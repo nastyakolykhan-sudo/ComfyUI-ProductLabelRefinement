@@ -69,15 +69,24 @@ Auto Draft runs the engine's `run.py draft` (`imgpost/draft.py`) and hands its j
 - snaps the old silhouette and each occluder to its edge;
 - sets the work box, colour (`reference` when the packshot has a white area) and relight.
 
+With `label` set to `cylinder` (a label on a bottle or jar) or `flat` (a label on a flat or flattened face, such as a tube's panels), it drafts the label only, by the engine's recipe for labels (its `references/stills/measuring.md`, "Labels on bottles and jars"):
+
+- measures the generated label's own outline from its 4 corners, each side walked along the curve it bows to (or along `product_mask`'s contour), and keeps it as the label's visible shape (`shape: generated`, the real label bled 10 px past it);
+- on a bottle, takes the axis and radius from the packshot's silhouette at the label's height, leaving out a drop shadow: the limb is where the label or glass meets the shadow;
+- makes the label's sides the fit's edges: its top and bottom as curves, the side where it meets the bottle's silhouette as a limb, plus a residual correction; the packshot's sides are snapped onto the packshot's own edges first;
+- sets `cylinder.limb_min` from how far round the packshot's print reaches, so the print isn't pressed into the silhouette;
+- grades and finishes it as the recipe does (colour `reference`, `ref_flatten: field`, `white_field`, clean paper, edge bleed, auto sharpen and prefilter) when the packshot's label shows white paper; on print straight on a coloured bottle, the plain white-level grade with the scene's colour. `light` is not used.
+
 Inputs, all in pixels (scene px unless said otherwise; numbers separated by spaces, commas or new lines):
 
-- `quad`: where the packshot outline's bounding box corners land in the scene, `x,y x,y x,y x,y` (top left, top right, bottom right, bottom left). A box `x0,y0,x1,y1` around the product also works when the product stands upright and faces the camera. A few px off is fine.
+- `quad`: where the packshot outline's bounding box corners land in the scene, `x,y x,y x,y x,y` (top left, top right, bottom right, bottom left). A box `x0,y0,x1,y1` around the product also works when the product stands upright and faces the camera. A few px off is fine. Pick it on the scene the node shows ([below](#picking-the-quad-on-the-scene)) or type it. With `label` on: the generated label's own 4 corners, in the packshot label's order, within about 3 px (where a side is rounded, the sides extended).
 - `product_mask` (optional): the generated product's mask, scene-sized, from SAM 3, the mask editor, or any node with a MASK output. The outline is then fitted to the mask's contour instead of to image edges. With a mask, `quad` may stay empty: the fit starts from the mask's box, its hull's corners and its main axis, and keeps the start that sits best on the contour. That works when nothing stands in front of the product; when something does, give the quad too.
 - `pairs` (optional): rough landmark pairs, `rx,ry=sx,sy` (reference px = scene px), one per line. Points on garbled generated print usually come back untrusted and are ignored.
 - `occluders` (optional): objects in front, one per line: `left: x,y x,y ...` (the occluder fills that side of the line: `left`, `right`, `above` or `below`) or `polygon: x,y x,y ...`. Each is snapped to the occluder's own edge.
-- `outline` (optional, reference px): the product on the packshot, as a box or a polygon, when the packshot shows more than the product (a box and its tube, a label on a bottle).
+- `outline` (optional, reference px): the product on the packshot, as a box or a polygon, when the packshot shows more than the product (a box and its tube, a label on a bottle). With `label` on it is needed: the label on the packshot, upright.
 - `mask_skip` (optional, reference px): a polygon whose part of the outline isn't fitted to the mask (where the mask runs on into a cap the job keeps).
 - `model`: `homography` or `affine`. `light`: `relight`, `cylinder` (a shading template for cans and bottles) or `off`. `suggest`: also add packshot corners that match the scene well as landmarks.
+- `label` (optional, last): `off`, `cylinder` or `flat`, as above. With `product_mask` it is a mask of the generated label: it gives each side's curve, and with `quad` empty its corners too.
 
 Outputs:
 
@@ -87,6 +96,18 @@ Outputs:
 - `report`: the draft's summary plus the align table. The node shows it, and each run also saves the job as `{filename_prefix}_NNNNN_.json` in the output folder.
 
 Check `align_overlay` and the report before trusting a draft: a side marked `left` means the generated edge disagreed and the fit doesn't use it. The rough corners stay in the job as weak placeholders (`w` 0.15 or 0.05); replace them with landmarks you read.
+
+### Picking the quad on the scene
+
+Auto Draft shows the scene under its widgets: the file of the Load Image that feeds `scene` (through Reroutes), or another node's preview once the graph has run. The picker (`web/quad_picker.js`) only edits the `quad` text, so the node's inputs, saved workflows, the API templates and `tools/comfy_run.py` work as before.
+
+- Click the corners in order: top left, top right, bottom right, bottom left. The quad is written as `x,y x,y x,y x,y` in scene px when the fourth corner is placed.
+- Drag a corner to adjust it. The last corner clicked or dragged moves 1 px per arrow key (Shift: 10 px).
+- The wheel zooms about the pointer, up to 16 screen px per scene px. Middle-drag or Shift-drag pans, and so does dragging empty space once the four corners are placed. **Fit** shows the whole scene; **Clear** empties the quad to pick it again.
+- A typed quad shows on the scene, and a box `x0,y0,x1,y1` shows as its four corners (drag one to make it a quad). The header turns amber when the corners cross or run anticlockwise, which means they were picked out of order.
+- For a product without corners, such as a bottle, place the corners of a box around it. For a hidden corner (behind the mug in the demo), follow the two sides that meet there.
+
+Zoom in on the corners before you queue. On the demo, corners clicked on the whole scene came within 2 to 3 px of the hand fit, and the draft left out a second side of the outline (its generated edge 2.3 px from where the rough fit put it). The two bottom corners were then dragged onto the card at 7× zoom, which put them on the hand fit's corners. The draft then kept the same sides as with the template's typed quad. It scored 0.9 / 2.4 px on the edge and 0.9 / 2.6 px on placement (`regress.py --draft --outline traced --quad ...`). A quad 3 px off at every corner, with the same traced outline, scores 0.5 / 3.6 and 1.6 / 4.0.
 
 ### How close a draft gets
 
@@ -99,31 +120,32 @@ Each draft was scored against the hand-measured job for the same product (`tools
 - **Audit**: the draft run's own verdict, with the hand job's in brackets. The hand jobs' WARNs were checked as false positives before delivery.
 - **With mask**: edge and placement with the mask added to the quad. **Mask alone**: with no quad.
 
-All columns but the last two use the quad and no mask. Results on 2026-10-16, engine 0.9.0:
+All columns but the last two use the quad and no mask. The six other rows' mask columns are from 0.9.0 (their code is unchanged and their quad rows score the same). The seven label rows draft with `label` on (`regress.py --draft` sets it from the hand job), their quad the generated label's corners 3 to 4 px off. Results on 2026-10-16, engine 0.10.0 (the other rows are unchanged from 0.9.0):
 
 | Product | Edge | Placement | Geometry vs hand | Draft vs hand | Audit | With mask: edge, placement | Mask alone: edge, placement |
 |---|---|---|---|---|---|---|---|
 | the demo card, a mug in front (1024 × 768) | 0.5 / 2.8 | 0.7 / 2.8 | 12,324 (13%) | 12,349 (13%) | WARN (WARN) | 0.6 / 7.2; 3.5 / 7.2 | 1.2 / 19.2; 6.8 / 19.6 |
 | a box on a plain studio set (2286 × 4096) | 1.4 / 4.7 | 14.4 / 19.8 | 161,719 (32%) | 471,067 (93%) | WARN (WARN) | 1.0 / 8.1; 10.1 / 13.7 | 0.5 / 1.5; 1.4 / 1.9 |
 | a lip tube on the same set: cap kept, 10 glints in front | 1.1 / 3.7 | 3.7 / 6.0 | 46,746 (24%) | 111,497 (56%) | WARN (WARN) | 1.3 / 2.0; 2.8 / 3.8 | 2.4 / 76.9; 38.3 / 76.7 |
-| a tube's printed panels in a mesh bag (4096²) | 1.4 / 3.5 | 2.0 / 3.5 | 45,193 (12%) | 200,557 (52%) | WARN (WARN) | 2.6 / 4.1; 2.4 / 3.9 | 2.6 / 4.6; 2.4 / 4.3 |
-| a dropper bottle's label in the same bag, bottle kept | 2.3 / 7.3 | 32.8 / 41.6 | 80,919 (31%) | 181,497 (70%) | WARN (WARN) | 2.2 / 8.1; 34.2 / 42.6 | 1.9 / 7.6; 33.3 / 41.0 |
-| a bottle's label in the same bag | 1.2 / 6.3 | 53.4 / 67.0 | 144,076 (24%) | 325,509 (55%) | WARN (WARN) | 0.9 / 10.4; 54.1 / 71.3 | 1.2 / 16.5; 57.8 / 73.8 |
-| a bottle label in a cup carrier (1024²) | 0.5 / 23.4 | 5.2 / 23.9 | 5,520 (46%) | 9,819 (82%) | WARN (clean) | 0.4 / 3.7; 3.1 / 3.8 | 0.4 / 2.3; 3.3 / 4.0 |
-| a frosted bottle's label in the same carrier | 0.4 / 8.4 | 7.1 / 9.3 | 6,595 (39%) | 16,015 (94%) | WARN (clean) | 0.4 / 10.2; 4.2 / 10.0 | 0.4 / 8.5; 3.5 / 8.6 |
-| a bottle label in the same carrier, its wall over a corner | 0.7 / 4.2 | 4.0 / 5.1 | 4,386 (39%) | 9,954 (89%) | FAIL (clean) | 0.5 / 3.5; 2.6 / 4.1 | 0.5 / 3.7; 2.7 / 4.7 |
-| a bottle label on a video's anchor frame (1080 × 1920) | 0.7 / 4.4 | 9.5 / 11.1 | 10,944 (48%) | 10,944 (48%) | WARN (FAIL) | 0.7 / 3.2; 9.7 / 11.4 | 0.5 / 3.9; 8.8 / 10.2 |
+| a tube's printed panels in a mesh bag (4096²), label `flat` | 0.6 / 2.3 | 0.9 / 2.4 | 40,304 (11%) | 61,441 (16%) | clean (WARN) | 0.6 / 2.3; 0.9 / 2.4 | 0.6 / 2.3; 0.8 / 2.4 |
+| a dropper bottle's label in the same bag, bottle kept, label `cylinder` | 0.4 / 3.1 | 0.6 / 2.8 | 31,512 (12%) | 32,258 (13%) | WARN (WARN) | 0.4 / 3.6; 1.2 / 3.5 | 0.4 / 2.4; 1.0 / 2.5 |
+| a bottle's label in the same bag, label `cylinder` | 0.3 / 3.8 | 11.2 / 14.0 | 100,958 (17%) | 103,092 (17%) | WARN (WARN) | 0.3 / 3.4; 6.1 / 8.1 | 0.3 / 3.8; 4.1 / 6.2 |
+| a bottle label in a cup carrier (1024²), label `cylinder` | 0.1 / 0.2 | 0.3 / 0.4 | 1,479 (12%) | 1,697 (14%) | clean (clean) | 0.1 / 1.2; 1.5 / 1.9 | 0.1 / 0.5; 1.3 / 1.6 |
+| a frosted bottle's label in the same carrier, label `cylinder` | 0.2 / 0.7 | 2.9 / 3.5 | 3,410 (20%) | 3,481 (20%) | clean (clean) | 0.1 / 0.6; 0.3 / 0.6 | 0.3 / 1.8; 2.4 / 3.0 |
+| a bottle label in the same carrier, its wall over a corner, label `cylinder` | 0.1 / 0.7 | 0.4 / 0.6 | 1,796 (16%) | 2,123 (19%) | clean (clean) | 0.1 / 1.0; 0.3 / 0.9 | 0.1 / 0.6; 0.3 / 0.7 |
+| print on a bottle on a video's anchor frame (1080 × 1920), label `cylinder` | 0.8 / 9.1 | 5.6 / 10.6 | 7,658 (34%) | 7,428 (33%) | WARN (FAIL) | 0.8 / 4.3; 12.4 / 14.6 | 1.0 / 5.3; 9.5 / 11.4 |
 | a blister card on a cluttered shelf, behind a box and the shelf lip (4096²) | 0.8 / 2.8 | 1.9 / 5.3 | 74,776 (52%) | 117,754 (81%) | WARN (WARN) | 3.3 / 18.7; 13.2 / 20.8 (stopped) | 5.3 / 75.1; 35.3 / 75.5 (stopped) |
 | a text block printed on a tube's body (ink matte) | 0.6 / 2.8 | 1.2 / 2.7 | 10,987 (24%) | 41,231 (90%) | WARN (WARN) | 10.4 / 40.5; 20.0 / 40.4 | 20.5 / 43.1; 34.4 / 43.0 |
 | a user-fixed render as the reference (identity fit) | 0.7 / 2.2 | 1.1 / 2.7 | 34,757 (33%) | 100,092 (95%) | WARN (WARN) | 3.5 / 6.3; 2.9 / 6.1 | 4.6 / 51.8; 23.5 / 51.6 |
 
 What it shows:
 
-- **Flat products with a quad: close to final.** The demo card, a tube's printed panels and the blister card on the cluttered shelf (given its occluders) land within 0.5 to 1.4 px of the hand outline (median; 2.8 to 3.5 px at worst), with their print within 2 px (5.3 px at worst). The shelf card is no worse than the clean scenes once the quad and the occluders are given; what the shelf costs is the occluders to trace and the edges the draft can't use (only one of its sides passed).
+- **Flat products with a quad: close to final.** The demo card, a tube's printed panels (`label: flat`) and the blister card on the cluttered shelf (given its occluders) land within 0.5 to 0.8 px of the hand outline (median; 2.3 to 2.8 px at worst), with their print within 2 px (5.3 px at worst). The shelf card is no worse than the clean scenes once the quad and the occluders are given; what the shelf costs is the occluders to trace and the edges the draft can't use (only one of its sides passed).
 - **A tall box needs landmarks or a mask.** With no landmarks the box's perspective comes from four corners each 3 px off, and its print slides up to 20 px along its long sides while its outline stays within 5 px. A mask alone fixes that: outline within 1.5 px and print within 1.9 px at worst.
-- **A mask helps where nothing stands in front.** With the quad, a mask brings the tube's worst edge from 3.7 to 2.0 px and one carrier label's from 23 to 3.7 px; on the frosted label it doesn't help (8.4 to 10.2 px). Alone, it fails where something stands in front: 19 px on the demo (the mug), 77 px on the tube (the cap and glints), and on the shelf card the run stops with FILL STOPPED (the mask's contour along the box in front boxes in a sliver). Give the quad as well whenever the product is partly hidden.
-- **Labels on bottles: a scaffold.** The draft fits a flat homography. A label's outline lands within a pixel or two (median), but its print, which the hand jobs wrap round a cylinder, is 4 to 10 px off on the small labels and 33 to 53 px on the large ones. One label draft FAILs its audit (the print over the carrier wall and the glass beside it). Finish these with the cylinder model and the generated label's own shape, by hand.
-- **Pixels.** Even with the hand job's grade, the closest drafts (the demo, the panels) differ from its image by more than 8 levels on 12 to 13 % of the pixels it changed, the rest on 24 to 52 %: a 1 px shift moves every print edge. A text block on a tube's body and a fixed render as the reference are in the table for completeness; neither is a case for a draft.
+- **A mask helps where nothing stands in front.** With the quad, a mask brings the tube's worst edge from 3.7 to 2.0 px; in label mode it brings the frosted label's print from 2.9 to 0.3 px and the large bottle label's from 11 to 6. Alone, it fails where something stands in front: 19 px on the demo (the mug), 77 px on the tube (the cap and glints), and on the shelf card the run stops with FILL STOPPED (the mask's contour along the box in front boxes in a sliver). Give the quad as well whenever the product is partly hidden.
+- **Labels on bottles, with `label` on: close to final.** Four of the six paper labels land within 0.3 to 0.9 px of the hand fit's print (median; 2.8 px at worst) and the frosted one within 2.9 px, against 2 to 53 px for the flat draft. Their pixels against the hand job's image fell from 52 to 94 % to 13 to 20 % of what the hand job changed, and every audit is as clean as the hand job's or cleaner (the carrier label that FAILed over the wall is now clean). With a mask of the label the frosted label comes within 0.3 px.
+- **Where a label draft stays off.** The other bottle label in the bag (4096 px) has its print 11 px round the bottle from the hand fit's (6 with a mask, 4 with a mask alone), and the frosted label's 2.9 px comes from half a pixel on its bottom edge. In the cylinder model a label's width and its turn about the axis trade off, and the edges barely tell them apart (the engine's pitfall 89): the hand fits sit on that ridge too (that label's own measured outline moves its hand fit 7.5 px). Both results read as the real label; check the print's margins against the packshot. The anchor frame isn't a paper label: the print is on the bottle, and its outline on the packshot is a box whose top and bottom aren't edges in either image (12 and 17 packshot px off the collar line and the base), so it lands 5.6 px off. It has no white paper either, so the draft keeps the plain grade there (the paper grade streaked it). The hand job placed it by landmarks on the generated wordmark; give pairs there, or measure the print's position by hand.
+- **Pixels.** Even with the hand job's grade, the closest drafts (the demo, the panels, three of the labels) differ from its image by more than 8 levels on 11 to 16 % of the pixels it changed, the rest on 17 to 52 %: a 1 px shift moves every print edge. A text block on a tube's body and a fixed render as the reference are in the table for completeness; neither is a case for a draft.
 
 ## Conventions
 
@@ -251,6 +273,7 @@ In-process results on 2026-10-08:
 | Labels in their generated shape (engine 0.7.0): three 1024 px labels with `shape: generated`, one behind a wall | all pass, within 1 level on 0 to 3 pixels; the `shape` and `audit` reports match the engine's |
 | Clean paper, body regions, top text placed by the tube (engine 0.8.0): four 4096 px jobs (two bottle labels, a tube's panels with a body band, an ink-matte text block) | all pass, within 1 level; the `fill`, `shape` and `audit` reports match the engine's |
 | Engine 0.9.0 (Auto Draft, 2026-10-16): the demo and 12 production jobs, against `run.py` | all pass: 12 jobs within 1 level on 0 to 9,053 px, the shelf card within 8 levels on 1,634 px (the relight patch above); nothing outside the work boxes |
+| Engine 0.10.0 (Auto Draft's label mode, 2026-10-16): the demo and 12 production jobs, against `run.py`; the 7 label jobs drafted with `label` on, with the quad, quad and mask, and mask alone | all pass: 12 jobs within 1 level on 0 to 9,053 px, the shelf card within 8 levels on 1,634 px; the 21 label drafts' jobs identical to the engine's and their images within 8 levels everywhere; the other 6 jobs' drafts score as at 0.9.0 |
 | Auto Draft against `run.py draft` (`--draft`): the same 13 jobs, each with a quad, a quad and a mask, and a mask alone | all 39 pass: identical draft jobs; images within 1 level, or both runs stop with the same FILL STOPPED (the shelf card with a mask) |
 
 ComfyUI passes images between nodes in 32-bit floats, where the engine keeps 64-bit, so a value can land on the other side of a threshold. The 12 × 11 px patch is where relight's fine pass kept a slightly different region. Nothing outside the work boxes differed in any run.
@@ -261,7 +284,7 @@ ComfyUI passes images between nodes in 32-bit floats, where the engine keeps 64-
 
 ```bash
 python -I tools/regress.py --job path/to/job.json --draft [--jitter 3] [--outline hand|traced] [--rough-pairs] \
-  [--mask PATH|hand [--no-quad]] [--no-occluders]
+  [--mask PATH|hand [--no-quad]] [--no-occluders] [--label auto|off|cylinder|flat]
 ```
 
 From the hand job it builds the rough input a person would give:
@@ -269,7 +292,8 @@ From the hand job it builds the rough input a person would give:
 - the outline on the packshot (`--outline traced` lets the draft trace it);
 - the hand job's occluders, 2 px off;
 - with `--rough-pairs`, its landmarks, `--jitter` px off;
-- with `--mask hand`, a mask of its generated outline minus its occluders, or `--mask PATH` for a real one.
+- with `--mask hand`, a mask of its generated outline minus its occluders, or `--mask PATH` for a real one;
+- for a label job (a cylinder hand job, or one in the generated label's shape), `label` on (`--label auto`, the default), and the quad is the generated label's 4 corners (the hand job's `qa/label_outline.json`, else its measured outline's sides extended), each `--jitter` px off.
 
 The pack runs `workflows/image-post-draft.api.json` on that input, and the engine runs `run.py draft` on the same. Their draft jobs must be identical and their images must match as above, or the check fails. Then the draft is scored against the hand job: edge, placement, pixels against the hand job's image, and both audit verdicts (the table above). It prints a `row` line for that table and writes everything to `regress.json`.
 
@@ -301,7 +325,7 @@ Never edit `imgpost/` here. To pick up an engine change:
 
 ## Not covered yet
 
-- Labels on bottles in the draft. Auto Draft fits a flat homography, so a label wrapped round a bottle lands 30 to 60 px off in its print even when its outline fits within a few px. Those jobs still need the cylinder model, measured by hand.
-- Picking the quad on the canvas. It is typed as numbers (or comes from a mask); there is no point picker on the node yet.
+- Print straight on a bottle (no label edges, like the anchor frame): `label: cylinder` needs the label's top and bottom to be edges in both images. Without them, read landmarks.
+- The turn of a label round its bottle isn't pinned by the edges (above): a 4096 px label can land 5 to 11 px round from where a hand fit puts it.
 - Batch mode: one job across many frames.
 - A GPU path. Everything runs the engine's numpy and scipy code on the CPU, about 4 to 15 s per product.

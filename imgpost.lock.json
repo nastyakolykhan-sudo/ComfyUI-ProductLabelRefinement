@@ -1,12 +1,12 @@
 {
   "skill": "~/Documents/Claude/product-label-refinement",
-  "imgpost_version": "0.9.0",
+  "imgpost_version": "0.10.0",
   "synced": "2026-10-16",
   "files": {
-    "__init__.py": "aba2290be96a8c7227493734f5bcc2e36a8bd63f07c8a42cc283ddc00aeb0877",
-    "audit.py": "ce3c65f7cfffe93e22807b481c03e36f42fa41acde76717ede141aeaae21d39f",
-    "autofit.py": "9a7846633ab362ffb98a7973afa064286697c6881ee4ef83679cd42f7a9bc65c",
-    "draft.py": "57d3a799f5784a44b316d0c5f3f62d2fd07aac74af0a305879125ab7b2bf0478",
+    "__init__.py": "4c5fe26552397e4b60b1d5f820ca3a3677e219ebc518cee89a96575f829b5192",
+    "audit.py": "7e6940bd8a5552e55b8eadfe2aa3b3624920045b12625b63e0d44b585f58de15",
+    "autofit.py": "2b6c28df73bf79141bca7c468ed913cc77ddfa12e94ad6d9e0bb7a796bab2747",
+    "draft.py": "5cbba5e64eaa85b15637a30a622018ac37c7c26c334037eecea85e4ff850aecd",
     "fill.py": "4267aca68ce18703a25e1bbdd32670de80bcafd5701b2cd7577f46c93722a4af",
     "finish.py": "ddf6fecf4a3246bf1d931fdcb24ae95a8067230523e72a3ac5ba6399848101f0",
     "geometry.py": "f5aaa4b8ff16c05e1886d3bd3593f7e4f35535f47fdbf19c7ecd57ed6a615ea1",
@@ -19,5 +19,5 @@
     "raster.py": "f9dc02da8f3121a741ce1ae906e1f0cea5c65b41c1b963edf032da9742816fd4",
     "warp.py": "b7a19675703d2464867e8c6b7dbd6cb5b3cbbde062aac71403418efec9d6a45e"
   },
-  "run_py": "33281132598792cbf266d48af0039739cfdbafc1ba49ecc3b31143f79d256374"
+  "run_py": "28e6e1a02a75376e0d19fe5538f64a18f285da4c6aed9d4e74c0f8adaf7312d6"
 }

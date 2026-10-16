@@ -74,14 +74,12 @@ def limb_guard(H, ref_lin, inside):
     return out
 
 
-def squeeze_info(H, refmask, ref_shape, ref_lin):
-    """How far round the packshot's print reaches against the scene's silhouette, per side, in degrees (cylinders).
-    Bands running across the label are not text. -> {side: {"print", "limb"}} or None"""
-    if not hasattr(H, "axis_x"):
-        return None
+def print_reach(axis_x, r, refmask, ref_shape, ref_lin):
+    """How far round the bottle the packshot's print reaches, per side, in degrees from the front (cylinders). Bands
+    running across the label are not text. -> {side: deg} or None"""
     ry, rx = np.mgrid[0:ref_shape[0], 0:ref_shape[1]].astype(float)
-    ins = (refmask.sample(rx, ry) > 0.5) & (np.abs(rx - H.axis_x) < H.r)
-    ins = binary_erosion(ins, iterations=max(2, int(0.03 * H.r)))            # the label's own edge isn't print
+    ins = (refmask.sample(rx, ry) > 0.5) & (np.abs(rx - axis_x) < r)
+    ins = binary_erosion(ins, iterations=max(2, int(0.03 * r)))              # the label's own edge isn't print
     Lr = ref_lin @ np.array([0.2126, 0.7152, 0.0722])
     if not ins.any():
         return None
@@ -93,13 +91,20 @@ def squeeze_info(H, refmask, ref_shape, ref_lin):
     ink &= ~band[:, None]
     if ink.sum() <= 20:
         return None
-    th = np.degrees(np.arcsin(np.clip((rx[ink] - H.axis_x) / H.r, -1, 1)))
-    out = {}
-    for side, sel in (("right", th > 0), ("left", th < 0)):
-        if sel.any():
-            out[side] = {"print": float(np.percentile(np.abs(th[sel]), 99.0)),
-                         "limb": abs(float(np.degrees(H.limb_angle(side))))}
-    return out
+    th = np.degrees(np.arcsin(np.clip((rx[ink] - axis_x) / r, -1, 1)))
+    return {side: float(np.percentile(np.abs(th[sel]), 99.0)) for side, sel in (("right", th > 0), ("left", th < 0))
+            if sel.any()}
+
+
+def squeeze_info(H, refmask, ref_shape, ref_lin):
+    """How far round the packshot's print reaches against the scene's silhouette, per side, in degrees (cylinders).
+    -> {side: {"print", "limb"}} or None"""
+    if not hasattr(H, "axis_x"):
+        return None
+    reach = print_reach(H.axis_x, H.r, refmask, ref_shape, ref_lin)
+    if reach is None:
+        return None
+    return {side: {"print": a, "limb": abs(float(np.degrees(H.limb_angle(side))))} for side, a in reach.items()}
 
 
 def run(crop_u8, after_u8, alpha, old, vis, F, offset, align_rep=None, squeeze=None, cut=None, ink=False, shape=False):

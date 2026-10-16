@@ -311,21 +311,216 @@ def _local_curve(pos, offs, c0, tol, win):
     return pos[keep], out[keep]
 
 
-def label_outline(img, corners, inset=3.0, search=6.0, step=2.0, skip=0.08, tol=1.0, sharp=(), r_max=None, passes=2):
+def label_outline(img, corners, inset=3.0, search=6.0, step=2.0, skip=0.08, tol=1.0, sharp=(), r_max=None, passes=2,
+                  guides=None, outer=()):
     """See _label_outline. A second pass starts from the first pass's corners when one moved more than 1.5 px:
     the walks then start where the edge really is (a rough corner 4 px off put a side's start on the far side of a
-    shadow line under the label)."""
-    r = _label_outline(img, corners, inset, search, step, skip, tol, sharp, r_max)
-    for _ in range(passes - 1):
+    shadow line under the label). guides "bow": each pass first finds how far each side bows off its chord
+    (side_guides) and walks along that curve; given guides are used as they are, in one pass."""
+    bow = isinstance(guides, str)
+    if bow and guides != "bow":
+        raise ValueError(f"guides: 4 polylines or 'bow', not {guides!r}")
+    if bow:                              # the found curve is within a px or so: walk a narrower band round it, so an
+        search = min(search, 3.5)        # edge just beyond the label (a carrier, glass) stays out of reach
+    caps = [_LIMB_BOW if i in set(outer) else None for i in range(4)]     # a silhouette barely bows
+    r = _label_outline(img, corners, inset, search, step, skip, tol, sharp, r_max,
+                       side_guides(img, corners, caps, step=step, skip=skip)[0] if bow else guides, outer)
+    for _ in range(passes - 1 if guides is None or bow else 0):
         moved = float(np.max(np.linalg.norm(np.asarray(r["sharp"]) - np.asarray(corners, float), axis=1)))
         if moved <= 1.5:
             break
         corners = np.asarray(r["sharp"], float)
-        r = _label_outline(img, corners, inset, search, step, skip, tol, sharp, r_max)
+        r = _label_outline(img, corners, inset, search, step, skip, tol, sharp, r_max,
+                           side_guides(img, corners, caps, step=step, skip=skip)[0] if bow else None, outer)
+    if bow:
+        r["bows"] = side_guides(img, corners, caps, step=step, skip=skip)[1]
     return r
 
 
-def _label_outline(img, corners, inset=3.0, search=6.0, step=2.0, skip=0.08, tol=1.0, sharp=(), r_max=None):
+_LIMB_BOW = "limb"
+
+
+def _bow_range(bow, L):
+    if bow == _LIMB_BOW:                 # a cylinder's silhouette is straight in the view; generated ones bend ~1 %
+        return max(4.0, 0.03 * L)
+    return float(bow) if bow else max(8.0, 0.08 * L)
+
+
+def side_guides(img, corners, bow=None, step=2.0, skip=0.08, tol=1.0, slack=3.0, tries=400):
+    """Where each side of a label really runs between its corners (in order around it, within ~3 px), when it bows
+    past label_outline's walks (a label's top edge on a bottle seen from above: 5 to 10 px off its chord).
+
+    Every sample scans a wide band across the chord (+-bow px, default 8 % of the side, at least 8; "limb": 3 %, at
+    least 4, for a bottle's silhouette; one value or one per side) for colour edges;
+    an edge counts fully when the side toward the label's middle looks more like the label's paper than the side
+    beyond (print edges face the other way). A curve pinned within `slack` px of both corners, bowing as a cubic,
+    is fitted by RANSAC to the edges most samples agree on. -> (4 guide polylines, side i from corner i to i + 1;
+    the bow per side: the curve's largest offset from the chord, px, + outward)"""
+    C0 = np.asarray(corners, float)
+    cen = C0.mean(0)
+    img_s = gaussian_filter(img, (0.8, 0.8, 0) if img.ndim == 3 else 0.8)
+    q = np.round(C0).astype(int)
+    x0, y0 = np.clip(q.min(0), 0, None)
+    x1, y1 = q.max(0) + 1
+    ys, xs = np.mgrid[y0:y1, x0:x1]
+    inside = inside_polygon(np.c_[xs.ravel(), ys.ravel()].astype(float), [tuple(p) for p in C0 + 0.15 * (cen - C0)])
+    pix = img_s[y0:y1, x0:x1].reshape(-1, img_s.shape[-1] if img_s.ndim == 3 else 1)[inside]
+    lum = pix @ LUMA if pix.shape[1] == 3 else pix[:, 0]
+    paper = np.median(pix[lum >= np.percentile(lum, 60)], axis=0) if len(pix) else None
+    rng = np.random.default_rng(0)
+    guides, bows = [], []
+    for i in range(4):
+        a, b = C0[i], C0[(i + 1) % 4]
+        base = _Chord(a, b, cen)
+        L, n = base.L, base.n
+        W = _bow_range(bow[i] if isinstance(bow, (list, tuple)) else bow, L)
+        pos = np.arange(skip * L, (1 - skip) * L + 1e-6, step)
+        u = pos / L
+        o = np.arange(-W - 3.0, W + 3.0 + 1e-6, 0.5)
+        Q = base.points(pos)[:, None, :] + o[None, :, None] * n[None, None, :]
+        prof = _sample(img_s, Q[..., 0].ravel(), Q[..., 1].ravel()).reshape(len(pos), len(o), -1)
+        g = np.linalg.norm(np.gradient(prof, 0.5, axis=1), axis=2)
+        k3 = 3
+        step_c = np.linalg.norm(prof[:, 2 * k3:] - prof[:, :-2 * k3], axis=2)
+        cand = np.zeros_like(g, bool)
+        cand[:, k3:-k3] = (g[:, k3:-k3] >= g[:, k3 - 1:-k3 - 1]) & (g[:, k3:-k3] > g[:, k3 + 1:-k3 + 1]) & \
+                          (g[:, k3:-k3] >= 0.05 * g.max(1, keepdims=True)) & (step_c >= 0.03)
+        cand &= np.abs(o)[None] <= W
+        w = np.zeros_like(g)
+        if paper is not None:
+            d_in = np.linalg.norm(np.roll(prof, 4, axis=1) - paper, axis=2)     # 2 px toward the label's middle
+            d_out = np.linalg.norm(np.roll(prof, -4, axis=1) - paper, axis=2)   # 2 px beyond
+            w = np.where(cand, np.where(d_in < d_out, 1.0, 0.25), 0.0)
+        else:
+            w = cand.astype(float)
+        ii, jj = np.nonzero(cand)
+        offs, wts = o[jj], w[ii, jj]
+
+        def curve(c, uu):
+            e0, e1, b0, b1 = c
+            return (1 - uu) * e0 + uu * e1 + uu * (1 - uu) * (b0 + b1 * uu)
+
+        def score(c):
+            r = np.abs(offs - curve(c, u[ii]))
+            best = np.zeros(len(pos))
+            np.maximum.at(best, ii[r <= tol], wts[r <= tol])
+            return float(best.sum())
+
+        best_c, best_s = np.zeros(4), score(np.zeros(4))
+        halves = [np.nonzero(u[ii] < 0.5)[0], np.nonzero(u[ii] >= 0.5)[0]]
+        if len(halves[0]) and len(halves[1]):
+            for _ in range(tries):
+                k = [int(rng.choice(h)) for h in halves]
+                uu, yy = u[ii[k]], offs[k]
+                M = np.c_[uu * (1 - uu), uu * uu * (1 - uu)]
+                if abs(np.linalg.det(M)) < 1e-9:
+                    continue
+                c = np.r_[0.0, 0.0, np.linalg.solve(M, yy)]
+                s_ = score(c)
+                if s_ > best_s:
+                    best_c, best_s = c, s_
+            for _ in range(3):                           # least squares on the edges near it, ends held within slack
+                r = np.abs(offs - curve(best_c, u[ii]))
+                sel = r <= tol
+                if sel.sum() < 6:
+                    break
+                uu, yy, ww = u[ii[sel]], offs[sel], wts[sel]
+                M = np.c_[1 - uu, uu, uu * (1 - uu), uu * uu * (1 - uu)] * np.sqrt(ww)[:, None]
+                reg = np.diag([1.0 / slack, 1.0 / slack, 0.0, 0.0]) * np.sqrt(ww.sum()) * 0.3
+                c = np.linalg.lstsq(np.vstack([M, reg]), np.r_[yy * np.sqrt(ww), 0, 0, 0, 0], rcond=None)[0]
+                c[:2] = np.clip(c[:2], -slack, slack)
+                if score(c) < best_s:
+                    break
+                best_c, best_s = c, score(c)
+        uu = np.linspace(0.0, 1.0, max(3, int(np.ceil(L / 2.0)) + 1))
+        off = curve(best_c, uu)
+        guides.append(base.points(uu * L) + off[:, None] * n[None])
+        bows.append(round(float(off[np.argmax(np.abs(off))]), 2))
+    return guides, bows
+
+
+class _Chord:
+    """A side's base line for the walks: the straight chord between its corners. `n` points out of the label."""
+
+    def __init__(self, a, b, cen):
+        self.a, self.L = a, float(np.linalg.norm(b - a))
+        self.t = (b - a) / self.L
+        n = np.array([self.t[1], -self.t[0]])
+        self.n = -n if np.dot(n, (a + b) / 2 - cen) < 0 else n
+
+    def point(self, p):
+        return self.a + p * self.t
+
+    def points(self, pos):
+        return self.a[None] + pos[:, None] * self.t[None]
+
+    def normal(self, p):
+        return self.n
+
+    def normals(self, pos):
+        return np.repeat(self.n[None], len(pos), 0)
+
+    def tangent(self, p):
+        return self.t
+
+    def project(self, q):
+        return float((q - self.a) @ self.t)
+
+
+class _Guide(_Chord):
+    """A side's base line along a predicted curve (a guide polyline from corner to corner, scene px): the walks then
+    start either side of where the edge is expected, not of the chord (a label's top edge on a bottle bows 5 to 10 px
+    off its chord, past the walks' reach). Parametrised by arc length, straight on past both ends."""
+
+    def __init__(self, a, b, cen, guide):
+        super().__init__(a, b, cen)
+        G = resample(np.asarray(guide, float), 1.0)
+        self.G = G
+        self.s = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(G, axis=0), axis=1))]
+        self.L = float(self.s[-1])
+        T = np.gradient(G, axis=0)
+        self.T = T / np.maximum(np.linalg.norm(T, axis=1), 1e-12)[:, None]
+        N = np.c_[self.T[:, 1], -self.T[:, 0]]
+        self.N = np.where((N @ self.n < 0)[:, None], -N, N)
+
+    def _frame(self, pos):
+        pos = np.atleast_1d(np.asarray(pos, float))
+        P = np.c_[np.interp(pos, self.s, self.G[:, 0]), np.interp(pos, self.s, self.G[:, 1])]
+        T = np.c_[np.interp(pos, self.s, self.T[:, 0]), np.interp(pos, self.s, self.T[:, 1])]
+        T /= np.maximum(np.linalg.norm(T, axis=1), 1e-12)[:, None]
+        lo, hi = pos < 0, pos > self.L
+        P[lo] = self.G[0] + pos[lo, None] * self.T[0]
+        P[hi] = self.G[-1] + (pos[hi, None] - self.L) * self.T[-1]
+        N = np.c_[T[:, 1], -T[:, 0]]
+        N = np.where((N @ self.n < 0)[:, None], -N, N)
+        return P, T, N
+
+    def point(self, p):
+        return self._frame(p)[0][0]
+
+    def points(self, pos):
+        return self._frame(pos)[0]
+
+    def normal(self, p):
+        return self._frame(p)[2][0]
+
+    def normals(self, pos):
+        return self._frame(pos)[2]
+
+    def tangent(self, p):
+        return self._frame(p)[1][0]
+
+    def project(self, q):
+        k = int(np.argmin(np.linalg.norm(self.G - q, axis=1)))
+        if k == 0:
+            return float(min(0.0, (q - self.G[0]) @ self.T[0]))
+        if k == len(self.G) - 1:
+            return float(self.L + max(0.0, (q - self.G[-1]) @ self.T[-1]))
+        return float(self.s[k] + (q - self.G[k]) @ self.T[k])
+
+
+def _label_outline(img, corners, inset=3.0, search=6.0, step=2.0, skip=0.08, tol=1.0, sharp=(), r_max=None,
+                   guides=None, outer=()):
     """A generated label's own outline from 4 rough corners in order around it (within ~2 px of the true edges).
 
     Sides: every sample walks out from `inset` px inside to the first colour edge and in from `search` px outside to
@@ -333,48 +528,62 @@ def _label_outline(img, corners, inset=3.0, search=6.0, step=2.0, skip=0.08, tol
     print fools the inside walk, a carrier or a bottle's base the outside one, never both on the same stretch).
     Corners: the two sides' curves meet at the sharp corner; the paper's edge along the bisector gives the radius
     r = d / (1 / sin(angle / 2) - 1) and an arc tangent to both sides replaces it. Corners listed in `sharp` (indices
-    into `corners`: an occluder hides them) stay sharp.
+    into `corners`: an occluder hides them) stay sharp. guides: 4 polylines (side i from corner i to corner i + 1,
+    scene px) the walks follow instead of the straight chords: where a model predicts the sides (a cylinder bends a
+    label's top and bottom). outer: sides (indices, side i from corner i to i + 1) that are the bottle's silhouette
+    (the label wraps on round it): there the paper darkens into the edge, so a double edge isn't judged by the band
+    but keeps the hit nearer the guide (without guides, the outer one).
     -> dict(polygon K x 2, sides [4 x M x 2], corners [4 x arc points], radii [4], support [4] share of samples on
        each side's curve, rms [4] px)"""
     C0 = np.asarray(corners, float)
     cen = C0.mean(0)
+    outer_sides = set(outer)
     img_s = gaussian_filter(img, (0.7, 0.7, 0) if img.ndim == 3 else 0.7)      # for the double-edge band test
     kw = dict(pick="first", rel=0.05, min_contrast=0.03)
     S = []
     for i in range(4):
         a, b = C0[i], C0[(i + 1) % 4]
-        L = float(np.linalg.norm(b - a))
-        t = (b - a) / L
-        n = np.array([t[1], -t[0]])
-        if np.dot(n, (a + b) / 2 - cen) < 0:
-            n = -n
+        base = _Chord(a, b, cen) if guides is None else _Guide(a, b, cen, guides[i])
+        L, t, n = base.L, base.t, base.n
         pos = np.arange(skip * L, (1 - skip) * L + 1e-6, step)
-        P = a[None] + pos[:, None] * t[None]
-        N = np.repeat(n[None], len(P), 0)
-        Tin = snap_points(img, P - inset * n[None], N, lo=-1.0, hi=inset + search, **kw)[0]
-        Tout = snap_points(img, P + search * n[None], -N, lo=-1.0, hi=search + inset, **kw)[0]
-        oi, oo = (Tin - P) @ n, (Tout - P) @ n
+        P = base.points(pos)
+        N = base.normals(pos)
+        if guides is None:
+            Tin = snap_points(img, P - inset * n[None], N, lo=-1.0, hi=inset + search, **kw)[0]
+            Tout = snap_points(img, P + search * n[None], -N, lo=-1.0, hi=search + inset, **kw)[0]
+            oi, oo = (Tin - P) @ n, (Tout - P) @ n
+        else:                            # per sample, along the guide's own normal
+            Tin = snap_points(img, P - inset * N, N, lo=-1.0, hi=inset + search, **kw)[0]
+            Tout = snap_points(img, P + search * N, -N, lo=-1.0, hi=search + inset, **kw)[0]
+            oi, oo = ((Tin - P) * N).sum(1), ((Tout - P) * N).sum(1)
         # a double edge: the two walks stop a few px apart (a light rim on the paper's cut edge; a dark line of
         # shadow under the label). The band between belongs to the label where it looks like the paper inside,
         # not like what lies beyond: keep the outer hit there, else the inner one
         edge = "single"
         dual = np.isfinite(oi) & np.isfinite(oo) & (oo - oi > 1.0) & (oo - oi < 8.0)
         if dual.any():
+            Nd = n[None] if guides is None else N[dual]
+            Td = t if guides is None else np.c_[-Nd[:, 1], Nd[:, 0]]
+
             def col(off):
-                q = P[dual] + off[:, None] * n[None]
+                q = P[dual] + off[:, None] * Nd
                 return np.stack([_sample(img_s, q[:, 0] + dx, q[:, 1] + dy) for dx, dy in
-                                 ((0, 0), (t[0], t[1]), (-t[0], -t[1]))], 0).mean(0).reshape(len(q), -1)
+                                 ((0, 0), (Td[..., 0], Td[..., 1]), (-Td[..., 0], -Td[..., 1]))], 0).mean(0).reshape(len(q), -1)
             paper, beyond = col(oi[dual] - 3.0), col(oo[dual] + 3.0)
             # the band's least paper-like point decides (a 1 px dark line between two hits 3 px apart)
             bands = [col(oi[dual] + f * (oo - oi)[dual]) for f in (0.25, 0.5, 0.75)]
             far = np.argmax(np.stack([np.abs(b_ - paper).max(-1) for b_ in bands]), axis=0)
             band = np.stack(bands)[far, np.arange(len(far))]
             outer = np.abs(band - paper).max(-1) < np.abs(band - beyond).max(-1)
+            if i in outer_sides:         # a silhouette: the hit nearer the guide's curve (the outer one without guides)
+                outer = np.abs(oo[dual]) <= np.abs(oi[dual]) if guides is not None else np.ones_like(outer)
             k = np.nonzero(dual)[0]
             oi, oo = oi.copy(), oo.copy()
             oi[k[outer]] = np.nan
             oo[k[~outer]] = np.nan
-            edge = f"double on {dual.sum()} of {len(pos)} samples: outer kept on {outer.sum()} (the band is paper), inner on {(~outer).sum()}"
+            edge = f"double on {dual.sum()} of {len(pos)} samples: " + (
+                f"the silhouette: outer kept on {outer.sum()}, inner on {(~outer).sum()}" if i in outer_sides else
+                f"outer kept on {outer.sum()} (the band is paper), inner on {(~outer).sum()}")
         fit = _robust_curve(pos, np.c_[oi, oo], tol)
         if fit is None:
             raise ValueError(f"side {i + 1} ({a.round(1).tolist()} -> {b.round(1).tolist()}): too few edge hits, "
@@ -382,7 +591,8 @@ def _label_outline(img, corners, inset=3.0, search=6.0, step=2.0, skip=0.08, tol
         # the quadratic picks the edge out of the clutter; the side itself follows the hits on it locally (a
         # generated edge bends unevenly: steeper toward a bottle's silhouette, a kink an AI left), straight past its ends
         loc = _local_curve(pos, np.c_[oi, oo], fit[0], 1.5 * tol, max(30.0, 0.12 * L))
-        S.append({"a": a, "t": t, "n": n, "L": L, "c": fit[0], "loc": loc, "support": fit[1], "rms": fit[2], "edge": edge})
+        S.append({"a": a, "t": t, "n": n, "L": L, "c": fit[0], "loc": loc, "support": fit[1], "rms": fit[2], "edge": edge,
+                  "base": base if guides is not None else None})
 
     def off(s, p):
         P_, F_ = s["loc"]
@@ -393,11 +603,19 @@ def _label_outline(img, corners, inset=3.0, search=6.0, step=2.0, skip=0.08, tol
         return float(np.interp(p, P_, F_))
 
     def at(s, p):
+        if s["base"] is not None:
+            return s["base"].point(p) + off(s, p) * s["base"].normal(p)
         return s["a"] + p * s["t"] + off(s, p) * s["n"]
 
     def tangent(s, p):
-        d = s["t"] + (off(s, p + 1.0) - off(s, p - 1.0)) / 2.0 * s["n"]
+        if s["base"] is not None:
+            d = s["base"].tangent(p) + (off(s, p + 1.0) - off(s, p - 1.0)) / 2.0 * s["base"].normal(p)
+        else:
+            d = s["t"] + (off(s, p + 1.0) - off(s, p - 1.0)) / 2.0 * s["n"]
         return d / np.linalg.norm(d)
+
+    def project(s, q):
+        return s["base"].project(q) if s["base"] is not None else float((q - s["a"]) @ s["t"])
 
     corner_info = []
     for j in range(4):                                   # corner j: side j-1 arrives, side j leaves
@@ -411,7 +629,7 @@ def _label_outline(img, corners, inset=3.0, search=6.0, step=2.0, skip=0.08, tol
                 break
             k1, _ = np.linalg.solve(M, B - A)
             C = A + k1 * T1
-            p1, p2 = float((C - s1["a"]) @ s1["t"]), float((C - s2["a"]) @ s2["t"])
+            p1, p2 = project(s1, C), project(s2, C)
         t_in, t_out = tangent(s1, p1), tangent(s2, p2)
         cos_th = float(np.clip(-t_in @ t_out, -0.999, 0.999))
         half = 0.5 * np.arccos(cos_th)
@@ -445,7 +663,7 @@ def _label_outline(img, corners, inset=3.0, search=6.0, step=2.0, skip=0.08, tol
                     m = max(2, int(np.ceil(abs(da) * r / 1.0)))
                     ang = a1 + da * np.linspace(0, 1, m + 1)
                     arc = ctr[None] + r * np.c_[np.cos(ang), np.sin(ang)]
-                    info.update(r=r, arc=arc, p1=float((q1 - s1["a"]) @ s1["t"]), p2=float((q2 - s2["a"]) @ s2["t"]))
+                    info.update(r=r, arc=arc, p1=project(s1, q1), p2=project(s2, q2))
         corner_info.append(info)
     sides_pts, poly = [], []
     for i in range(4):

@@ -84,13 +84,13 @@ def definition_draft():
     nodes[3] = ("ImagePostAutoDraft", "Auto Draft", {
         "scene": L(1, 0), "reference": L(2, 0), "quad": DRAFT_INPUT["quad"], "model": "homography", "light": "relight",
         "suggest": False, "filename_prefix": "image-post/draft", "reference_mask": L(2, 1), "pairs": DRAFT_INPUT["pairs"],
-        "occluders": DRAFT_INPUT["occluders"], "outline": "", "mask_skip": ""}, (0, 780))
+        "occluders": DRAFT_INPUT["occluders"], "outline": "", "mask_skip": "", "label": "off"}, (0, 780))
     nodes[21] = ("SaveImage", "Save QA draft_points", {"images": L(3, 2), "filename_prefix": "image-post/qa/draft_points"},
-                 (0, 1440))
+                 (0, 1800))
     return nodes
 
 
-SIZE = {"LoadImage": (400, 360), "SaveImage": (400, 330), "ImagePostLoadJob": (420, 560), "ImagePostAutoDraft": (420, 620),
+SIZE = {"LoadImage": (400, 360), "SaveImage": (400, 330), "ImagePostLoadJob": (420, 560), "ImagePostAutoDraft": (460, 760),
         "ImagePostQASheet": (420, 520), "ImagePostFitWarp": (380, 140), "ImagePostSavePSD": (420, 300)}
 
 

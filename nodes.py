@@ -27,6 +27,7 @@ SHADING_CHOICES = ["job", "off"]
 RELIGHT_CHOICES = ["job", "off"]
 MODEL_CHOICES = ["homography", "affine"]
 LIGHT_CHOICES = ["relight", "cylinder", "off"]
+LABEL_CHOICES = ["off", "cylinder", "flat"]
 
 
 def _stages():
@@ -291,7 +292,8 @@ class ImagePostAutoDraft:
                     "Where the product sits in the scene, roughly (scene px): TL TR BR BL corners of the packshot "
                     "outline's bounding box as x,y x,y x,y x,y, or a box x0,y0,x1,y1 around it. A few px off is fine. "
                     "Leave it empty when product_mask is connected and nothing stands in front of the product, or give 4 "
-                    "landmark pairs instead.")}),
+                    "landmark pairs instead. With label on: the generated label's own 4 corners, in the packshot "
+                    "label's order (TL TR BR BL), within about 3 px.")}),
                 "model": (MODEL_CHOICES, {"default": "homography", "tooltip": (
                     "homography: perspective. affine: no perspective (a small or flat-on product).")}),
                 "light": (LIGHT_CHOICES, {"default": "relight", "tooltip": (
@@ -317,10 +319,17 @@ class ImagePostAutoDraft:
                 "outline": ("STRING", {"default": "", "tooltip": (
                     "The product on the packshot (reference px): a box x0,y0,x1,y1 or a polygon x,y x,y ... Empty: traced "
                     "from a packshot on a plain background (or its alpha). Give it when the packshot shows more than "
-                    "the product.")}),
+                    "the product. With label on: the label on the packshot, upright (needed).")}),
                 "mask_skip": ("STRING", {"default": "", "tooltip": (
                     "A polygon in reference px whose outline isn't fitted to product_mask (where the mask runs on "
                     "into a part the job keeps, such as a cap).")}),
+                "label": (LABEL_CHOICES, {"default": "off", "tooltip": (
+                    "The label only (run.py draft --label). cylinder: a label on a bottle or jar, mapped round the "
+                    "bottle (its axis and radius from the packshot's silhouette at the label's height). flat: a label "
+                    "on a flat or flattened face, such as a tube's panels (model as set). The generated label's own "
+                    "outline is measured and kept as its shape; its sides become the fit's edges. quad is then the "
+                    "label's 4 corners, outline the label on the packshot, product_mask a mask of the label; light is "
+                    "not used (the generated label's paper carries the light).")}),
             },
         }
 
@@ -333,13 +342,15 @@ class ImagePostAutoDraft:
         "A first job from rough input, in place of Load Job (run.py draft): traces the packshot's outline, refines "
         "landmark pairs, proposes edge lines from the outline's straight sides where the generated edge agrees, "
         "snaps the old silhouette and the occluders to edges, and sets the work box, colour and relight. With "
-        "product_mask (SAM 3) the outline is fitted to the mask. On a clean scene the draft is close to final; on a "
-        "cluttered shelf it is a scaffold to finish by hand. job_json and the saved file are the job to edit and "
+        "product_mask (SAM 3) the outline is fitted to the mask. With label on, the label only: the generated "
+        "label's own outline as its shape, its sides as the fit's edges, round the bottle (cylinder) or flat. On a "
+        "clean scene the draft is close to final; on a cluttered shelf it is a scaffold to finish by hand. job_json "
+        "and the saved file are the job to edit and "
         "load into Load Job; draft_points shows each landmark pair (packshot under the fit | scene)."
     )
 
     def draft(self, scene, reference, quad, model, light, suggest, filename_prefix, product_mask=None,
-              reference_mask=None, pairs="", occluders="", outline="", mask_skip=""):
+              reference_mask=None, pairs="", occluders="", outline="", mask_skip="", label="off"):
         su8 = _u8(scene, "scene")
         ru8, ra = _reference({}, reference, reference_mask)
         mask, note = _product_mask(product_mask, su8.shape[:2])
@@ -347,7 +358,8 @@ class ImagePostAutoDraft:
                                            occluders=_occluders(occluders), mask=mask,
                                            mask_skip=_points(mask_skip, "mask_skip") or None, model=model,
                                            outline=_outline(outline), cylinder=light == "cylinder",
-                                           relight=light == "relight", suggest=suggest)
+                                           relight=light == "relight", suggest=suggest,
+                                           label=None if label == "off" else label)
         if note:
             text = f"note       {note}\n{text}"
         job_text = json.dumps(job, indent=2)

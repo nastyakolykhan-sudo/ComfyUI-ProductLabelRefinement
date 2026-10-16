@@ -6,6 +6,7 @@
   python -I tools/regress.py --job JOB.json [--scene PATH] [--reference PATH] [--workflow WF.api.json] [--psd]
   python -I tools/regress.py --job JOB.json --draft [--quad "X,Y ..."] [--jitter 3] [--outline hand|traced]
                              [--rough-pairs] [--mask PATH|hand [--no-quad]] [--no-occluders]
+                             [--label auto|off|cylinder|flat]
 
 Runs the engine's scripts/run.py (--skill-dir, default ~/Documents/Claude/product-label-refinement) with --job-dir and --output
 inside --work, never at the job's own output path; or pass --skill-out to compare with an existing engine output.
@@ -18,7 +19,9 @@ Exit 0 when fewer than --max-px pixels differ by more than --levels, nothing out
 give: the quad (where the outline's bounding box corners land under the hand fit, each corner --jitter px off),
 the product's outline on the packshot (--outline hand; traced: the draft traces it), the hand job's occluders 2 px
 off, optionally its landmarks as rough pairs and a product mask (hand: its generated outline minus its occluders,
-what a good SAM 3 mask gives). The pack runs workflows/image-post-draft.api.json on that input and the engine runs
+what a good SAM 3 mask gives). A label job (the hand job's model is cylinder, or its shape "generated") drafts in
+Auto Draft's label mode (--label auto): the quad is then the generated label's 4 corners (the hand job's
+qa/label_outline.json, else its measured outline's sides extended), each --jitter px off. The pack runs workflows/image-post-draft.api.json on that input and the engine runs
 run.py draft on the same; their draft jobs must be identical and their images must match as above. The draft is
 then scored against the hand job (run by the engine):
   edge       how far the draft puts the product's outline from where the hand fit puts it, scene px (median, max)
@@ -148,6 +151,9 @@ def main():
                                   "minus its occluders")
     d.add_argument("--no-quad", action="store_true", help="with --mask: no quad, the mask alone")
     d.add_argument("--no-occluders", action="store_true")
+    d.add_argument("--label", choices=("auto", "off", "cylinder", "flat"), default="auto",
+                   help="Auto Draft's label mode (auto: cylinder for a cylinder hand job, flat for one in the generated "
+                        "label's shape, else off)")
     d.add_argument("--name", help="the row's name (default: the job folder's)")
     a = ap.parse_args()
     a.workflow = a.workflow or str(PACK / "workflows" / ("image-post-draft.api.json" if a.draft else "image-post.api.json"))
@@ -210,7 +216,30 @@ def _imgpost():
     return autofit, geometry, images, masks, outline
 
 
-def rough_input(a, job, scene, reference, work):
+def label_corners(job, job_p, approx):
+    """The generated label's 4 sharp corners (sides extended), TL TR BR BL as on the packshot: the hand job's
+    measure.py label output when it is there, else lines through its measured outline's sides 20 to 45 % of the way
+    from each corner, intersected; else (no measured outline) `approx`, the hand fit's box corners."""
+    lo = Path(job_p).parent / "qa" / "label_outline.json"
+    if lo.exists():
+        return np.asarray(json.loads(lo.read_text())["corners_sharp"], float)
+    osil = job.get("old_silhouette")
+    if not (isinstance(osil, dict) and osil.get("measured")):
+        return np.asarray(approx, float)
+    af, geo, _, _, _ = _imgpost()
+    M, A, out = af.resample(np.asarray(osil["measured"], float), 0.5, closed=True), np.asarray(approx, float), []
+    for i in range(4):
+        c, Ls = A[i], []
+        for o in (A[i - 1], A[(i + 1) % 4]):
+            Ln = float(np.linalg.norm(o - c))
+            t = (o - c) / Ln
+            s_, off = (M - c) @ t, (M - c) @ np.array([-t[1], t[0]])
+            Ls.append(geo.line_through(M[(s_ > 0.2 * Ln) & (s_ < 0.45 * Ln) & (np.abs(off) < 0.08 * Ln)]))
+        out.append(np.linalg.solve(np.array([Ls[0][:2], Ls[1][:2]]), -np.array([Ls[0][2], Ls[1][2]])))
+    return np.array(out)
+
+
+def rough_input(a, job, scene, reference, work, job_p=None):
     """The rough input a person would give for this product, from the hand job -> (dict for the pack's Auto Draft
     node, run.py draft arguments, the hand fit, the hand outline polygon in reference px)"""
     af, geo, im, mk, ol = _imgpost()
@@ -225,10 +254,14 @@ def rough_input(a, job, scene, reference, work):
     (bx0, by0), (bx1, by1) = Q.min(0), Q.max(0)
     fmt = lambda pts: " ".join(f"{x:.2f},{y:.2f}" for x, y in pts)
     node, cli = {"quad": "", "pairs": "", "occluders": "", "outline": "", "mask_skip": ""}, []   # the template's demo input off
+    model = job["align"].get("model", "homography")
+    label = a.label if a.label != "auto" else "cylinder" if model == "cylinder" else \
+        "flat" if job.get("shape") == "generated" else "off"
+    box = geo.apply_H(Hh, [(bx0, by0), (bx1, by0), (bx1, by1), (bx0, by1)])
     if a.quad:
         node["quad"] = a.quad
     elif not a.no_quad:
-        node["quad"] = fmt(geo.apply_H(Hh, [(bx0, by0), (bx1, by0), (bx1, by1), (bx0, by1)]) + a.jitter * JITTER)
+        node["quad"] = fmt((label_corners(job, job_p, box) if label != "off" else box) + a.jitter * JITTER)
     if node["quad"]:
         cli += ["--quad"] + node["quad"].split()
     if a.outline == "hand":
@@ -249,8 +282,10 @@ def rough_input(a, job, scene, reference, work):
         node["occluders"] = "\n".join(occ)
         for o in occ:
             cli += ["--occluder", o.replace(": ", ":", 1)]
-    model = job["align"].get("model", "homography")
     node["model"] = model if model in ("homography", "affine") else "homography"
+    node["label"] = label
+    if label != "off":
+        cli += ["--label", label]
     gs = job.get("grade", {})
     node["light"] = "cylinder" if gs.get("shading") else "relight" if gs.get("relight") else "off"
     cli += ["--model", node["model"]] + (["--cylinder"] if node["light"] == "cylinder" else
@@ -318,7 +353,7 @@ def geometry_job(job, draft_job, scene, reference):
 
 
 def draft_main(a, job_p, job, scene, reference, work):
-    node, cli, mask, Hh, P = rough_input(a, job, scene, reference, work)
+    node, cli, mask, Hh, P = rough_input(a, job, scene, reference, work, job_p)
 
     # 1. the engine: run.py draft on the rough input, then the draft job in full; and the hand job
     sd = work / "skill-draft"
@@ -374,7 +409,8 @@ def draft_main(a, job_p, job, scene, reference, work):
         "sides_kept": len(pack_job["align"]["lines"]),
         "trusted_points": sum(1 for q in pack_job["align"]["points"] if q["w"] >= 1.0),
         "input": {"quad": bool(node["quad"]), "jitter": a.jitter if node["quad"] and not a.quad else None,
-                  "outline": a.outline, "pairs": a.rough_pairs, "mask": a.mask, "occluders": bool(node["occluders"])}})
+                  "outline": a.outline, "pairs": a.rough_pairs, "mask": a.mask, "occluders": bool(node["occluders"]),
+                  "label": node["label"]}})
     res["pass"] = bool(ok)
     (work / "regress.json").write_text(json.dumps(res, indent=2))
     print(json.dumps(res, indent=2))

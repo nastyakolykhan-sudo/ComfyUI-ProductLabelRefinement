@@ -39,7 +39,8 @@
       "pairs": "40,230=373,276\n560,230=609,288",
       "occluders": "polygon: 593,428 593,662 650,666 705,662 705,428 650,424",
       "outline": "",
-      "mask_skip": ""
+      "mask_skip": "",
+      "label": "off"
     },
     "class_type": "ImagePostAutoDraft",
     "_meta": {

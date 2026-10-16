@@ -45,14 +45,14 @@ def work_box(job, Hs, Ws):
 # 0. a first job from rough input (run.py draft)
 
 def draft(scene_u8, ref_u8, ref_a, quad=None, pairs=(), occluders=(), mask=None, mask_skip=None, model="homography",
-          outline=None, cylinder=False, relight=True, suggest=False):
+          outline=None, cylinder=False, relight=True, suggest=False, label=None):
     """run.py draft without its files -> (job without the scene, reference and output paths; the lines run.py prints:
     the draft's summary and the align table; review sheet PIL image or None). run.py then runs the align stage,
-    which Fit Warp and Warp Reference do here."""
+    which Fit Warp and Warp Reference do here. label "cylinder" / "flat": run.py draft --label (the label only)."""
     try:
         d = dr.draft(scene_u8, ref_u8, ref_a, quad=quad, pairs=pairs, occluders=occluders, mask=mask,
                      mask_skip=mask_skip, model=model, outline=outline, cylinder=cylinder, relight=relight,
-                     suggest=suggest)
+                     suggest=suggest, label=label)
     except dr.DraftError as e:
         raise StageError(str(e)) from e
     check_job(d["job"])
