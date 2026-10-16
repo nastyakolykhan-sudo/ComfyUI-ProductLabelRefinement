@@ -289,12 +289,22 @@ def _outline_runs(P):
     whose outward normal is within SIDE_TOL of up, right, down or left; top runs left to right, right top to bottom,
     bottom right to left, left bottom to top."""
     Q = af.resample(np.asarray(P, float), 1.0, closed=True)
+    runs = {}
+    for name, ix in _run_indices(Q).items():
+        r = Q[ix]
+        ahead = {"top": r[-1, 0] - r[0, 0], "right": r[-1, 1] - r[0, 1], "bottom": r[0, 0] - r[-1, 0],
+                 "left": r[0, 1] - r[-1, 1]}[name]
+        runs[name] = r if ahead >= 0 else r[::-1]
+    return runs
+
+
+def _run_indices(Q):
+    """Per side of a dense closed outline Q, the indices of its longest run (in Q's order, cyclically consecutive)."""
     T = np.roll(Q, -2, 0) - np.roll(Q, 2, 0)
     T /= np.maximum(np.linalg.norm(T, axis=1), 1e-9)[:, None]
     N = np.c_[T[:, 1], -T[:, 0]] if _area(Q) > 0 else np.c_[-T[:, 1], T[:, 0]]          # outward
-    runs = {}
-    for name, d, ahead in (("top", (0, -1), lambda r: r[-1, 0] - r[0, 0]), ("right", (1, 0), lambda r: r[-1, 1] - r[0, 1]),
-                           ("bottom", (0, 1), lambda r: r[0, 0] - r[-1, 0]), ("left", (-1, 0), lambda r: r[0, 1] - r[-1, 1])):
+    out = {}
+    for name, d in (("top", (0, -1)), ("right", (1, 0)), ("bottom", (0, 1)), ("left", (-1, 0))):
         ok = N @ np.array(d, float) >= np.cos(np.radians(SIDE_TOL))
         if not ok.any() or ok.all():
             raise DraftError(f"the label's outline on the packshot has no clear {name} side: give the label upright, "
@@ -305,9 +315,34 @@ def _outline_runs(P):
                 cur.append(i)
             else:
                 best, cur = (cur if len(cur) > len(best) else best), []
-        r = Q[cur if len(cur) > len(best) else best]
-        runs[name] = r if ahead(r) >= 0 else r[::-1]
-    return runs
+        out[name] = cur if len(cur) > len(best) else best
+    return out
+
+
+def _square_wraps(P, wrap, xl, xr):
+    """The packshot label's outline with each side that wraps round the bottle redrawn on the limb, 2 px past it
+    (xl, xr): the top and bottom run on straight to it (or are cut there), and the corners beside it go. A label
+    that wraps on shows its paper right up to the silhouette; an outline drawn short of it (a product mask's tilted
+    rectangle) left strips by the limb the real label couldn't cover. -> polygon, simplified within 0.1 px"""
+    Q = af.resample(np.asarray(P, float), 1.0, closed=True)
+    if _area(Q) < 0:
+        Q = Q[::-1]                                          # clockwise on screen: top, right, bottom, left
+    ix, n = _run_indices(Q), len(Q)
+    seg = lambda a, b: Q[[(a + k) % n for k in range((b - a) % n + 1)]]
+    t, r, b, l = ix["top"], ix["right"], ix["bottom"], ix["left"]
+    top, a_tr, right, a_br = seg(t[0], t[-1]), seg(t[-1], r[0])[1:-1], seg(r[0], r[-1]), seg(r[-1], b[0])[1:-1]
+    bot, a_bl, left, a_tl = seg(b[0], b[-1]), seg(b[-1], l[0])[1:-1], seg(l[0], l[-1]), seg(l[-1], t[0])[1:-1]
+    T0, B0, none = top, bot, np.zeros((0, 2))
+    if "right" in wrap:
+        top = np.vstack([top[top[:, 0] < xr], [[xr, _at_x(T0, xr)]]])
+        bot = np.vstack([[[xr, _at_x(B0, xr)]], bot[bot[:, 0] < xr]])
+        a_tr = right = a_br = none
+    if "left" in wrap:
+        top = np.vstack([[[xl, _at_x(T0, xl)]], top[top[:, 0] > xl]])
+        bot = np.vstack([bot[bot[:, 0] > xl], [[xl, _at_x(B0, xl)]]])
+        a_bl = left = a_tl = none
+    S = np.vstack([top, a_tr, right, a_br, bot, a_bl, left, a_tl])
+    return af._dp(np.vstack([S, S[:1]]), 0.1)[:-1]
 
 
 def label_frame(P):
@@ -558,6 +593,22 @@ def label_draft(scene_u8, ref_u8, ref_alpha=None, quad=None, outline=None, kind=
             if cyl["spread"][side] > 2.5:
                 notes.append(f"the bottle's {side} limb varies {cyl['spread'][side]} px over the label's rows: check "
                              "axis_x and radius")
+        if wrap:                         # the wrapping sides on the limbs, 2 px past (the recipe's outline)
+            xl, xr = cyl["limbs"]["left"] - 2.0, cyl["limbs"]["right"] + 2.0
+            for side, corners_, x_new in (("left", ("TL", "BL"), xl), ("right", ("TR", "BR"), xr)):
+                off = [round(abs(C[c][0] - x_new), 1) for c in corners_]
+                if side in wrap and max(off) > 3.0:
+                    notes.append(f"the outline's {side} side ran {max(off)} px off the bottle's {side} limb at a corner: "
+                                 "redrawn on the limb, 2 px past it, as a label that wraps on round the bottle")
+            P = _square_wraps(P, wrap, xl, xr)
+            spec_o = {"type": "polygon", "about": spec_o.get("about", "the label on the packshot") +
+                      "; its wrapping sides redrawn on the bottle's limbs by the draft",
+                      "pts": [[round(float(x), 2), round(float(y), 2)] for x, y in P]}
+            P = np.asarray(ol.outline_polygon(spec_o), float)
+            F = label_frame(P)
+            C, rad = F["corners"], F["radii"]
+            S = _snap_sides(ref, F)
+            ref_q = np.array([C[c] for c in CORNERS])
         limb_min, reach = _limb_floor(ref_u8, ref_alpha, spec_o, cyl["axis_x"], cyl["radius"], wrap)
 
     # 3. the generated label's corners: the quad, or the mask's

@@ -1,12 +1,12 @@
 {
   "skill": "~/Documents/Claude/product-label-refinement",
-  "imgpost_version": "0.10.1",
+  "imgpost_version": "0.10.2",
   "synced": "2026-10-16",
   "files": {
-    "__init__.py": "a543cef00a32e78aa842320ae591231759d77e7c875980f1fcdfa649c62cbee9",
+    "__init__.py": "64def12eb784d4445039020e59c89fe88f38aa27ad2609b5e33cad17fee559e4",
     "audit.py": "7e6940bd8a5552e55b8eadfe2aa3b3624920045b12625b63e0d44b585f58de15",
     "autofit.py": "92c60d7045eee4be40853a4c35777e739b814044585b7ca343b724c0fdf168e9",
-    "draft.py": "5cbba5e64eaa85b15637a30a622018ac37c7c26c334037eecea85e4ff850aecd",
+    "draft.py": "01ceaa00e118d77dafec186849a79b931482edbd9f06d0b2b8a2c72414802e05",
     "fill.py": "4267aca68ce18703a25e1bbdd32670de80bcafd5701b2cd7577f46c93722a4af",
     "finish.py": "ddf6fecf4a3246bf1d931fdcb24ae95a8067230523e72a3ac5ba6399848101f0",
     "geometry.py": "f5aaa4b8ff16c05e1886d3bd3593f7e4f35535f47fdbf19c7ecd57ed6a615ea1",
