@@ -25,9 +25,9 @@
     "imgpost_version": "0.10.2",
     "packages": {
       "imgvideo": {
-        "version": "0.3.0",
+        "version": "0.3.1",
         "files": {
-          "__init__.py": "4d934a3c70a0657cdb3ec2822b105028d4abf3e8cc6be62180d6175255d3cd12",
+          "__init__.py": "54d367c1296fc517728baac1c13dde9a4bb594397769d619ee714b0556cfe900",
           "alltracker/LICENSE": "ab740abe5c34e17963fe4d6a1f68a3dcd35bbc05dc520cf08d7a062c0ea13c79",
           "alltracker/__init__.py": "5354c3910da4daa2fe420fb845e2a19204af24d780b57853039c76bbd7be4deb",
           "alltracker/alltracker.py": "417a8d7251cd1e5a38df6787b47508fcd971aaa43ced6f46cfb841b25fe4dee1",
@@ -37,7 +37,7 @@
           "keyframe.py": "8890633354b6c64c320a37f62ba9d71aabb20ffa78261e50b96cfc096dee902c",
           "labelspace.py": "a9307e82842da3c95ccfceb3edd4d9736d81ae3a395833fd9dbdb206e680a948",
           "optics.py": "ef19545ae8d457937a1861811fa7f36116dc20d42351348e59ca490852ed3f4f",
-          "pipeline.py": "1d3a9c10dea521650e1b3a4713cdb6854100f5ddac237b81837cc6b4a103056a",
+          "pipeline.py": "02067181cb4e720c4d9285d3db5ba74f239b4d1527c2da10025ed039c8c95f45",
           "qa.py": "e4425d80628f159806af3964b020ab2b0073dd877041791c3c347c5bc3a6015a",
           "render.py": "f4f5c72efaec4caa9a313f72e0eb29b4bc8db0a3447a75a71ef1ad0dc28f0ff8",
           "review.py": "09a9b3442cf8d663263e335327677d1d8629abc196724e8a2a4d879d76eca77f",

@@ -1478,29 +1478,36 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
             if not plot_qa(rows, rep, plot):
                 plot = None
 
-    # what is left, shot by shot: imgauto's coverage plan for each uncovered run (chain, re-acquire or a new keyframe,
-    # with the reason and the frame to correct). The frames where the label turned into view past what a keyframe saw
-    # count as uncovered too (the source was kept there).
+    # what is left, shot by shot: imgauto's coverage plan for each run still to fix (chain, re-acquire or a new keyframe,
+    # with the reason and the frame to correct). Two kinds: frames left as they are (not_covered), and frames refined
+    # where part of the label turned into view past what the keyframe saw, so the source is kept on that part
+    # (partly_covered).
     covered = set(owner)
     unseen = set()
     for J in jobs:
         q = json.loads((J.qa / "qa.json").read_text())
         lim = q.get("thresholds", {}).get("unseen_max", 0.02)
         unseen |= {r["frame"] for r in q.get("frames", []) if (r.get("unseen_frac") or 0) > lim and owner.get(r["frame"]) is J}
-    not_covered = []
+    not_covered, partly_covered = [], []
     for s_ in sh:
         for u in acov.plan(s_, kinds, covered, unseen, stats, bounds, M2, T)["uncovered"]:
             sg = u.get("suggest") or {}
-            not_covered.append({"frames": [int(x) for x in u["run"]], "plan": u["plan"], "why": u["why"],
-                                "suggested_keyframe": sg.get("pick"), "suggestion_score": sg.get("score")})
-    runs = [nc["frames"] for nc in not_covered]
+            entry = {"plan": u["plan"], "why": u["why"], "suggested_keyframe": sg.get("pick"),
+                     "suggestion_score": sg.get("score")}
+            a_, b_ = (int(x) for x in u["run"])
+            for refined in (False, True):
+                for r0, r1 in _ranges([t for t in range(a_, b_) if (t in covered) == refined]):
+                    (partly_covered if refined else not_covered).append({"frames": [int(r0), int(r1)], **entry})
+    not_covered.sort(key=lambda e: e["frames"])
+    partly_covered.sort(key=lambda e: e["frames"])
     report = {
         "engine": {"imgvideo": __version__},
         "frames": T, "size": [frames.shape[2], frames.shape[1]], "fps": fps,
         "cuts": cuts,
         "keyframes": decisions,
         "covered": [[int(a), int(b)] for a, b in _ranges(covered)],
-        "not_covered": not_covered,
+        "not_covered": not_covered,           # left as they are
+        "partly_covered": partly_covered,     # refined; part of the label keeps the source (past what the keyframe saw)
         "needs_mask": [[int(a), int(b)] for a, b in _ranges([t for t, w in enumerate(why) if w == "no matte, product visible"])],
         "flagged": {str(r["frame"]): r["flag"] for r in rows if r.get("flag")},
         "review": review,
@@ -1510,7 +1517,10 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
         "seconds": round(time.time() - t_start, 1),
     }
     (root / "report.json").write_text(json.dumps(report, indent=1, default=str))
-    print(f"refine     {len(covered)} of {T} frames refined by {len(jobs)} keyframe(s); not covered: "
-          f"{', '.join(f'{a}-{b - 1}' for a, b in runs) or 'none'}; flagged {len(report['flagged'])}; "
-          f"{outside} px changed outside the matte; {report['seconds']} s")
+    def spans(es):
+        return ", ".join(f"{e['frames'][0]}-{e['frames'][1] - 1}" for e in es) or "none"
+    print(f"refine     {len(covered)} of {T} frames refined by {len(jobs)} keyframe(s); left as they are: "
+          f"{spans(not_covered)}; refined with part of the label kept from the source (it turned past what the "
+          f"keyframe saw): {spans(partly_covered)}; flagged {len(report['flagged'])}; {outside} px changed outside "
+          f"the matte; {report['seconds']} s")
     return {"frames": out, "matte": masks, "changed": changed, "report": report, "qa_plot": plot, "work": root}

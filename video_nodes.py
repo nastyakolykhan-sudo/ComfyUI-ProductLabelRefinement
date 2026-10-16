@@ -32,8 +32,25 @@ CATEGORY = "image/product-label-refinement/video"
 if not hasattr(folder_paths, "models_dir"):  # (a stand-in folder_paths, as tools/offline_run.py installs)
     folder_paths = None
 TRACKERS_DIR = os.path.join(folder_paths.models_dir, "trackers") if folder_paths else None
+
+
+def _tracker_dirs():
+    """models/trackers, plus a `trackers` folder beside every place the standard model folders come from. A server
+    that mounts its models from a volume through extra_model_paths.yaml (main.py loads it before custom nodes) lists
+    checkpoints, sams, ... there but not this new folder type, so the volume's trackers/ would otherwise go unseen."""
+    dirs = [TRACKERS_DIR]
+    for kind in ("checkpoints", "sams", "diffusion_models", "loras", "vae", "upscale_models", "text_encoders"):
+        try:
+            paths = folder_paths.get_folder_paths(kind)
+        except Exception:                    # (a folder type this ComfyUI doesn't know)
+            continue
+        dirs += [os.path.join(os.path.dirname(os.path.normpath(p)), "trackers") for p in paths]
+    return list(dict.fromkeys(dirs))
+
+
 if folder_paths:
-    folder_paths.add_model_folder_path("trackers", TRACKERS_DIR)
+    for _d in _tracker_dirs():
+        folder_paths.add_model_folder_path("trackers", _d)
 
 
 def _engine():

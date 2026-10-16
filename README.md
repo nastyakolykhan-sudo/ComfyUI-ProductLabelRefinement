@@ -162,7 +162,7 @@ Correct one frame of a clip, by hand or with an image model given the real produ
 3. re-projects the true label with each frame's light, softness and grain;
 4. composites it inside the product's mask.
 
-The text is right on every frame, the timing is the source's, and the pixels outside the changed area come back exactly as they went in. It's the product-label-refinement skill's video engine (`imgvideo` 0.3.0), and the skill's own `video.py --refine` gives the same pixels (see Regression).
+The text is right on every frame, the timing is the source's, and the pixels outside the changed area come back exactly as they went in. It's the product-label-refinement skill's video engine (`imgvideo` 0.3.1), and the skill's own `video.py --refine` gives the same pixels (see Regression).
 
 ### Swordfish checklist
 
@@ -170,7 +170,7 @@ The text is right on every frame, the timing is the source's, and the pixels out
    - The video nodes themselves run on 0.18.2.
    - SAM 3 (`SAM3_Detect`, `SAM3_VideoTrack`) and the SAM 3 helper below need 0.19.3, as does a label-fix workflow that segments with SAM 3.
 2. **AllTracker's weights:** `ComfyUI/models/trackers/alltracker.pth`.
-   - That's the `models/trackers` folder of the ComfyUI on the Modal volume. An `extra_model_paths.yaml` entry `trackers:` works too.
+   - That's the `models/trackers` folder, or a `trackers` folder beside the standard model folders wherever they're mounted from: a volume that `extra_model_paths.yaml` maps for `checkpoints`, `sams` and the rest is searched too, so `trackers/alltracker.pth` at that volume's top level is found without editing the yaml. On Swordfish, add it from the Models page with the HuggingFace button (repo `aharley/alltracker`, file `alltracker.pth`, custom path `trackers`), then restart ComfyUI and reload the page.
    - Get them from `https://huggingface.co/aharley/alltracker/resolve/main/alltracker.pth`: 66,005,722 bytes, sha256 `ffd9ebcfb6d206d594b646999a150540f92c049cf9b2bf940facf7123f62aa1d`, MIT.
    - The node lists what's in that folder under `tracker` and never downloads anything.
 3. **SAM 3.1:** `ComfyUI/models/checkpoints/sam3.1_multiplex_fp16.safetensors`, the checkpoint the label-fix workflow already loads. Its licence is Meta's SAM License.
@@ -196,7 +196,7 @@ The text is right on every frame, the timing is the source's, and the pixels out
      - `keyframe_index`: LoadVideoTrim's `keyframe_index`.
    - **Out:** `frames` goes straight to SaveVideo and Save Lossless; nothing needs pasting back. With crops instead of full frames, paste back through `changed`.
    - **Then read the report:**
-     - `not_covered` says what to do about each stretch it couldn't refine (`chain`, `reacquire`, or a new `keyframe` at the suggested frame);
+     - `not_covered` and `partly_covered` say what to do about each stretch (`chain`, `reacquire`, or a new `keyframe` at the suggested frame): `not_covered` holds frames left as they are, `partly_covered` frames refined with part of the label kept from the source because it turned past what the keyframe saw;
      - `flagged` lists frames to look at;
      - `review` has the automatic checks.
 
@@ -215,7 +215,7 @@ The text is right on every frame, the timing is the source's, and the pixels out
 - print polarity and stroke;
 - the shot each keyframe covers;
 - a colour-key patch for frames where the mask has a gap;
-- a plan, with a suggested frame, for every stretch it couldn't cover.
+- the stretches it left as they are (`not_covered`) and the stretches refined with part of the label kept from the source (`partly_covered`), each with a plan and a suggested frame.
 
 **`settings`** (JSON) overrides any of that:
 - the engine's vjob sections: `track`, `fit`, `render`, `qa`, `review`, `artwork`, `key`;
