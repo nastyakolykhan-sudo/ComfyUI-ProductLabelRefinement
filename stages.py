@@ -1,8 +1,9 @@
-"""run.py's cmd_run, split at the node boundaries.
+"""run.py's cmd_draft and cmd_run, split at the node boundaries.
 
 Each function is a line-for-line port of one section of the image-post skill's scripts/run.py (same names,
 same order, same defaults) and works on the work box (roi) in float64, exactly like run.py. Keep it that way:
 when run.py changes, port the diff here. `tools/sync_imgpost.py --check` says when run.py or imgpost/ moved on.
+draft() is cmd_draft without its files: the draft itself lives in imgpost/draft.py, which both call.
 
 run.py's sys.exit() conditions raise StageError with the same message.
 """
@@ -11,6 +12,7 @@ from scipy.ndimage import binary_dilation, binary_erosion, gaussian_filter
 
 from .imgpost import audit as au
 from .imgpost import autofit as af
+from .imgpost import draft as dr
 from .imgpost import fill as fl
 from .imgpost import finish as fn
 from .imgpost import geometry as geo
@@ -38,6 +40,24 @@ def check_job(job):
 def work_box(job, Hs, Ws):
     return [max(0, int(round(job["roi"][0]))), max(0, int(round(job["roi"][1]))),
             min(Ws, int(round(job["roi"][2]))), min(Hs, int(round(job["roi"][3])))]
+
+
+# 0. a first job from rough input (run.py draft)
+
+def draft(scene_u8, ref_u8, ref_a, quad=None, pairs=(), occluders=(), mask=None, mask_skip=None, model="homography",
+          outline=None, cylinder=False, relight=True, suggest=False):
+    """run.py draft without its files -> (job without the scene, reference and output paths; the lines run.py prints:
+    the draft's summary and the align table; review sheet PIL image or None). run.py then runs the align stage,
+    which Fit Warp and Warp Reference do here."""
+    try:
+        d = dr.draft(scene_u8, ref_u8, ref_a, quad=quad, pairs=pairs, occluders=occluders, mask=mask,
+                     mask_skip=mask_skip, model=model, outline=outline, cylinder=cylinder, relight=relight,
+                     suggest=suggest)
+    except dr.DraftError as e:
+        raise StageError(str(e)) from e
+    check_job(d["job"])
+    _, rep = fit_warp(d["job"])
+    return d["job"], "\n".join(dr.summary(d) + [align_table(rep)]), d["sheet"]
 
 
 def generated_cover(job, roi):

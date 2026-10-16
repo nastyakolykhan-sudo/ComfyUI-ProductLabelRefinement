@@ -1,0 +1,478 @@
+{
+  "1": {
+    "inputs": {
+      "image": "imagepost_demo_scene.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Scene (generated image)"
+    }
+  },
+  "2": {
+    "inputs": {
+      "image": "imagepost_demo_packshot.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Reference (real product)"
+    }
+  },
+  "3": {
+    "inputs": {
+      "scene": [
+        "1",
+        0
+      ],
+      "reference": [
+        "2",
+        0
+      ],
+      "quad": "375,168 610,189 613,563 367,580",
+      "model": "homography",
+      "light": "relight",
+      "suggest": false,
+      "filename_prefix": "image-post/draft",
+      "reference_mask": [
+        "2",
+        1
+      ],
+      "pairs": "40,230=373,276\n560,230=609,288",
+      "occluders": "polygon: 593,428 593,662 650,666 705,662 705,428 650,424",
+      "outline": "",
+      "mask_skip": ""
+    },
+    "class_type": "ImagePostAutoDraft",
+    "_meta": {
+      "title": "Auto Draft"
+    }
+  },
+  "4": {
+    "inputs": {
+      "job": [
+        "3",
+        0
+      ],
+      "scene": [
+        "1",
+        0
+      ],
+      "product_mask": [
+        "6",
+        1
+      ]
+    },
+    "class_type": "ImagePostJobMasks",
+    "_meta": {
+      "title": "Job Masks"
+    }
+  },
+  "5": {
+    "inputs": {
+      "job": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "ImagePostFitWarp",
+    "_meta": {
+      "title": "Fit Warp"
+    }
+  },
+  "6": {
+    "inputs": {
+      "job": [
+        "3",
+        0
+      ],
+      "homography": [
+        "5",
+        0
+      ],
+      "scene": [
+        "1",
+        0
+      ],
+      "reference": [
+        "2",
+        0
+      ],
+      "reference_mask": [
+        "2",
+        1
+      ]
+    },
+    "class_type": "ImagePostWarpReference",
+    "_meta": {
+      "title": "Warp Reference"
+    }
+  },
+  "7": {
+    "inputs": {
+      "job": [
+        "3",
+        0
+      ],
+      "scene": [
+        "1",
+        0
+      ],
+      "warped": [
+        "6",
+        0
+      ],
+      "product_mask": [
+        "6",
+        1
+      ],
+      "old_silhouette": [
+        "4",
+        0
+      ],
+      "occluder_mask": [
+        "4",
+        1
+      ],
+      "colour": "job",
+      "shading": "job",
+      "reference": [
+        "2",
+        0
+      ],
+      "coords": [
+        "6",
+        3
+      ],
+      "relight": "job"
+    },
+    "class_type": "ImagePostGradeToScene",
+    "_meta": {
+      "title": "Grade To Scene"
+    }
+  },
+  "8": {
+    "inputs": {
+      "job": [
+        "3",
+        0
+      ],
+      "scene": [
+        "1",
+        0
+      ],
+      "graded": [
+        "7",
+        0
+      ],
+      "product_mask": [
+        "6",
+        1
+      ],
+      "old_silhouette": [
+        "4",
+        0
+      ],
+      "occluder_mask": [
+        "4",
+        1
+      ],
+      "coords": [
+        "6",
+        3
+      ]
+    },
+    "class_type": "ImagePostMatchFinish",
+    "_meta": {
+      "title": "Match Finish"
+    }
+  },
+  "9": {
+    "inputs": {
+      "job": [
+        "3",
+        0
+      ],
+      "scene": [
+        "1",
+        0
+      ],
+      "product_mask": [
+        "6",
+        1
+      ],
+      "old_silhouette": [
+        "4",
+        0
+      ],
+      "occluder_mask": [
+        "4",
+        1
+      ],
+      "coords": [
+        "6",
+        3
+      ]
+    },
+    "class_type": "ImagePostFillLeftovers",
+    "_meta": {
+      "title": "Fill Leftovers"
+    }
+  },
+  "10": {
+    "inputs": {
+      "job": [
+        "3",
+        0
+      ],
+      "scene": [
+        "1",
+        0
+      ],
+      "background": [
+        "9",
+        0
+      ],
+      "product": [
+        "8",
+        0
+      ],
+      "product_mask": [
+        "6",
+        1
+      ],
+      "occluder_mask": [
+        "4",
+        1
+      ],
+      "ink": [
+        "7",
+        4
+      ],
+      "coords": [
+        "6",
+        3
+      ]
+    },
+    "class_type": "ImagePostCompositeBehind",
+    "_meta": {
+      "title": "Composite Behind"
+    }
+  },
+  "11": {
+    "inputs": {
+      "job": [
+        "3",
+        0
+      ],
+      "before": [
+        "1",
+        0
+      ],
+      "after": [
+        "10",
+        0
+      ],
+      "reference": [
+        "2",
+        0
+      ],
+      "matte": [
+        "10",
+        1
+      ],
+      "fill_mask": [
+        "9",
+        1
+      ],
+      "reference_mask": [
+        "2",
+        1
+      ],
+      "align_report": [
+        "5",
+        1
+      ],
+      "grade_report": [
+        "7",
+        2
+      ],
+      "finish_report": [
+        "8",
+        1
+      ],
+      "fill_report": [
+        "9",
+        2
+      ],
+      "old_silhouette": [
+        "4",
+        0
+      ],
+      "occluder_mask": [
+        "4",
+        1
+      ],
+      "coords": [
+        "6",
+        3
+      ]
+    },
+    "class_type": "ImagePostQASheet",
+    "_meta": {
+      "title": "QA Sheet"
+    }
+  },
+  "12": {
+    "inputs": {
+      "images": [
+        "10",
+        0
+      ],
+      "filename_prefix": "image-post/imagepost_demo_scene_refined"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save refined image"
+    }
+  },
+  "13": {
+    "inputs": {
+      "images": [
+        "11",
+        0
+      ],
+      "filename_prefix": "image-post/qa/compare"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA compare"
+    }
+  },
+  "14": {
+    "inputs": {
+      "images": [
+        "11",
+        1
+      ],
+      "filename_prefix": "image-post/qa/edges"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA edges"
+    }
+  },
+  "15": {
+    "inputs": {
+      "images": [
+        "11",
+        2
+      ],
+      "filename_prefix": "image-post/qa/before_after"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA before_after"
+    }
+  },
+  "16": {
+    "inputs": {
+      "images": [
+        "6",
+        2
+      ],
+      "filename_prefix": "image-post/qa/align_overlay"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA align_overlay"
+    }
+  },
+  "17": {
+    "inputs": {
+      "images": [
+        "7",
+        1
+      ],
+      "filename_prefix": "image-post/qa/grade_preview"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA grade_preview"
+    }
+  },
+  "18": {
+    "inputs": {
+      "images": [
+        "7",
+        3
+      ],
+      "filename_prefix": "image-post/qa/relight_map"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA relight_map"
+    }
+  },
+  "20": {
+    "inputs": {
+      "images": [
+        "11",
+        4
+      ],
+      "filename_prefix": "image-post/qa/audit"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA audit"
+    }
+  },
+  "19": {
+    "inputs": {
+      "job": [
+        "3",
+        0
+      ],
+      "scene": [
+        "1",
+        0
+      ],
+      "image": [
+        "10",
+        0
+      ],
+      "background": [
+        "9",
+        0
+      ],
+      "fill_mask": [
+        "9",
+        1
+      ],
+      "product": [
+        "8",
+        0
+      ],
+      "matte": [
+        "10",
+        1
+      ],
+      "filename_prefix": "image-post/imagepost_demo_scene_refined"
+    },
+    "class_type": "ImagePostSavePSD",
+    "_meta": {
+      "title": "Save PSD"
+    }
+  },
+  "21": {
+    "inputs": {
+      "images": [
+        "3",
+        2
+      ],
+      "filename_prefix": "image-post/qa/draft_points"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA draft_points"
+    }
+  }
+}

@@ -3,10 +3,10 @@
 
   python -I tools/offline_run.py --workflow workflows/image-post.api.json \\
       --scene path/to/scene.png --reference path/to/packshot.png \\
-      [--job JOB.json] [--stage align|grade|all] [--psd] --out ./ip-offline
+      [--job JOB.json] [--set NODE.INPUT=VALUE] [--mask MASK.png] [--stage align|grade|all] [--psd] --out ./ip-offline
 
 Takes the same arguments as comfy_run.py and writes the same --out layout. It imports this pack, stands in for
-the core nodes the workflows use (LoadImage, SaveImage, PreviewImage, MaskToImage) and ComfyUI's folder_paths
+the core nodes the workflows use (LoadImage, LoadImageMask, SaveImage, PreviewImage, MaskToImage) and ComfyUI's folder_paths
 with ComfyUI's own pixel conversions, checks inputs and link types the way ComfyUI validates a prompt, and runs
 the output nodes' dependencies in order. Needs a Python with torch, numpy, scipy and Pillow (ComfyUI's own works).
 """
@@ -78,6 +78,30 @@ class LoadImage:
         return output_images[0], output_masks[0]
 
 
+class LoadImageMask:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"image": ("STRING", {}), "channel": (["alpha", "red", "green", "blue"],)}}
+
+    RETURN_TYPES = ("MASK",)
+    FUNCTION = "load_image"
+
+    def load_image(self, image, channel):
+        i = ImageOps.exif_transpose(Image.open(LoadImage.paths[image]))
+        if i.getbands() != ("R", "G", "B", "A"):
+            if i.mode == "I":
+                i = i.point(lambda i: i * (1 / 255))
+            i = i.convert("RGBA")
+        c = channel[0].upper()
+        if c in i.getbands():
+            mask = torch.from_numpy(np.array(i.getchannel(c)).astype(np.float32) / 255.0)
+            if c == "A":
+                mask = 1. - mask
+        else:
+            mask = torch.zeros((64, 64), dtype=torch.float32, device="cpu")
+        return (mask.unsqueeze(0),)
+
+
 class SaveImage:
     out_dir = Path(".")
     type = "output"
@@ -128,7 +152,8 @@ class MaskToImage:
         return (mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])).movedim(1, -1).expand(-1, -1, -1, 3),)
 
 
-CORE = {"LoadImage": LoadImage, "SaveImage": SaveImage, "PreviewImage": PreviewImage, "MaskToImage": MaskToImage}
+CORE = {"LoadImage": LoadImage, "LoadImageMask": LoadImageMask, "SaveImage": SaveImage, "PreviewImage": PreviewImage,
+        "MaskToImage": MaskToImage}
 
 # ComfyUI's folder_paths, for nodes that write files themselves (Save PSD): the same output/ and temp/ folders
 folder_paths = types.ModuleType("folder_paths")
@@ -209,18 +234,19 @@ def execute(wf, classes):
     return {"outputs": ui, "status": {"status_str": "success", "completed": True, "messages": []}}
 
 
-def run(workflow, out, scene=None, reference=None, images=(), job=None, stage="all", psd=False):
+def run(workflow, out, scene=None, reference=None, images=(), job=None, stage="all", psd=False, sets=(), mask=None):
     """Offline equivalent of comfy_run.py -> history entry (also written to out/history.json)."""
     wf = cr.load_workflow(workflow)
     if job:
         cr.set_job(wf, job)
-    targets = cr.image_targets(wf, scene, reference, images)
+    cr.set_inputs(wf, sets)
+    targets = cr.image_targets(wf, scene, reference, images, mask)
     wf = cr.prune(cr.keep_psd(wf, cr.psd_wanted(wf, psd)), stage)
     out = Path(out).expanduser()
     out.mkdir(parents=True, exist_ok=True)
     classes = {**CORE, **load_pack()}
     for nid, node in wf.items():
-        if node["class_type"] == "LoadImage":
+        if node["class_type"] in ("LoadImage", "LoadImageMask"):
             if nid not in targets:
                 sys.exit(f"Load Image node {nid} ({node['inputs']['image']}): give its file with --scene, --reference or --image {nid}=PATH")
             node["inputs"]["image"] = targets[nid].name
@@ -247,13 +273,15 @@ def main():
     ap.add_argument("--reference")
     ap.add_argument("--image", action="append", default=[], metavar="NODE_ID=PATH")
     ap.add_argument("--job")
+    ap.add_argument("--set", action="append", default=[], metavar="NODE.INPUT=VALUE")
+    ap.add_argument("--mask", help="the product's mask (white = product) for the Auto Draft nodes")
     ap.add_argument("--stage", choices=("align", "grade", "all"), default="all")
     ap.add_argument("--psd", action="store_true", help="also run the Save PSD nodes (same as \"psd\": true in the job)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     sys.stdout.reconfigure(line_buffering=True)   # keep progress and errors in order when piped
     t0 = time.time()
-    entry, written = run(a.workflow, a.out, a.scene, a.reference, a.image, a.job, a.stage, a.psd)
+    entry, written = run(a.workflow, a.out, a.scene, a.reference, a.image, a.job, a.stage, a.psd, a.set, a.mask)
     status = entry["status"]
     if status["status_str"] == "error":
         msg = status["messages"][0][1]

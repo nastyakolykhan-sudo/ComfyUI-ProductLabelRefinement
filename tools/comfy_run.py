@@ -5,10 +5,15 @@
       --workflow workflows/image-post.api.json \\
       --scene path/to/scene.png --reference path/to/packshot.png \\
       [--job path/to/job.json] [--stage align|grade|all] [--psd] --out ./ip-run
+  python3 -P tools/comfy_run.py --workflow workflows/image-post-draft.api.json --scene ... --reference ... \\
+      --set "ImagePostAutoDraft.quad=X,Y X,Y X,Y X,Y" [--mask product_mask.png] --out ./ip-draft
 
 --scene / --reference upload the files (POST /upload/image, into input/image-post/) and point the Load Image
 nodes that feed Warp Reference at them; --image NODE_ID=PATH does the same for any Load Image node.
---job replaces the job text in every Load Job node. --stage prunes the graph like run.py --stage
+--job replaces the job text in every Load Job node. --set NODE.INPUT=VALUE sets a widget value on a node, NODE being
+its id or its class_type (every node of that class): the Auto Draft node's quad, pairs, occluders, outline.
+--mask PATH adds a Load Image (as Mask) node, red channel (white = product), feeding every Auto Draft node's
+product_mask. --stage prunes the graph like run.py --stage
 (align: fit, warp, overlay; grade: + grade preview and relight map; all: everything).
 Save PSD nodes run only with --psd or "psd": true in the job, like run.py --psd.
 --out receives every output file (server folder layout: images, the PSD), report.json (from the QA node), the
@@ -27,7 +32,7 @@ import uuid
 from pathlib import Path
 
 STAGE_NODES = {
-    "align": {"ImagePostLoadJob", "ImagePostJobMasks", "ImagePostFitWarp", "ImagePostWarpReference"},
+    "align": {"ImagePostLoadJob", "ImagePostAutoDraft", "ImagePostJobMasks", "ImagePostFitWarp", "ImagePostWarpReference"},
 }
 STAGE_NODES["grade"] = STAGE_NODES["align"] | {"ImagePostGradeToScene"}
 
@@ -52,8 +57,8 @@ def loaders(wf, input_name):
     return sorted(i for i in ids if wf[i]["class_type"] == "LoadImage")
 
 
-def image_targets(wf, scene=None, reference=None, images=()):
-    """-> {load image node id: local path}"""
+def image_targets(wf, scene=None, reference=None, images=(), mask=None):
+    """-> {load image node id: local path}. mask: adds the product mask's loader (add_mask)."""
     out = {}
     for role, path in (("scene", scene), ("reference", reference)):
         if path:
@@ -66,6 +71,8 @@ def image_targets(wf, scene=None, reference=None, images=()):
         if nid not in wf or wf[nid]["class_type"] != "LoadImage":
             sys.exit(f"--image {spec}: node {nid} is not a Load Image node")
         out[nid] = path
+    if mask:
+        out[add_mask(wf)] = mask
     for nid, path in out.items():
         p = Path(path).expanduser()
         if not p.is_file():
@@ -84,6 +91,41 @@ def set_job(wf, job_path):
             n += 1
     if not n:
         sys.exit("--job: the workflow has no Image Post Load Job node")
+
+
+def set_inputs(wf, specs):
+    """--set NODE.INPUT=VALUE: a widget value on node NODE (an id) or on every node of class NODE. A value replacing a
+    number or a boolean is read as JSON; anything else stays text."""
+    for spec in specs:
+        key, eq, value = spec.partition("=")
+        target, dot, name = key.rpartition(".")
+        if not eq or not dot or not target or not name:
+            sys.exit(f"--set {spec!r}: expected NODE.INPUT=VALUE (NODE: a node id or a class_type)")
+        ids = [target] if target in wf else [nid for nid, n in wf.items() if n["class_type"] == target]
+        if not ids:
+            sys.exit(f"--set {spec!r}: the workflow has no node {target!r}")
+        for nid in ids:
+            old = wf[nid]["inputs"].get(name)
+            if is_link(old):
+                sys.exit(f"--set {spec!r}: input {name} of node {nid} is a link, not a value")
+            if isinstance(old, (bool, int, float)):
+                try:
+                    value = json.loads(value)
+                except json.JSONDecodeError:
+                    sys.exit(f"--set {spec!r}: {name} takes a number or true/false")
+            wf[nid]["inputs"][name] = value
+
+
+def add_mask(wf):
+    """--mask: a Load Image (as Mask) node, red channel, feeding every Auto Draft node's product_mask -> its id."""
+    drafts = [n for n in wf.values() if n["class_type"] == "ImagePostAutoDraft"]
+    if not drafts:
+        sys.exit("--mask: the workflow has no Auto Draft node")
+    nid = str(max(int(k) for k in wf) + 1)
+    wf[nid] = {"inputs": {"image": "", "channel": "red"}, "class_type": "LoadImageMask", "_meta": {"title": "Product mask"}}
+    for n in drafts:
+        n["inputs"]["product_mask"] = [nid, 0]
+    return nid
 
 
 def psd_wanted(wf, flag=False):
@@ -192,6 +234,8 @@ def main():
     ap.add_argument("--reference")
     ap.add_argument("--image", action="append", default=[], metavar="NODE_ID=PATH")
     ap.add_argument("--job", help="job.json to run instead of the one embedded in the workflow")
+    ap.add_argument("--set", action="append", default=[], metavar="NODE.INPUT=VALUE", help="a widget value, e.g. the Auto Draft quad")
+    ap.add_argument("--mask", help="the product's mask (white = product, scene-sized) for the Auto Draft nodes")
     ap.add_argument("--stage", choices=("align", "grade", "all"), default="all")
     ap.add_argument("--psd", action="store_true", help="also run the Save PSD nodes (same as \"psd\": true in the job)")
     ap.add_argument("--out", required=True)
@@ -203,7 +247,8 @@ def main():
     wf = load_workflow(a.workflow)
     if a.job:
         set_job(wf, a.job)
-    targets = image_targets(wf, a.scene, a.reference, a.image)
+    set_inputs(wf, a.set)
+    targets = image_targets(wf, a.scene, a.reference, a.image, a.mask)
     wf = prune(keep_psd(wf, psd_wanted(wf, a.psd)), a.stage)
     out = Path(a.out).expanduser()
     out.mkdir(parents=True, exist_ok=True)

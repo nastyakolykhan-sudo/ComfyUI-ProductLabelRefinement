@@ -1,8 +1,8 @@
 import { app } from "../../scripts/app.js";
 import { ComfyWidgets } from "../../scripts/widgets.js";
 
-// Shows the text these nodes return in ui.text (residual table, report.json) in a read-only box on the node.
-const TEXT_NODES = new Set(["ImagePostFitWarp", "ImagePostQASheet", "ImagePostSavePSD"]);
+// Shows the text these nodes return in ui.text (draft summary, residual table, report.json) in a read-only box on the node.
+const TEXT_NODES = new Set(["ImagePostAutoDraft", "ImagePostFitWarp", "ImagePostQASheet", "ImagePostSavePSD"]);
 
 app.registerExtension({
     name: "ImagePost.ReportText",

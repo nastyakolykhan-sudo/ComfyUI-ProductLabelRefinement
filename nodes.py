@@ -25,6 +25,8 @@ CATEGORY = "image/image-post"
 COLOUR_CHOICES = ["job", "scene", "reference"]
 SHADING_CHOICES = ["job", "off"]
 RELIGHT_CHOICES = ["job", "off"]
+MODEL_CHOICES = ["homography", "affine"]
+LIGHT_CHOICES = ["relight", "cylinder", "off"]
 
 
 def _stages():
@@ -182,6 +184,93 @@ def _body(job, box, coords, key):
     return coords[key]
 
 
+_NUMBER = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
+
+
+def _numbers(text):
+    return [float(v) for v in _NUMBER.findall(text or "")]
+
+
+def _points(text, name):
+    """"x,y x,y ..." (any separators: spaces, commas, semicolons, new lines) -> [(x, y), ...]"""
+    v = _numbers(text)
+    if len(v) % 2:
+        raise ValueError(f"{name}: {len(v)} numbers, expected x,y pairs")
+    return list(zip(v[0::2], v[1::2]))
+
+
+def _quad(text):
+    """4 numbers: a box x0,y0,x1,y1 around the product; 8: TL TR BR BL corners. -> 4 corners or None"""
+    v = _numbers(text)
+    if not v:
+        return None
+    if len(v) == 4:
+        x0, y0, x1, y1 = v
+        return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    if len(v) == 8:
+        return list(zip(v[0::2], v[1::2]))
+    raise ValueError(f"quad: {len(v)} numbers; give a box x0,y0,x1,y1 or 4 corners x,y (TL TR BR BL)")
+
+
+_PAIR = re.compile(r"([-+]?[\d.]+)\s*,\s*([-+]?[\d.]+)\s*=\s*([-+]?[\d.]+)\s*,\s*([-+]?[\d.]+)")
+
+
+def _pairs(text):
+    """"rx,ry=sx,sy" entries (reference px = rough scene px) -> [((rx, ry), (sx, sy)), ...]"""
+    text = text or ""
+    rest = _PAIR.sub(" ", text)
+    if re.search(r"[\d=]", rest):
+        raise ValueError(f"pairs: can't read {rest.strip()!r}: give rx,ry=sx,sy entries")
+    return [((float(a), float(b)), (float(c), float(d))) for a, b, c, d in _PAIR.findall(text)]
+
+
+def _occluders(text):
+    """One per line (or separated by ";"): "left: x,y x,y ..." (right, above, below: the side the occluder occupies)
+    or "polygon: x,y ..."."""
+    out = []
+    for line in re.split(r"[\n;]", text or ""):
+        if not line.strip():
+            continue
+        side, colon, pts = line.partition(":")
+        side = side.strip().lower()
+        if not colon or side not in ("left", "right", "above", "below", "polygon"):
+            raise ValueError(f"occluders: {line.strip()!r}: start with left:, right:, above:, below: or polygon:")
+        out.append((side, _points(pts, f"occluder {side}")))
+    return out
+
+
+def _outline(text):
+    """4 numbers: a box in reference px; 6 or more: a polygon. -> box tuple, polygon list or None (traced)"""
+    v = _numbers(text)
+    if not v:
+        return None
+    if len(v) == 4:
+        return tuple(v)
+    return _points(text, "outline")
+
+
+def _product_mask(mask, hw):
+    """A scene-sized MASK (SAM, the mask editor) -> bool mask, or None for LoadImage's 64x64 placeholder or an empty
+    mask."""
+    if mask is None:
+        return None, None
+    m = mask.detach().to("cpu", torch.float32)
+    if m.dim() == 4 and m.shape[1] == 1:
+        m = m[:, 0]
+    if m.dim() == 3:
+        if m.shape[0] != 1:
+            raise ValueError(f"product_mask: a batch of {m.shape[0]} masks; pick the one product to draft")
+        m = m[0]
+    if tuple(m.shape) == (64, 64) and tuple(hw) != (64, 64) and not bool((m > 0.5).any()):
+        return None, None
+    if tuple(m.shape) != tuple(hw):
+        raise ValueError(f"product_mask is {m.shape[1]}x{m.shape[0]}: expected the scene's size ({hw[1]}x{hw[0]})")
+    b = m.numpy() > 0.5
+    if not b.any():
+        return None, "product_mask is empty: ignored"
+    return b, None
+
+
 def _box_masks(job, box, hw, product_mask, old_silhouette, occluder_mask):
     a_new = _mask(product_mask, box, hw, "product_mask")
     old = _mask(old_silhouette, box, hw, "old_silhouette") > 0.5
@@ -190,6 +279,84 @@ def _box_masks(job, box, hw, product_mask, old_silhouette, occluder_mask):
 
 
 # ---- nodes ----
+
+class ImagePostAutoDraft:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "scene": ("IMAGE",),
+                "reference": ("IMAGE",),
+                "quad": ("STRING", {"default": "", "tooltip": (
+                    "Where the product sits in the scene, roughly (scene px): TL TR BR BL corners of the packshot "
+                    "outline's bounding box as x,y x,y x,y x,y, or a box x0,y0,x1,y1 around it. A few px off is fine. "
+                    "Leave it empty when product_mask is connected and nothing stands in front of the product, or give 4 "
+                    "landmark pairs instead.")}),
+                "model": (MODEL_CHOICES, {"default": "homography", "tooltip": (
+                    "homography: perspective. affine: no perspective (a small or flat-on product).")}),
+                "light": (LIGHT_CHOICES, {"default": "relight", "tooltip": (
+                    "relight: grade.relight on (cast shadows, falloff, glows). cylinder: the shading template for "
+                    "cans and bottles instead (measure the highlight and add spec / shadow). off: neither.")}),
+                "suggest": ("BOOLEAN", {"default": False, "tooltip": (
+                    "Also add packshot corners that match the scene well as landmarks.")}),
+                "filename_prefix": ("STRING", {"default": "image-post/draft", "tooltip": (
+                    "The draft job.json is saved here inside ComfyUI's output folder, numbered like Save Image's files.")}),
+            },
+            "optional": {
+                "product_mask": ("MASK", {"tooltip": (
+                    "The generated product's mask, scene-sized (SAM 3, the mask editor): the outline is fitted to its "
+                    "contour instead of to image edges. Without a quad the fit starts from the mask itself (its box, hull "
+                    "corners and main axis): give the quad as well when something stands in front of the product.")}),
+                "reference_mask": ("MASK", {"tooltip": "The reference Load Image's MASK: a transparent packshot's outline is its alpha"}),
+                "pairs": ("STRING", {"default": "", "multiline": True, "tooltip": (
+                    "Rough landmark pairs, reference px = scene px: rx,ry=sx,sy, one per line. Each is refined by colour "
+                    "correlation and kept only when trusted.")}),
+                "occluders": ("STRING", {"default": "", "multiline": True, "tooltip": (
+                    "Objects in front of the product, one per line, snapped to their own edge: left: x,y x,y ... "
+                    "(the occluder occupies that side: left, right, above, below) or polygon: x,y x,y ...")}),
+                "outline": ("STRING", {"default": "", "tooltip": (
+                    "The product on the packshot (reference px): a box x0,y0,x1,y1 or a polygon x,y x,y ... Empty: traced "
+                    "from a packshot on a plain background (or its alpha). Give it when the packshot shows more than "
+                    "the product.")}),
+                "mask_skip": ("STRING", {"default": "", "tooltip": (
+                    "A polygon in reference px whose outline isn't fitted to product_mask (where the mask runs on "
+                    "into a part the job keeps, such as a cap).")}),
+            },
+        }
+
+    RETURN_TYPES = (JOB, "STRING", "IMAGE", "STRING")
+    RETURN_NAMES = ("job", "job_json", "draft_points", "report")
+    FUNCTION = "draft"
+    OUTPUT_NODE = True
+    CATEGORY = CATEGORY
+    DESCRIPTION = (
+        "A first job from rough input, in place of Load Job (run.py draft): traces the packshot's outline, refines "
+        "landmark pairs, proposes edge lines from the outline's straight sides where the generated edge agrees, "
+        "snaps the old silhouette and the occluders to edges, and sets the work box, colour and relight. With "
+        "product_mask (SAM 3) the outline is fitted to the mask. On a clean scene the draft is close to final; on a "
+        "cluttered shelf it is a scaffold to finish by hand. job_json and the saved file are the job to edit and "
+        "load into Load Job; draft_points shows each landmark pair (packshot under the fit | scene)."
+    )
+
+    def draft(self, scene, reference, quad, model, light, suggest, filename_prefix, product_mask=None,
+              reference_mask=None, pairs="", occluders="", outline="", mask_skip=""):
+        su8 = _u8(scene, "scene")
+        ru8, ra = _reference({}, reference, reference_mask)
+        mask, note = _product_mask(product_mask, su8.shape[:2])
+        job, text, sheet = _stages().draft(su8, ru8, ra, quad=_quad(quad), pairs=_pairs(pairs),
+                                           occluders=_occluders(occluders), mask=mask,
+                                           mask_skip=_points(mask_skip, "mask_skip") or None, model=model,
+                                           outline=_outline(outline), cylinder=light == "cylinder",
+                                           relight=light == "relight", suggest=suggest)
+        if note:
+            text = f"note       {note}\n{text}"
+        job_text = json.dumps(job, indent=2)
+        path, name, sub = _output_file(filename_prefix, "json")
+        with open(path, "w") as f:
+            f.write(job_text + "\n")
+        return {"ui": {"text": [text], "files": [{"filename": name, "subfolder": sub, "type": "output"}]},
+                "result": (job, job_text, _pil_out(sheet) if sheet else _placeholder(), text)}
+
 
 class ImagePostLoadJob:
     @classmethod
@@ -572,6 +739,7 @@ class ImagePostSavePSD:
 
 NODE_CLASS_MAPPINGS = {
     "ImagePostLoadJob": ImagePostLoadJob,
+    "ImagePostAutoDraft": ImagePostAutoDraft,
     "ImagePostJobMasks": ImagePostJobMasks,
     "ImagePostFitWarp": ImagePostFitWarp,
     "ImagePostWarpReference": ImagePostWarpReference,
@@ -585,6 +753,7 @@ NODE_CLASS_MAPPINGS = {
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ImagePostLoadJob": "Image Post: Load Job",
+    "ImagePostAutoDraft": "Image Post: Auto Draft",
     "ImagePostJobMasks": "Image Post: Job Masks",
     "ImagePostFitWarp": "Image Post: Fit Warp",
     "ImagePostWarpReference": "Image Post: Warp Reference",

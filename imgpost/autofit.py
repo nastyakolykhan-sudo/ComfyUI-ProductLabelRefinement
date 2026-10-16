@@ -579,8 +579,12 @@ def fit_to_mask(mask, poly_ref, H0, model="homography", step=3.0, skip=None, ite
             src, dst = D[use][keep], tree.data[idx[keep]]
             if kind == "similarity":
                 Hn = _similarity(apply_H(H, src), dst) @ H
+            elif kind == "affine":
+                # a correction on top of the current fit: an affine refitted from scratch dropped a quad's
+                # perspective (42 px at a tall box's corner) and the sides it then missed were dropped as leaks
+                Hn = fit_points(apply_H(H, src), dst, model="affine") @ H
             else:
-                Hn = fit_points(src, dst, model="affine" if kind == "affine" else "homography")
+                Hn = fit_points(src, dst, model="homography")
             moved = float(np.max(np.linalg.norm(apply_H(Hn, D) - apply_H(H, D), axis=1)))
             H = Hn / Hn[2, 2]
             if moved < 0.05:

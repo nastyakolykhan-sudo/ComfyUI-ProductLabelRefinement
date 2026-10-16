@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Build the template workflow in both formats from one definition and the nodes' own INPUT_TYPES/RETURN_TYPES.
+"""Build the template workflows in both formats from one definition and the nodes' own INPUT_TYPES/RETURN_TYPES.
 
   python -I tools/build_workflows.py [--job examples/demo/job.json]
 
 Writes workflows/image-post.api.json (what tools/comfy_run.py submits) and workflows/image-post.json (what the
-ComfyUI editor loads), with the job embedded in Load Job, then converts the UI file back the way the frontend
-does (links by slot, widgets by position) and checks it gives the API file again. Re-run it after changing a
+ComfyUI editor loads), with the job embedded in Load Job; and workflows/image-post-draft.{api.json,json}, the same
+graph started by Auto Draft from the demo's rough input instead. Each UI file is converted back the way the frontend
+does (links by slot, widgets by position) and checked to give its API file again. Re-run it after changing a
 node's inputs or outputs. Needs a Python with torch (the pack imports it), like tools/offline_run.py.
 """
 import argparse
@@ -68,7 +69,28 @@ def definition(job_text):
     }
 
 
-SIZE = {"LoadImage": (400, 360), "SaveImage": (400, 330), "ImagePostLoadJob": (420, 560),
+# the demo's rough input, as a person would give it: the card's corners read a few px off, the mug traced roughly,
+# two landmark pairs clicked near the header band's corners
+DRAFT_INPUT = {
+    "quad": "375,168 610,189 613,563 367,580",
+    "pairs": "40,230=373,276\n560,230=609,288",
+    "occluders": "polygon: 593,428 593,662 650,666 705,662 705,428 650,424",
+}
+
+
+def definition_draft():
+    """The template with Auto Draft (node 3) in place of Load Job, and its review sheet saved."""
+    nodes = definition("")
+    nodes[3] = ("ImagePostAutoDraft", "Auto Draft", {
+        "scene": L(1, 0), "reference": L(2, 0), "quad": DRAFT_INPUT["quad"], "model": "homography", "light": "relight",
+        "suggest": False, "filename_prefix": "image-post/draft", "reference_mask": L(2, 1), "pairs": DRAFT_INPUT["pairs"],
+        "occluders": DRAFT_INPUT["occluders"], "outline": "", "mask_skip": ""}, (0, 780))
+    nodes[21] = ("SaveImage", "Save QA draft_points", {"images": L(3, 2), "filename_prefix": "image-post/qa/draft_points"},
+                 (0, 1440))
+    return nodes
+
+
+SIZE = {"LoadImage": (400, 360), "SaveImage": (400, 330), "ImagePostLoadJob": (420, 560), "ImagePostAutoDraft": (420, 620),
         "ImagePostQASheet": (420, 520), "ImagePostFitWarp": (380, 140), "ImagePostSavePSD": (420, 300)}
 
 
@@ -103,15 +125,18 @@ def node_spec(classes, ct):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--job", default=str(PACK / "examples" / "demo" / "job.json"))
-    ap.add_argument("--name", default="image-post")
     a = ap.parse_args()
     job_text = Path(a.job).expanduser().read_text()
     json.loads(job_text)
     classes = load_pack()
-    nodes_def = definition(job_text)
+    build("image-post", definition(job_text), classes)
+    build("image-post-draft", definition_draft(), classes)
+
+
+def build(wf_name, nodes_def, classes):
     api = {str(k): {"inputs": inp, "class_type": ct, "_meta": {"title": title}}
            for k, (ct, title, inp, _) in nodes_def.items()}
-    (PACK / "workflows" / f"{a.name}.api.json").write_text(json.dumps(api, indent=2) + "\n")
+    (PACK / "workflows" / f"{wf_name}.api.json").write_text(json.dumps(api, indent=2) + "\n")
 
     order, seen = [], set()
 
@@ -155,11 +180,11 @@ def main():
             nodes[nid]["inputs"][slot]["link"] = lid
             out = nodes[src]["outputs"][idx]
             out["links"] = (out["links"] or []) + [lid]
-    ui = {"id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"imagepost/{a.name}")), "revision": 0,
+    ui = {"id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"imagepost/{wf_name}")), "revision": 0,
           "last_node_id": max(int(n) for n in api), "last_link_id": len(links),
           "nodes": [nodes[n] for n in sorted(nodes, key=int)], "links": links, "groups": [], "config": {},
           "extra": {"ds": {"scale": 0.55, "offset": [40, 40]}}, "version": 0.4}
-    (PACK / "workflows" / f"{a.name}.json").write_text(json.dumps(ui, indent=1) + "\n")
+    (PACK / "workflows" / f"{wf_name}.json").write_text(json.dumps(ui, indent=1) + "\n")
 
     # round trip: UI -> API the way the frontend does it (links by slot, widgets by position)
     lk = {l[0]: l for l in links}
@@ -177,7 +202,7 @@ def main():
             sys.exit(f"round trip differs at node {k}")
     if set(back) != set(api):
         sys.exit("round trip differs: node ids")
-    print(f"wrote workflows/{a.name}.api.json and workflows/{a.name}.json: {len(api)} nodes, {len(links)} links; "
+    print(f"wrote workflows/{wf_name}.api.json and workflows/{wf_name}.json: {len(api)} nodes, {len(links)} links; "
           "UI converts back to the API file exactly")
 
 
