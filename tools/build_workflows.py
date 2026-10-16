@@ -3,8 +3,8 @@
 
   python -I tools/build_workflows.py [--job examples/demo/job.json]
 
-Writes workflows/image-post.api.json (what tools/comfy_run.py submits) and workflows/image-post.json (what the
-ComfyUI editor loads), with the job embedded in Load Job; and workflows/image-post-draft.{api.json,json}, the same
+Writes workflows/product-label-refinement.api.json (what tools/comfy_run.py submits) and workflows/product-label-refinement.json (what the
+ComfyUI editor loads), with the job embedded in Load Job; and workflows/product-label-refinement-draft.{api.json,json}, the same
 graph started by Auto Draft from the demo's rough input instead. Each UI file is converted back the way the frontend
 does (links by slot, widgets by position) and checked to give its API file again. Re-run it after changing a
 node's inputs or outputs. Needs a Python with torch (the pack imports it), like tools/offline_run.py.
@@ -27,7 +27,7 @@ def L(nid, i):
 
 def definition(job_text):
     """node id -> (class_type, title, inputs, UI position)"""
-    out = "image-post/imagepost_demo_scene_refined"
+    out = "product-label-refinement/imagepost_demo_scene_refined"
     return {
         1: ("LoadImage", "Scene (generated image)", {"image": "imagepost_demo_scene.png"}, (0, 0)),
         2: ("LoadImage", "Reference (real product)", {"image": "imagepost_demo_packshot.png"}, (0, 390)),
@@ -56,13 +56,13 @@ def definition(job_text):
                                               "finish_report": L(8, 1), "fill_report": L(9, 2),
                                               "old_silhouette": L(4, 0), "occluder_mask": L(4, 1), "coords": L(6, 3)}, (1760, 0)),
         12: ("SaveImage", "Save refined image", {"images": L(10, 0), "filename_prefix": out}, (1330, 760)),
-        13: ("SaveImage", "Save QA compare", {"images": L(11, 0), "filename_prefix": "image-post/qa/compare"}, (2220, 0)),
-        14: ("SaveImage", "Save QA edges", {"images": L(11, 1), "filename_prefix": "image-post/qa/edges"}, (2220, 360)),
-        15: ("SaveImage", "Save QA before_after", {"images": L(11, 2), "filename_prefix": "image-post/qa/before_after"}, (2220, 720)),
-        16: ("SaveImage", "Save QA align_overlay", {"images": L(6, 2), "filename_prefix": "image-post/qa/align_overlay"}, (470, 700)),
-        17: ("SaveImage", "Save QA grade_preview", {"images": L(7, 1), "filename_prefix": "image-post/qa/grade_preview"}, (900, 420)),
-        18: ("SaveImage", "Save QA relight_map", {"images": L(7, 3), "filename_prefix": "image-post/qa/relight_map"}, (900, 780)),
-        20: ("SaveImage", "Save QA audit", {"images": L(11, 4), "filename_prefix": "image-post/qa/audit"}, (2220, 1080)),
+        13: ("SaveImage", "Save QA compare", {"images": L(11, 0), "filename_prefix": "product-label-refinement/qa/compare"}, (2220, 0)),
+        14: ("SaveImage", "Save QA edges", {"images": L(11, 1), "filename_prefix": "product-label-refinement/qa/edges"}, (2220, 360)),
+        15: ("SaveImage", "Save QA before_after", {"images": L(11, 2), "filename_prefix": "product-label-refinement/qa/before_after"}, (2220, 720)),
+        16: ("SaveImage", "Save QA align_overlay", {"images": L(6, 2), "filename_prefix": "product-label-refinement/qa/align_overlay"}, (470, 700)),
+        17: ("SaveImage", "Save QA grade_preview", {"images": L(7, 1), "filename_prefix": "product-label-refinement/qa/grade_preview"}, (900, 420)),
+        18: ("SaveImage", "Save QA relight_map", {"images": L(7, 3), "filename_prefix": "product-label-refinement/qa/relight_map"}, (900, 780)),
+        20: ("SaveImage", "Save QA audit", {"images": L(11, 4), "filename_prefix": "product-label-refinement/qa/audit"}, (2220, 1080)),
         19: ("ImagePostSavePSD", "Save PSD", {"job": L(3, 0), "scene": L(1, 0), "image": L(10, 0),
                                                            "background": L(9, 0), "fill_mask": L(9, 1), "product": L(8, 0),
                                                            "matte": L(10, 1), "filename_prefix": out}, (1760, 580)),
@@ -83,9 +83,9 @@ def definition_draft():
     nodes = definition("")
     nodes[3] = ("ImagePostAutoDraft", "Auto Draft", {
         "scene": L(1, 0), "reference": L(2, 0), "quad": DRAFT_INPUT["quad"], "model": "homography", "light": "relight",
-        "suggest": False, "filename_prefix": "image-post/draft", "reference_mask": L(2, 1), "pairs": DRAFT_INPUT["pairs"],
+        "suggest": False, "filename_prefix": "product-label-refinement/draft", "reference_mask": L(2, 1), "pairs": DRAFT_INPUT["pairs"],
         "occluders": DRAFT_INPUT["occluders"], "outline": "", "mask_skip": "", "label": "off"}, (0, 780))
-    nodes[21] = ("SaveImage", "Save QA draft_points", {"images": L(3, 2), "filename_prefix": "image-post/qa/draft_points"},
+    nodes[21] = ("SaveImage", "Save QA draft_points", {"images": L(3, 2), "filename_prefix": "product-label-refinement/qa/draft_points"},
                  (0, 1800))
     return nodes
 
@@ -129,8 +129,8 @@ def main():
     job_text = Path(a.job).expanduser().read_text()
     json.loads(job_text)
     classes = load_pack()
-    build("image-post", definition(job_text), classes)
-    build("image-post-draft", definition_draft(), classes)
+    build("product-label-refinement", definition(job_text), classes)
+    build("product-label-refinement-draft", definition_draft(), classes)
 
 
 def build(wf_name, nodes_def, classes):

@@ -1,8 +1,8 @@
-"""Image Post nodes: deterministic product compositing (the image-post engine) as ComfyUI nodes.
+"""Product Label Refinement nodes: deterministic product compositing (the product-label-refinement engine) as ComfyUI nodes.
 
 Data conventions
 - `scene` is the full generated frame. The job's roi is the work box; nothing outside it changes.
-- Every other IMAGE and MASK passed between Image Post nodes covers the work box only. Mask inputs also take
+- Every other IMAGE and MASK passed between Product Label Refinement nodes covers the work box only. Mask inputs also take
   a scene-sized mask (mask editor, segmentation) and crop it to the work box.
 - Product layers (warped, graded, product) are sRGB like any IMAGE but keep highlight headroom above 1.0,
   which Match Finish rolls off. Don't clamp them in between.
@@ -20,7 +20,7 @@ JOB = "IMAGEPOST_JOB"
 HOMOGRAPHY = "IMAGEPOST_HOMOGRAPHY"
 COORDS = "IMAGEPOST_COORDS"   # reference coordinates of every work-box pixel, float64 (grade.shading reads them)
 INK = "IMAGEPOST_INK"         # the grade's white field and ink colour, for the job's matte 'ink' (None otherwise)
-CATEGORY = "image/image-post"
+CATEGORY = "image/product-label-refinement"
 
 COLOUR_CHOICES = ["job", "scene", "reference"]
 SHADING_CHOICES = ["job", "off"]
@@ -42,7 +42,7 @@ def _frame(image, name):
     if image.dim() != 4:
         raise ValueError(f"{name}: expected an IMAGE [B, H, W, C], got shape {tuple(image.shape)}")
     if image.shape[0] != 1:
-        raise ValueError(f"{name}: Image Post works on one image per job, got a batch of {image.shape[0]}")
+        raise ValueError(f"{name}: Product Label Refinement works on one image per job, got a batch of {image.shape[0]}")
     a = image[0].detach().to("cpu", torch.float32).numpy()
     return np.repeat(a, 3, 2) if a.shape[2] == 1 else a[..., :3]
 
@@ -73,7 +73,7 @@ def _mask(mask, box, scene_hw, name):
         m = m[:, 0]
     if m.dim() == 3:
         if m.shape[0] != 1:
-            raise ValueError(f"{name}: Image Post works on one mask per job, got a batch of {m.shape[0]}")
+            raise ValueError(f"{name}: Product Label Refinement works on one mask per job, got a batch of {m.shape[0]}")
         m = m[0]
     if m.dim() != 2:
         raise ValueError(f"{name}: expected a MASK [B, H, W], got shape {tuple(mask.shape)}")
@@ -114,7 +114,7 @@ def _output_file(prefix, ext):
     import folder_paths   # ComfyUI's module (tools/offline_run.py provides a stand-in)
     root = os.path.abspath(folder_paths.get_output_directory())
     sub, _, stem = prefix.strip().replace("\\", "/").rpartition("/")
-    stem = stem or "image-post"
+    stem = stem or "product-label-refinement"
     folder = os.path.abspath(os.path.join(root, sub))
     if os.path.commonpath([root, folder]) != root:
         raise ValueError(f"filename_prefix {prefix!r} points outside ComfyUI's output folder")
@@ -301,7 +301,7 @@ class ImagePostAutoDraft:
                     "cans and bottles instead (measure the highlight and add spec / shadow). off: neither.")}),
                 "suggest": ("BOOLEAN", {"default": False, "tooltip": (
                     "Also add packshot corners that match the scene well as landmarks.")}),
-                "filename_prefix": ("STRING", {"default": "image-post/draft", "tooltip": (
+                "filename_prefix": ("STRING", {"default": "product-label-refinement/draft", "tooltip": (
                     "The draft job.json is saved here inside ComfyUI's output folder, numbered like Save Image's files.")}),
             },
             "optional": {
@@ -376,7 +376,7 @@ class ImagePostLoadJob:
         return {
             "required": {
                 "job_json": ("STRING", {"default": "", "multiline": True,
-                                        "tooltip": "job.json text in the image-post skill's format. Ignored when job_path is set."}),
+                                        "tooltip": "job.json text in the product-label-refinement skill's format. Ignored when job_path is set."}),
                 "job_path": ("STRING", {"default": "",
                                         "tooltip": "Path to a job.json on the machine running ComfyUI. Overrides job_json."}),
             },
@@ -387,7 +387,7 @@ class ImagePostLoadJob:
     FUNCTION = "load"
     CATEGORY = CATEGORY
     DESCRIPTION = (
-        "Loads an image-post job (all measurements: work box, landmarks, edge lines, outlines, occluders, "
+        "Loads an product-label-refinement job (all measurements: work box, landmarks, edge lines, outlines, occluders, "
         "grade/finish/fill settings). The job's scene, reference and output paths are not read: images come "
         "from Load Image nodes and the result goes to a Save Image node."
     )
@@ -720,7 +720,7 @@ class ImagePostSavePSD:
         return {"required": {
             "job": (JOB,), "scene": ("IMAGE",), "image": ("IMAGE",), "background": ("IMAGE",), "fill_mask": ("MASK",),
             "product": ("IMAGE",), "matte": ("MASK",),
-            "filename_prefix": ("STRING", {"default": "image-post/refined", "tooltip": (
+            "filename_prefix": ("STRING", {"default": "product-label-refinement/refined", "tooltip": (
                 "Folder and name inside ComfyUI's output folder; files are numbered like Save Image's.")}),
         }}
 
@@ -764,15 +764,15 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "ImagePostLoadJob": "Image Post: Load Job",
-    "ImagePostAutoDraft": "Image Post: Auto Draft",
-    "ImagePostJobMasks": "Image Post: Job Masks",
-    "ImagePostFitWarp": "Image Post: Fit Warp",
-    "ImagePostWarpReference": "Image Post: Warp Reference",
-    "ImagePostGradeToScene": "Image Post: Grade To Scene",
-    "ImagePostMatchFinish": "Image Post: Match Finish",
-    "ImagePostFillLeftovers": "Image Post: Fill Leftovers",
-    "ImagePostCompositeBehind": "Image Post: Composite Behind",
-    "ImagePostQASheet": "Image Post: QA Sheet",
-    "ImagePostSavePSD": "Image Post: Save PSD",
+    "ImagePostLoadJob": "Product Label: Load Job",
+    "ImagePostAutoDraft": "Product Label: Auto Draft",
+    "ImagePostJobMasks": "Product Label: Job Masks",
+    "ImagePostFitWarp": "Product Label: Fit Warp",
+    "ImagePostWarpReference": "Product Label: Warp Reference",
+    "ImagePostGradeToScene": "Product Label: Grade To Scene",
+    "ImagePostMatchFinish": "Product Label: Match Finish",
+    "ImagePostFillLeftovers": "Product Label: Fill Leftovers",
+    "ImagePostCompositeBehind": "Product Label: Composite Behind",
+    "ImagePostQASheet": "Product Label: QA Sheet",
+    "ImagePostSavePSD": "Product Label: Save PSD",
 }

@@ -31,7 +31,7 @@
       "model": "homography",
       "light": "relight",
       "suggest": false,
-      "filename_prefix": "image-post/draft",
+      "filename_prefix": "product-label-refinement/draft",
       "reference_mask": [
         "2",
         1
@@ -328,7 +328,7 @@
         "10",
         0
       ],
-      "filename_prefix": "image-post/imagepost_demo_scene_refined"
+      "filename_prefix": "product-label-refinement/imagepost_demo_scene_refined"
     },
     "class_type": "SaveImage",
     "_meta": {
@@ -341,7 +341,7 @@
         "11",
         0
       ],
-      "filename_prefix": "image-post/qa/compare"
+      "filename_prefix": "product-label-refinement/qa/compare"
     },
     "class_type": "SaveImage",
     "_meta": {
@@ -354,7 +354,7 @@
         "11",
         1
       ],
-      "filename_prefix": "image-post/qa/edges"
+      "filename_prefix": "product-label-refinement/qa/edges"
     },
     "class_type": "SaveImage",
     "_meta": {
@@ -367,7 +367,7 @@
         "11",
         2
       ],
-      "filename_prefix": "image-post/qa/before_after"
+      "filename_prefix": "product-label-refinement/qa/before_after"
     },
     "class_type": "SaveImage",
     "_meta": {
@@ -380,7 +380,7 @@
         "6",
         2
       ],
-      "filename_prefix": "image-post/qa/align_overlay"
+      "filename_prefix": "product-label-refinement/qa/align_overlay"
     },
     "class_type": "SaveImage",
     "_meta": {
@@ -393,7 +393,7 @@
         "7",
         1
       ],
-      "filename_prefix": "image-post/qa/grade_preview"
+      "filename_prefix": "product-label-refinement/qa/grade_preview"
     },
     "class_type": "SaveImage",
     "_meta": {
@@ -406,7 +406,7 @@
         "7",
         3
       ],
-      "filename_prefix": "image-post/qa/relight_map"
+      "filename_prefix": "product-label-refinement/qa/relight_map"
     },
     "class_type": "SaveImage",
     "_meta": {
@@ -419,7 +419,7 @@
         "11",
         4
       ],
-      "filename_prefix": "image-post/qa/audit"
+      "filename_prefix": "product-label-refinement/qa/audit"
     },
     "class_type": "SaveImage",
     "_meta": {
@@ -456,7 +456,7 @@
         "10",
         1
       ],
-      "filename_prefix": "image-post/imagepost_demo_scene_refined"
+      "filename_prefix": "product-label-refinement/imagepost_demo_scene_refined"
     },
     "class_type": "ImagePostSavePSD",
     "_meta": {
@@ -469,7 +469,7 @@
         "3",
         2
       ],
-      "filename_prefix": "image-post/qa/draft_points"
+      "filename_prefix": "product-label-refinement/qa/draft_points"
     },
     "class_type": "SaveImage",
     "_meta": {

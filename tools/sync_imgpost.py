@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep the vendored imgpost/ pinned to the image-post skill.
+"""Keep the vendored imgpost/ pinned to the product-label-refinement skill.
 
   python3 -P tools/sync_imgpost.py                 # check (default); exit 1 when anything moved
   python3 -P tools/sync_imgpost.py --update        # copy the skill's imgpost/ here and re-pin it

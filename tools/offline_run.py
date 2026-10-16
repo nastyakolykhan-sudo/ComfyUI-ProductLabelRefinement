@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Execute an Image Post workflow (API format) in-process, without a ComfyUI server. For tests and regression.
+"""Execute an Product Label Refinement workflow (API format) in-process, without a ComfyUI server. For tests and regression.
 
-  python -I tools/offline_run.py --workflow workflows/image-post.api.json \\
+  python -I tools/offline_run.py --workflow workflows/product-label-refinement.api.json \\
       --scene path/to/scene.png --reference path/to/packshot.png \\
       [--job JOB.json] [--set NODE.INPUT=VALUE] [--mask MASK.png] [--stage align|grade|all] [--psd] --out ./ip-offline
 

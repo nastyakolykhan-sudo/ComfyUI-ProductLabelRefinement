@@ -1,6 +1,6 @@
 """run.py's cmd_draft and cmd_run, split at the node boundaries.
 
-Each function is a line-for-line port of one section of the image-post skill's scripts/run.py (same names,
+Each function is a line-for-line port of one section of the product-label-refinement skill's scripts/run.py (same names,
 same order, same defaults) and works on the work box (roi) in float64, exactly like run.py. Keep it that way:
 when run.py changes, port the diff here. `tools/sync_imgpost.py --check` says when run.py or imgpost/ moved on.
 draft() is cmd_draft without its files: the draft itself lives in imgpost/draft.py, which both call.

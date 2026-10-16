@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Submit an Image Post workflow (API format) to a ComfyUI server and download what it produced.
+"""Submit an Product Label Refinement workflow (API format) to a ComfyUI server and download what it produced.
 
   python3 -P tools/comfy_run.py --server http://127.0.0.1:8188 \\
-      --workflow workflows/image-post.api.json \\
+      --workflow workflows/product-label-refinement.api.json \\
       --scene path/to/scene.png --reference path/to/packshot.png \\
       [--job path/to/job.json] [--stage align|grade|all] [--psd] --out ./ip-run
-  python3 -P tools/comfy_run.py --workflow workflows/image-post-draft.api.json --scene ... --reference ... \\
+  python3 -P tools/comfy_run.py --workflow workflows/product-label-refinement-draft.api.json --scene ... --reference ... \\
       --set "ImagePostAutoDraft.quad=X,Y X,Y X,Y X,Y" [--mask product_mask.png] --out ./ip-draft
 
---scene / --reference upload the files (POST /upload/image, into input/image-post/) and point the Load Image
+--scene / --reference upload the files (POST /upload/image, into input/product-label-refinement/) and point the Load Image
 nodes that feed Warp Reference at them; --image NODE_ID=PATH does the same for any Load Image node.
 --job replaces the job text in every Load Job node. --set NODE.INPUT=VALUE sets a widget value on a node, NODE being
 its id or its class_type (every node of that class): the Auto Draft node's quad, pairs, occluders, outline.
@@ -90,7 +90,7 @@ def set_job(wf, job_path):
             node["inputs"]["job_json"], node["inputs"]["job_path"] = text, ""
             n += 1
     if not n:
-        sys.exit("--job: the workflow has no Image Post Load Job node")
+        sys.exit("--job: the workflow has no Product Label Refinement Load Job node")
 
 
 def set_inputs(wf, specs):
@@ -147,7 +147,7 @@ def keep_psd(wf, keep):
 
 
 def prune(wf, stage):
-    """Keep only nodes whose Image Post ancestors all belong to the stage (run.py --stage)."""
+    """Keep only nodes whose Product Label Refinement ancestors all belong to the stage (run.py --stage)."""
     if stage == "all":
         return wf
     allowed, memo = STAGE_NODES[stage], {}
@@ -182,7 +182,7 @@ class Server:
         data = None if payload is None else json.dumps(payload).encode()
         return json.loads(self.request(path, data, "application/json" if data else None))
 
-    def upload(self, path, subfolder="image-post"):
+    def upload(self, path, subfolder="product-label-refinement"):
         boundary = uuid.uuid4().hex
         ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         parts = []

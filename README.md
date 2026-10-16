@@ -1,4 +1,4 @@
-# ComfyUI-ImagePost
+# ComfyUI-ProductLabelRefinement
 
 Fix a hallucinated product in an AI-generated still by compositing the real product from its packshot, inside ComfyUI. The nodes warp the packshot onto the generated product's perspective and carry over the scene's light and colour. That includes cast shadows, falloff, gloss and haze, and the round light on cans and bottles. They match the frame's softness and grain, put the product behind whatever stands in front of it, and fill in the background where the generated product was bigger. Every run ends with QA sheets, a report, and a layered PSD if you want to finish by hand.
 
@@ -6,28 +6,30 @@ It is deterministic compositing with no models. Every measurement lives in a job
 
 A job doesn't have to be measured by hand first. **Auto Draft** makes one inside ComfyUI from rough input: the scene, the packshot, where the product roughly sits (four corners or a box), and optionally a product mask from SAM 3. On a clean scene the draft is close to final; on a cluttered shelf it is a scaffold to finish by hand. [Starting from rough input](#starting-from-rough-input-auto-draft) has the scores.
 
+**Renamed from ComfyUI-ImagePost (2026-10-16).** The pack now matches the product-label-refinement skill it ports. GitHub redirects the old URL, so existing clones keep pulling. The node IDs (`ImagePostLoadJob`, `ImagePostAutoDraft`, ...) are unchanged, so saved workflows still load; only the display names ("Product Label: ..."), the menu category, the template file names and the default output folder (`output/product-label-refinement/`) changed. To rename an existing clone's remote: `git remote set-url origin https://github.com/nastyakolykhan-sudo/ComfyUI-ProductLabelRefinement`.
+
 ## Install
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/nastyakolykhan-sudo/ComfyUI-ImagePost
+git clone https://github.com/nastyakolykhan-sudo/ComfyUI-ProductLabelRefinement
 ```
 
-It needs no extra dependencies: numpy, scipy and Pillow (10.1 or later) ship with ComfyUI. Restart ComfyUI. The nodes are under **image › image-post**.
+It needs no extra dependencies: numpy, scipy and Pillow (10.1 or later) ship with ComfyUI. Restart ComfyUI. The nodes are under **image › product-label-refinement**.
 
 ## Try the demo
 
 1. Copy `examples/demo/imagepost_demo_scene.png` and `examples/demo/imagepost_demo_packshot.png` into `ComfyUI/input/`.
-2. Load `workflows/image-post.json` and queue it.
-3. The refined image lands in `output/image-post/`, the QA sheets in `output/image-post/qa/`, and the layered PSD next to the image.
+2. Load `workflows/product-label-refinement.json` and queue it.
+3. The refined image lands in `output/product-label-refinement/`, the QA sheets in `output/product-label-refinement/qa/`, and the layered PSD next to the image.
 
-To start from rough input instead, load `workflows/image-post-draft.json`: Auto Draft takes the place of Load Job, with the card's corners read a few px off, the mug traced roughly and two landmarks clicked near the header band. It also appears in ComfyUI's template browser, under ComfyUI-ImagePost. The draft job it made is saved as `output/image-post/draft_00001_.json`.
+To start from rough input instead, load `workflows/product-label-refinement-draft.json`: Auto Draft takes the place of Load Job, with the card's corners read a few px off, the mug traced roughly and two landmarks clicked near the header band. It also appears in ComfyUI's template browser, under ComfyUI-ProductLabelRefinement. The draft job it made is saved as `output/product-label-refinement/draft_00001_.json`.
 
 The demo is a made-up product card. In the "generated" scene its text is garbled ("PRDOUCT", "sapmle lable"), its emblem and grid are wrong, its corners are square and its top is too tall. A mug stands in front of its lower right corner and casts a shadow across it. The packshot is the clean card. `tools/make_demo.py` draws all three files from code, so they show no real product or brand. `examples/demo/job.json` is the worked example of a job.
 
 ## Nodes
 
-There is one node per step. The math is the image-post engine's (`imgpost/`, see [Maintaining](#maintaining)), split at the node boundaries in `stages.py`.
+There is one node per step. The math is the product-label-refinement engine's (`imgpost/`, see [Maintaining](#maintaining)), split at the node boundaries in `stages.py`.
 
 | Node | Inputs | Outputs | Step |
 |---|---|---|---|
@@ -149,7 +151,7 @@ What it shows:
 
 ## Conventions
 
-- **Work box.** `scene` is the whole generated frame, and the job's `roi` is the work box. Every other IMAGE or MASK passed between Image Post nodes covers only the work box. Composite Behind pastes it back, and every pixel outside the box passes through untouched.
+- **Work box.** `scene` is the whole generated frame, and the job's `roi` is the work box. Every other IMAGE or MASK passed between Product Label Refinement nodes covers only the work box. Composite Behind pastes it back, and every pixel outside the box passes through untouched.
 - **Masks.** Mask inputs also accept a scene-sized mask, which they crop to the work box, so a mask from the mask editor or another node can stand in. `old_silhouette` is thresholded at 0.5. `occluder_mask` is 1 where something is in front of the product.
 - **Product layers.** `warped`, `graded` and `product` are sRGB like any IMAGE, but values above 1.0 are kept as highlight headroom, and Match Finish rolls them off. Don't clamp them in between.
 - **One image per job.** Batches larger than 1 raise an error.
@@ -163,12 +165,12 @@ What it shows:
 
 ```bash
 python3 tools/comfy_run.py --server http://127.0.0.1:8188 \
-  --workflow workflows/image-post.api.json \
+  --workflow workflows/product-label-refinement.api.json \
   --scene examples/demo/imagepost_demo_scene.png --reference examples/demo/imagepost_demo_packshot.png \
   --job examples/demo/job.json --out ./ip-run
 ```
 
-- `--scene` and `--reference` upload to `input/image-post/` and set the Load Image nodes that feed Warp Reference. `--image NODE_ID=PATH` targets any other Load Image node.
+- `--scene` and `--reference` upload to `input/product-label-refinement/` and set the Load Image nodes that feed Warp Reference. `--image NODE_ID=PATH` targets any other Load Image node.
 - `--job` replaces the job in every Load Job node. Without it, the workflow's embedded job runs.
 - `--set NODE.INPUT=VALUE` sets a widget value on node `NODE`, given as an id or as a class name for every node of that class. With the draft workflow, that is how the rough input goes in.
 - `--mask PATH` uploads a product mask (white = product, scene-sized) and adds a Load Image (as Mask) node that feeds every Auto Draft node's `product_mask`.
@@ -182,25 +184,25 @@ A draft from rough input, run through to the refined image:
 
 ```bash
 python3 tools/comfy_run.py --server http://127.0.0.1:8188 \
-  --workflow workflows/image-post-draft.api.json --scene scene.png --reference packshot.png \
+  --workflow workflows/product-label-refinement-draft.api.json --scene scene.png --reference packshot.png \
   --set "ImagePostAutoDraft.quad=372,170 612,186 610,566 370,578" \
   --set "ImagePostAutoDraft.pairs=" --set "ImagePostAutoDraft.occluders=polygon: 593,428 593,662 705,662 705,428" \
   [--mask product_mask.png] [--stage align] --out ./ip-draft
 ```
 
-Clear the template's demo `pairs` and `occluders` (as above) unless you set your own. `--out` then also holds `ImagePostAutoDraft-3.txt` (the draft's summary and align table) and `image-post/draft_00001_.json`, the draft job to check, edit and run with `--job` through `workflows/image-post.api.json`.
+Clear the template's demo `pairs` and `occluders` (as above) unless you set your own. `--out` then also holds `ImagePostAutoDraft-3.txt` (the draft's summary and align table) and `product-label-refinement/draft_00001_.json`, the draft job to check, edit and run with `--job` through `workflows/product-label-refinement.api.json`.
 
 The same steps with curl. Upload both images:
 
 ```bash
-curl -s -F "image=@scene.png" -F "subfolder=image-post" -F "overwrite=true" http://127.0.0.1:8188/upload/image
+curl -s -F "image=@scene.png" -F "subfolder=product-label-refinement" -F "overwrite=true" http://127.0.0.1:8188/upload/image
 ```
 
-Point nodes 1 (scene) and 2 (reference) at `image-post/<name>`, then queue the prompt:
+Point nodes 1 (scene) and 2 (reference) at `product-label-refinement/<name>`, then queue the prompt:
 
 ```bash
-jq '{prompt: (.["1"].inputs.image = "image-post/scene.png" | .["2"].inputs.image = "image-post/packshot.png")}' \
-  workflows/image-post.api.json > prompt.json
+jq '{prompt: (.["1"].inputs.image = "product-label-refinement/scene.png" | .["2"].inputs.image = "product-label-refinement/packshot.png")}' \
+  workflows/product-label-refinement.api.json > prompt.json
 curl -s -H "Content-Type: application/json" -d @prompt.json http://127.0.0.1:8188/prompt
 ```
 
@@ -218,7 +220,7 @@ In `outputs`:
 Fetch each file:
 
 ```bash
-curl -s -o refined.png "http://127.0.0.1:8188/view?filename=imagepost_demo_scene_refined_00001_.png&subfolder=image-post&type=output"
+curl -s -o refined.png "http://127.0.0.1:8188/view?filename=imagepost_demo_scene_refined_00001_.png&subfolder=product-label-refinement&type=output"
 ```
 
 A failed run has `status.status_str: "error"`, with the node and `exception_message` under `status.messages`.
@@ -250,7 +252,7 @@ A failed run has `status.status_str: "error"`, with the node and `exception_mess
 - `prefilter`: `auto` for a small packshot enlarged in the frame. `matte`: `ink` for text printed on a coloured body.
 - `psd`: true to also write the layered PSD.
 
-Measure landmarks and edges by colour change, not by the strongest gradient, and accept a fit at 1.5 px or less on the visible edge lines. The image-post engine's job spec documents every field.
+Measure landmarks and edges by colour change, not by the strongest gradient, and accept a fit at 1.5 px or less on the visible edge lines. The product-label-refinement engine's job spec documents every field.
 
 ## Regression
 
@@ -296,13 +298,13 @@ From the hand job it builds the rough input a person would give:
 - with `--mask hand`, a mask of its generated outline minus its occluders, or `--mask PATH` for a real one;
 - for a label job (a cylinder hand job, or one in the generated label's shape), `label` on (`--label auto`, the default), and the quad is the generated label's 4 corners (the hand job's `qa/label_outline.json`, else its measured outline's sides extended), each `--jitter` px off.
 
-The pack runs `workflows/image-post-draft.api.json` on that input, and the engine runs `run.py draft` on the same. Their draft jobs must be identical and their images must match as above, or the check fails. Then the draft is scored against the hand job: edge, placement, pixels against the hand job's image, and both audit verdicts (the table above). It prints a `row` line for that table and writes everything to `regress.json`.
+The pack runs `workflows/product-label-refinement-draft.api.json` on that input, and the engine runs `run.py draft` on the same. Their draft jobs must be identical and their images must match as above, or the check fails. Then the draft is scored against the hand job: edge, placement, pixels against the hand job's image, and both audit verdicts (the table above). It prints a `row` line for that table and writes everything to `regress.json`.
 
 `tools/offline_run.py` runs any API workflow in-process, with no server. It uses ComfyUI's own LoadImage and SaveImage conversions and validates inputs and link types the way ComfyUI does. `regress.py` uses it, and it takes the same arguments as `comfy_run.py`.
 
 ## Maintaining
 
-`imgpost/` is a byte-identical copy of the image-post engine's library. The pack vendors it rather than importing it so the math stays identical and the pack stays self-contained on any server. `imgpost.lock.json` records the sha256 of every vendored file and of the runner version that `stages.py` ports.
+`imgpost/` is a byte-identical copy of the product-label-refinement engine's library. The pack vendors it rather than importing it so the math stays identical and the pack stays self-contained on any server. `imgpost.lock.json` records the sha256 of every vendored file and of the runner version that `stages.py` ports.
 
 ```bash
 python3 tools/sync_imgpost.py                    # check: local edits, engine changes, runner changes

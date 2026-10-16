@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression: the node pack against the image-post engine's own run.py, on the same job and images.
+"""Regression: the node pack against the product-label-refinement engine's own run.py, on the same job and images.
 
   python -I tools/regress.py                          # the demo job, pack run in-process (needs torch)
   python3 -P tools/regress.py --server http://127.0.0.1:8188 [--header "K: V"]   # pack run on a ComfyUI server
@@ -21,7 +21,7 @@ the product's outline on the packshot (--outline hand; traced: the draft traces 
 off, optionally its landmarks as rough pairs and a product mask (hand: its generated outline minus its occluders,
 what a good SAM 3 mask gives). A label job (the hand job's model is cylinder, or its shape "generated") drafts in
 Auto Draft's label mode (--label auto): the quad is then the generated label's 4 corners (the hand job's
-qa/label_outline.json, else its measured outline's sides extended), each --jitter px off. The pack runs workflows/image-post-draft.api.json on that input and the engine runs
+qa/label_outline.json, else its measured outline's sides extended), each --jitter px off. The pack runs workflows/product-label-refinement-draft.api.json on that input and the engine runs
 run.py draft on the same; their draft jobs must be identical and their images must match as above. The draft is
 then scored against the hand job (run by the engine):
   edge       how far the draft puts the product's outline from where the hand fit puts it, scene px (median, max)
@@ -132,7 +132,7 @@ def main():
     ap.add_argument("--job", help="default: this pack's examples/demo/job.json")
     ap.add_argument("--scene", help="default: the job's scene")
     ap.add_argument("--reference", help="default: the job's reference")
-    ap.add_argument("--workflow", help="default: workflows/image-post.api.json (with --draft: image-post-draft.api.json)")
+    ap.add_argument("--workflow", help="default: workflows/product-label-refinement.api.json (with --draft: product-label-refinement-draft.api.json)")
     ap.add_argument("--psd", action="store_true", help="also write and compare the layered PSDs")
     ap.add_argument("--server", help="run the pack on this ComfyUI server instead of in-process")
     ap.add_argument("--header", action="append", default=[])
@@ -156,7 +156,7 @@ def main():
                         "label's shape, else off)")
     d.add_argument("--name", help="the row's name (default: the job folder's)")
     a = ap.parse_args()
-    a.workflow = a.workflow or str(PACK / "workflows" / ("image-post-draft.api.json" if a.draft else "image-post.api.json"))
+    a.workflow = a.workflow or str(PACK / "workflows" / ("product-label-refinement-draft.api.json" if a.draft else "product-label-refinement.api.json"))
 
     job_p = Path(a.job).expanduser().resolve() if a.job else PACK / "examples" / "demo" / "job.json"
     job = json.loads(job_p.read_text())
