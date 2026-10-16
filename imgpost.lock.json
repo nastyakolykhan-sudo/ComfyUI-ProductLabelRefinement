@@ -1,5 +1,5 @@
 {
-  "skill": "~/Documents/Claude/image-post",
+  "skill": "~/Documents/Claude/product-label-refinement",
   "imgpost_version": "0.8.0",
   "synced": "2026-10-09",
   "files": {
@@ -18,5 +18,5 @@
     "raster.py": "f9dc02da8f3121a741ce1ae906e1f0cea5c65b41c1b963edf032da9742816fd4",
     "warp.py": "b7a19675703d2464867e8c6b7dbd6cb5b3cbbde062aac71403418efec9d6a45e"
   },
-  "run_py": "c93fcde6b772d1331aaf5f252b0b9dd19ddc7e2ad38105128a6c0aaf21871ed2"
+  "run_py": "6e5c29f268d0c4b129ba06bb3f56a38e753a11819cd961d49088ec9474683842"
 }

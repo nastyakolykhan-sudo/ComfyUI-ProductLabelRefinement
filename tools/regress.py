@@ -5,7 +5,7 @@
   python3 -P tools/regress.py --server http://127.0.0.1:8188 [--header "K: V"]   # pack run on a ComfyUI server
   python -I tools/regress.py --job JOB.json [--scene PATH] [--reference PATH] [--workflow WF.api.json] [--psd]
 
-Runs the engine's scripts/run.py (--skill-dir, default ~/Documents/Claude/image-post) with --job-dir and --output
+Runs the engine's scripts/run.py (--skill-dir, default ~/Documents/Claude/product-label-refinement) with --job-dir and --output
 inside --work, never at the job's own output path; or pass --skill-out to compare with an existing engine output.
 Prints the pixel differences (max, count above 0, 1 and --levels) and which report sections match; with --psd
 both sides also write the layered PSD and their psd reports are compared.
@@ -28,7 +28,7 @@ from PIL import Image
 import comfy_run as cr
 
 PACK = Path(__file__).resolve().parent.parent
-SKILL = Path("~/Documents/Claude/image-post").expanduser()
+SKILL = Path("~/Documents/Claude/product-label-refinement").expanduser()
 
 
 def resolve(p, base):
