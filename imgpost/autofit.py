@@ -1083,21 +1083,41 @@ def _dp(P, tol):
 
 
 def trace_outline(mask, step=None, tol=0.75):
-    """Outline polygon (reference px) of a star-shaped mask: boundary crossings along rows and columns, ordered by
-    angle around the centroid, simplified to within tol px."""
-    ys, xs = np.nonzero(mask)
-    step = step or max(1, int(min(np.ptp(ys), np.ptp(xs))) // 150)
-    pts = []
-    for y in range(ys.min(), ys.max() + 1, step):
-        r = np.nonzero(mask[y])[0]
-        if len(r):
-            pts += [(r[0] - 0.5, y), (r[-1] + 0.5, y)]
-    for x in range(xs.min(), xs.max() + 1, step):
-        c = np.nonzero(mask[:, x])[0]
-        if len(c):
-            pts += [(x, c[0] - 0.5), (x, c[-1] + 0.5)]
-    P = np.unique(np.round(np.array(pts, float), 2), axis=0)
-    P = P[np.argsort(np.arctan2(P[:, 1] - ys.mean(), P[:, 0] - xs.mean()))]
+    """Outline polygon (reference px) of a mask's largest region: its outer boundary walked edge by edge between
+    region and background pixels, clockwise on screen, through each edge's midpoint (halfway between the two pixel
+    centres, so a 45-degree staircase is a straight line), simplified to within tol px. Where two pixels touch only
+    at a corner the walk turns right, so they count as apart. Any shape: points ordered by angle round the centroid
+    zig-zagged across a pump head that overhangs the bottle, and the mask fit collapsed onto the zig-zag. step: unused,
+    kept for callers."""
+    lab, n = label(mask)
+    if n > 1:
+        sizes = np.bincount(lab.ravel())
+        sizes[0] = 0
+        mask = lab == sizes.argmax()
+    m = np.pad(np.asarray(mask, bool), 1)
+    W = m.shape[1] + 1                                   # pixel corners per row; corner (x, y) is pixel (y, x)'s top left
+    ii, jj = np.nonzero(m)
+    out = {}
+    # every boundary edge, with the region on its right: top (moving right), right (down), bottom (left), left (up)
+    for sel, (x0, y0), (x1, y1), d in ((~m[ii - 1, jj], (jj, ii), (jj + 1, ii), 0),
+                                       (~m[ii, jj + 1], (jj + 1, ii), (jj + 1, ii + 1), 1),
+                                       (~m[ii + 1, jj], (jj + 1, ii + 1), (jj, ii + 1), 2),
+                                       (~m[ii, jj - 1], (jj, ii + 1), (jj, ii), 3)):
+        for a, b in zip((y0[sel] * W + x0[sel]).tolist(), (y1[sel] * W + x1[sel]).tolist()):
+            out.setdefault(a, []).append((b, d))
+    k = int(np.argmin(ii * m.shape[1] + jj))             # the top row's leftmost pixel: its top edge is on the outside
+    start = int(ii[k]) * W + int(jj[k])
+    v, d, mids = start, 3, []
+    while True:
+        cand = out[v]
+        if len(cand) > 1:                                 # a corner touch: a right turn before straight on or left
+            cand.sort(key=lambda c: {1: 0, 0: 1, 3: 2}.get((c[1] - d) % 4, 3))
+        e, d = cand.pop(0)
+        mids.append(((v % W + e % W) / 2.0, (v // W + e // W) / 2.0))
+        v = e
+        if v == start:
+            break
+    P = np.array(mids, float) - 1.5                      # padded corners -> pixel-centre coordinates
     S = _dp(np.vstack([P, P[:1]]), tol)[:-1]
     return [[round(float(x), 2), round(float(y), 2)] for x, y in S]
 
