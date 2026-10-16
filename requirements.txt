@@ -2,3 +2,9 @@
 numpy
 scipy        # imgpost: homography fit, warp sampling, masks, harmonic fill
 Pillow>=10.1 # imgpost/qa.py: ImageFont.load_default(size=...)
+# The video nodes (video_nodes.py) also use these; all but matplotlib ship with ComfyUI.
+torch
+torchvision  # AllTracker (imgvideo/alltracker): ConvNeXt blocks
+einops       # AllTracker
+av           # Save Lossless (Video): QuickTime PNG / ProRes
+matplotlib   # optional: the video QA plot (skipped without it)

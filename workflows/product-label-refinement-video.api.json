@@ -1,0 +1,177 @@
+{
+  "1": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "labelvideo_demo_clip.mov"
+    },
+    "_meta": {
+      "title": "Clip (generated video)"
+    }
+  },
+  "2": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Clip frames"
+    }
+  },
+  "3": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "labelvideo_demo_mask.mov"
+    },
+    "_meta": {
+      "title": "Product mask (video, white = product)"
+    }
+  },
+  "4": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Mask frames"
+    }
+  },
+  "5": {
+    "class_type": "ImageToMask",
+    "inputs": {
+      "image": [
+        "4",
+        0
+      ],
+      "channel": "red"
+    },
+    "_meta": {
+      "title": "Mask"
+    }
+  },
+  "6": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "labelvideo_demo_keyframe.png"
+    },
+    "_meta": {
+      "title": "Corrected keyframe"
+    }
+  },
+  "7": {
+    "class_type": "ProductLabelVideoRefine",
+    "inputs": {
+      "frames": [
+        "2",
+        0
+      ],
+      "mask": [
+        "5",
+        0
+      ],
+      "keyframes": [
+        "6",
+        0
+      ],
+      "tracker": "alltracker.pth",
+      "keyframe_index": -1,
+      "keyframe_frames": "auto",
+      "settings": "",
+      "fps": [
+        "2",
+        2
+      ],
+      "processes": 1,
+      "model": "tube (round products)"
+    },
+    "_meta": {
+      "title": "Product Label: Refine (Video)"
+    }
+  },
+  "8": {
+    "class_type": "ProductLabelVideoSaveLossless",
+    "inputs": {
+      "images": [
+        "7",
+        0
+      ],
+      "fps": [
+        "2",
+        2
+      ],
+      "filename_prefix": "product-label-refinement/video/refined",
+      "format": "mov (PNG, exact RGB)",
+      "audio": [
+        "2",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "Save the comp file (lossless)"
+    }
+  },
+  "9": {
+    "class_type": "PreviewImage",
+    "inputs": {
+      "images": [
+        "7",
+        4
+      ]
+    },
+    "_meta": {
+      "title": "QA plot"
+    }
+  },
+  "10": {
+    "class_type": "PreviewAny",
+    "inputs": {
+      "source": [
+        "7",
+        3
+      ]
+    },
+    "_meta": {
+      "title": "Report"
+    }
+  },
+  "11": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "7",
+        0
+      ],
+      "fps": [
+        "2",
+        2
+      ],
+      "audio": [
+        "2",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "Review copy"
+    }
+  },
+  "12": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "11",
+        0
+      ],
+      "filename_prefix": "product-label-refinement/video/review",
+      "format": "auto",
+      "codec": "auto"
+    },
+    "_meta": {
+      "title": "Save review copy (mp4)"
+    }
+  }
+}

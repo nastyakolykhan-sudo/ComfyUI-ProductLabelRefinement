@@ -19,5 +19,51 @@
     "raster.py": "f9dc02da8f3121a741ce1ae906e1f0cea5c65b41c1b963edf032da9742816fd4",
     "warp.py": "b7a19675703d2464867e8c6b7dbd6cb5b3cbbde062aac71403418efec9d6a45e"
   },
-  "run_py": "28e6e1a02a75376e0d19fe5538f64a18f285da4c6aed9d4e74c0f8adaf7312d6"
+  "run_py": "28e6e1a02a75376e0d19fe5538f64a18f285da4c6aed9d4e74c0f8adaf7312d6",
+  "video_engine": {
+    "synced": "2026-10-16",
+    "imgpost_version": "0.10.2",
+    "packages": {
+      "imgvideo": {
+        "version": "0.3.0",
+        "files": {
+          "__init__.py": "4d934a3c70a0657cdb3ec2822b105028d4abf3e8cc6be62180d6175255d3cd12",
+          "alltracker/LICENSE": "ab740abe5c34e17963fe4d6a1f68a3dcd35bbc05dc520cf08d7a062c0ea13c79",
+          "alltracker/__init__.py": "5354c3910da4daa2fe420fb845e2a19204af24d780b57853039c76bbd7be4deb",
+          "alltracker/alltracker.py": "417a8d7251cd1e5a38df6787b47508fcd971aaa43ced6f46cfb841b25fe4dee1",
+          "alltracker/blocks.py": "0c347f79b53367e0a99fb8d5bbe65346def904940f07dd361349af1da4eb0672",
+          "alltracker/misc.py": "4ac64b714891789b21f1776292c7b9bd580031950f8df4398c9718922e7dbe90",
+          "fit.py": "275e7f2b8353eb9ad0713c269b6b3d400746fd4fde230d2a363a656af87c9bc0",
+          "keyframe.py": "8890633354b6c64c320a37f62ba9d71aabb20ffa78261e50b96cfc096dee902c",
+          "labelspace.py": "a9307e82842da3c95ccfceb3edd4d9736d81ae3a395833fd9dbdb206e680a948",
+          "optics.py": "ef19545ae8d457937a1861811fa7f36116dc20d42351348e59ca490852ed3f4f",
+          "pipeline.py": "1d3a9c10dea521650e1b3a4713cdb6854100f5ddac237b81837cc6b4a103056a",
+          "qa.py": "e4425d80628f159806af3964b020ab2b0073dd877041791c3c347c5bc3a6015a",
+          "render.py": "f4f5c72efaec4caa9a313f72e0eb29b4bc8db0a3447a75a71ef1ad0dc28f0ff8",
+          "review.py": "09a9b3442cf8d663263e335327677d1d8629abc196724e8a2a4d879d76eca77f",
+          "surface.py": "c0188e11fb72d1c5f786646c83d82f29cefcdd1d5bfd106ef009be3db1ce87b9",
+          "track.py": "c1fadd9d7f17437c28a48d6e4302e6b65935323964f7eb27b71ab3bd810bc7c9",
+          "vio.py": "ed2e2cbcecdf76e0c7f744098664296c1be933037574935f1c6c1419d5a9bb19"
+        }
+      },
+      "imgauto": {
+        "version": "0.2.0",
+        "files": {
+          "__init__.py": "9c779ed4d200c98f607ad389c8e757c89a41baff4839bbafa85ca1d761356b6d",
+          "composite.py": "b4af068edb01efbbf7868962618ee38f7b11d204d5248491ed56463f6c08ab84",
+          "coverage.py": "d10c460099a64b1e9a50aa3b1cc1ef8b159ec1845ae176dbcba35521eaadb971",
+          "cropbox.py": "ce284dc13d5583808d3514e177c37f8ab1d1232a7a1019ab2e960e7754594b5a",
+          "keyfix.py": "b3bb73cb18368d53b136c54a6f68c4ff3e0f42a62671c3aa9fd074e3beff3669",
+          "keypick.py": "69696ed1f5b709cba958e343e3d4ad1f6daae11394aa7ee42168636d3f84dca5",
+          "labeltext.py": "07ecf3f70de4b35a6eda85af0f7e93557e5fff21b3eddd298f170a37605f1dc1",
+          "media.py": "7108cbb1c739c37f2e894bdf5195d00d18b48db81c36d5ee8f216b18f80ffbdb",
+          "refangle.py": "266926cbd095e85d2378ce6e5f3633049363fe8d373c1c10aa0737db679c51a1",
+          "shadow.py": "85aea70344a609f2b492779079b620c4bbc00c608fa6768f3e1df6383b4edcbc",
+          "shots.py": "1c62136c2dd0c64f735085817413043cb77c7b17bde1446bfafa18468ebcba99",
+          "verify.py": "4576b00f6711ef8775a10acc9d665cb7ff2e89bad67b57d49b998babbcfc0a36",
+          "vjobs.py": "9aedfda0f0dd49dd3fb4f4397da323ece5508c011733de033c319ed7f3acc3b0"
+        }
+      }
+    }
+  }
 }

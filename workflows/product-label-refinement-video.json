@@ -1,0 +1,676 @@
+{
+  "id": "00000000-0000-0000-0000-000000000000",
+  "revision": 0,
+  "last_node_id": 12,
+  "last_link_id": 32,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LoadVideo",
+      "pos": [
+        0,
+        0
+      ],
+      "size": [
+        282.798828125,
+        82
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": [
+            17
+          ]
+        }
+      ],
+      "title": "Clip (generated video)",
+      "properties": {
+        "Node name for S&R": "LoadVideo"
+      },
+      "widgets_values": [
+        "labelvideo_demo_clip.mov",
+        "image"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "GetVideoComponents",
+      "pos": [
+        380,
+        0
+      ],
+      "size": [
+        193.530859375,
+        66
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "link": 17
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": [
+            20
+          ]
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "links": [
+            26,
+            31
+          ]
+        },
+        {
+          "name": "fps",
+          "type": "FLOAT",
+          "links": [
+            23,
+            25,
+            30
+          ]
+        }
+      ],
+      "title": "Clip frames",
+      "properties": {
+        "Node name for S&R": "GetVideoComponents"
+      }
+    },
+    {
+      "id": 3,
+      "type": "LoadVideo",
+      "pos": [
+        0,
+        420
+      ],
+      "size": [
+        282.798828125,
+        82
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": [
+            18
+          ]
+        }
+      ],
+      "title": "Product mask (video, white = product)",
+      "properties": {
+        "Node name for S&R": "LoadVideo"
+      },
+      "widgets_values": [
+        "labelvideo_demo_mask.mov",
+        "image"
+      ]
+    },
+    {
+      "id": 4,
+      "type": "GetVideoComponents",
+      "pos": [
+        380,
+        420
+      ],
+      "size": [
+        193.530859375,
+        66
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "link": 18
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": [
+            19
+          ]
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "links": null
+        },
+        {
+          "name": "fps",
+          "type": "FLOAT",
+          "links": null
+        }
+      ],
+      "title": "Mask frames",
+      "properties": {
+        "Node name for S&R": "GetVideoComponents"
+      }
+    },
+    {
+      "id": 5,
+      "type": "ImageToMask",
+      "pos": [
+        700,
+        420
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 19
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": [
+            21
+          ]
+        }
+      ],
+      "title": "Mask",
+      "properties": {
+        "Node name for S&R": "ImageToMask"
+      },
+      "widgets_values": [
+        "red"
+      ]
+    },
+    {
+      "id": 6,
+      "type": "LoadImage",
+      "pos": [
+        0,
+        820
+      ],
+      "size": [
+        282.798828125,
+        314
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            22
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "title": "Corrected keyframe",
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "labelvideo_demo_keyframe.png",
+        "image"
+      ]
+    },
+    {
+      "id": 7,
+      "type": "ProductLabelVideoRefine",
+      "pos": [
+        1000,
+        120
+      ],
+      "size": [
+        400,
+        288
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "frames",
+          "type": "IMAGE",
+          "link": 20
+        },
+        {
+          "name": "mask",
+          "type": "MASK",
+          "link": 21
+        },
+        {
+          "name": "keyframes",
+          "type": "IMAGE",
+          "link": 22
+        },
+        {
+          "name": "keyframe_bbox",
+          "shape": 7,
+          "type": "BBOX",
+          "link": null
+        },
+        {
+          "name": "product",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "fps",
+          "shape": 7,
+          "type": "FLOAT",
+          "widget": {
+            "name": "fps"
+          },
+          "link": 23
+        }
+      ],
+      "outputs": [
+        {
+          "name": "frames",
+          "type": "IMAGE",
+          "links": [
+            24,
+            29
+          ]
+        },
+        {
+          "name": "matte",
+          "type": "MASK",
+          "links": null
+        },
+        {
+          "name": "changed",
+          "type": "MASK",
+          "links": null
+        },
+        {
+          "name": "report",
+          "type": "STRING",
+          "links": [
+            28
+          ]
+        },
+        {
+          "name": "qa_image",
+          "type": "IMAGE",
+          "links": [
+            27
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "ProductLabelVideoRefine"
+      },
+      "widgets_values": [
+        "alltracker.pth",
+        -1,
+        "auto",
+        "",
+        24,
+        1,
+        "tube (round products)"
+      ]
+    },
+    {
+      "id": 8,
+      "type": "ProductLabelVideoSaveLossless",
+      "pos": [
+        1500,
+        0
+      ],
+      "size": [
+        345.597265625,
+        126
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 24
+        },
+        {
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": 26
+        },
+        {
+          "name": "fps",
+          "type": "FLOAT",
+          "widget": {
+            "name": "fps"
+          },
+          "link": 25
+        }
+      ],
+      "outputs": [],
+      "title": "Save the comp file (lossless)",
+      "properties": {
+        "Node name for S&R": "ProductLabelVideoSaveLossless"
+      },
+      "widgets_values": [
+        24,
+        "product-label-refinement/video/refined",
+        "mov (PNG, exact RGB)"
+      ]
+    },
+    {
+      "id": 9,
+      "type": "PreviewImage",
+      "pos": [
+        1500,
+        360
+      ],
+      "size": [
+        140,
+        26
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 27
+        }
+      ],
+      "outputs": [],
+      "title": "QA plot",
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      }
+    },
+    {
+      "id": 10,
+      "type": "PreviewAny",
+      "pos": [
+        1500,
+        760
+      ],
+      "size": [
+        210,
+        166
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "source",
+          "type": "*",
+          "link": 28
+        }
+      ],
+      "outputs": [],
+      "title": "Report",
+      "properties": {
+        "Node name for S&R": "PreviewAny"
+      },
+      "widgets_values": [
+        null,
+        null,
+        false
+      ]
+    },
+    {
+      "id": 11,
+      "type": "CreateVideo",
+      "pos": [
+        1500,
+        1100
+      ],
+      "size": [
+        270,
+        78
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 29
+        },
+        {
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": 31
+        },
+        {
+          "name": "fps",
+          "type": "FLOAT",
+          "widget": {
+            "name": "fps"
+          },
+          "link": 30
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": [
+            32
+          ]
+        }
+      ],
+      "title": "Review copy",
+      "properties": {
+        "Node name for S&R": "CreateVideo"
+      },
+      "widgets_values": [
+        30
+      ]
+    },
+    {
+      "id": 12,
+      "type": "SaveVideo",
+      "pos": [
+        1850,
+        1100
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "link": 32
+        }
+      ],
+      "outputs": [],
+      "title": "Save review copy (mp4)",
+      "properties": {},
+      "widgets_values": [
+        "product-label-refinement/video/review",
+        "auto",
+        "auto"
+      ]
+    }
+  ],
+  "links": [
+    [
+      17,
+      1,
+      0,
+      2,
+      0,
+      "VIDEO"
+    ],
+    [
+      18,
+      3,
+      0,
+      4,
+      0,
+      "VIDEO"
+    ],
+    [
+      19,
+      4,
+      0,
+      5,
+      0,
+      "IMAGE"
+    ],
+    [
+      20,
+      2,
+      0,
+      7,
+      0,
+      "IMAGE"
+    ],
+    [
+      21,
+      5,
+      0,
+      7,
+      1,
+      "MASK"
+    ],
+    [
+      22,
+      6,
+      0,
+      7,
+      2,
+      "IMAGE"
+    ],
+    [
+      23,
+      2,
+      2,
+      7,
+      5,
+      "FLOAT"
+    ],
+    [
+      24,
+      7,
+      0,
+      8,
+      0,
+      "IMAGE"
+    ],
+    [
+      25,
+      2,
+      2,
+      8,
+      2,
+      "FLOAT"
+    ],
+    [
+      26,
+      2,
+      1,
+      8,
+      1,
+      "AUDIO"
+    ],
+    [
+      27,
+      7,
+      4,
+      9,
+      0,
+      "IMAGE"
+    ],
+    [
+      28,
+      7,
+      3,
+      10,
+      0,
+      "STRING"
+    ],
+    [
+      29,
+      7,
+      0,
+      11,
+      0,
+      "IMAGE"
+    ],
+    [
+      30,
+      2,
+      2,
+      11,
+      2,
+      "FLOAT"
+    ],
+    [
+      31,
+      2,
+      1,
+      11,
+      1,
+      "AUDIO"
+    ],
+    [
+      32,
+      11,
+      0,
+      12,
+      0,
+      "VIDEO"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.05294550175335783,
+      "offset": [
+        10532.14105243093,
+        4025.7531647512938
+      ]
+    },
+    "frontendVersion": "1.41.21"
+  },
+  "version": 0.4
+}

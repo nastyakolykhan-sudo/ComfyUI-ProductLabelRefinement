@@ -1,0 +1,409 @@
+"""Per-frame surface fit to the tracks, with the stills engine's own mapping (imgpost geometry.fit: homography or cylinder) or a tube.
+
+Each track gets its label coordinates (u, v) once, from the anchor frame's mapping (a stills job measured on
+that frame). Every frame is then a still fit whose points are the tracks: geometry.fit with the anchor job's model.
+Smoothing works on control points (a grid on the label mapped by each frame's fit), so it is the same for any model,
+and refits the model to the smoothed points. It is zero-lag (a centred local quadratic) and never runs across an
+impact (a kink in the motion: a bounce, a hit) or a cut, where any smoothing would pull the label off the product."""
+import numpy as np
+
+from imgpost import geometry as geo
+
+
+def _rebuild_residual(state):
+    obj = object.__new__(geo.Residual)
+    obj.__dict__.update(state)
+    return obj
+
+
+# geometry.Residual forwards unknown attributes to its base through __dict__, which unpickling hasn't filled yet:
+# pickle it by its state instead (fit.pkl holds the per-frame mappings)
+import copyreg  # noqa: E402
+copyreg.pickle(geo.Residual, lambda R: (_rebuild_residual, (dict(R.__dict__),)))
+
+
+def label_coords(H0, xy):
+    """Anchor-frame scene px -> label (reference) px, and whether the point is on the modelled surface."""
+    if hasattr(H0, "inverse"):
+        u, v, ok = H0.inverse(xy[:, 0], xy[:, 1])
+        return np.c_[u, v], (np.ones(len(xy), bool) if ok is None else ok)
+    q = np.c_[xy, np.ones(len(xy))] @ np.linalg.inv(H0).T
+    return q[:, :2] / q[:, 2:3], np.ones(len(xy), bool)
+
+
+def _geo_fit(spec):
+    """geometry.fit, but a perspective cylinder whose camera lands behind the product (the perspective terms are tiny
+    and their sign is noise on a nearly affine view) is refitted affine: the engine would see its back half."""
+    if spec.get("model") == "tube":
+        from .surface import fit as tube_fit
+        return tube_fit(spec)
+    H, rep = geo.fit(spec)
+    if spec.get("perspective") and isinstance(H, geo.Cylinder):
+        cam = H._camera()
+        if cam is not None and cam[2] < 0:
+            H, rep = geo.fit(dict(spec, perspective=False))
+    return H, rep
+
+
+def _spec(base, uv, xy, w):
+    s = {k: v for k, v in base.items() if k in ("model", "cylinder", "tube", "camera", "perspective", "perspective_reg")}
+    s["points"] = [{"ref": [float(a), float(b)], "scene": [float(c), float(d)], "w": float(e)}
+                   for (a, b), (c, d), e in zip(uv, xy, w)]
+    return s
+
+
+def with_residual(H, uv, xy, residual):
+    """The stills engine's Residual (a smooth scene-space RBF correction) through the points' misfit: a mesh warp on top of
+    the rigid model, for surfaces it can't follow (a squeezed tube, a bottle drawn a little differently per frame).
+    residual: {"sigma": px | "auto" (a quarter of the points' smaller extent), "lam": 1.0}"""
+    if not residual:
+        return H
+    q = geo.apply_H(H, uv)
+    sig = residual.get("sigma", "auto")
+    if sig == "auto":
+        sig = 0.25 * float(min(np.ptp(xy[:, 0]), np.ptp(xy[:, 1])))
+    return geo.Residual(H, q, xy - q, float(sig), float(residual.get("lam", 1.0)))
+
+
+def shear_deg(H):
+    """How far an affine tube's camera is from a rigid one: the angle between its around and along axes off 90
+    degrees, and their length ratio off 1 (None for other models)."""
+    A = getattr(H, "A", None)
+    if A is None or not hasattr(H, "Ru"):
+        return None
+    a, b = A[:, 0], A[:, 1]
+    ang = 90.0 - np.degrees(np.arccos(np.clip(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)), -1, 1)))
+    return float(ang), float(np.linalg.norm(a) / np.linalg.norm(b) - 1.0)
+
+
+def fit_frame(base, uv, xy, w, wmin=0.5, reject=2.5, iters=2, residual=None):
+    """One frame: the model fitted to the visible tracks, outliers (residual above `reject` px and 3x the median)
+    dropped and refitted, then the residual correction when asked.
+    -> (mapping, residual px per track of the rigid model (nan where not used), inlier mask)"""
+    use = w >= wmin
+    if use.sum() < 8:
+        return None, np.full(len(uv), np.nan), use
+    for _ in range(iters + 1):
+        H, _ = _geo_fit(_spec(base, uv[use], xy[use], np.sqrt(w[use])))
+        r = np.linalg.norm(geo.apply_H(H, uv) - xy, axis=1)
+        new = (w >= wmin) & (r <= max(reject, 3.0 * np.median(r[use])))
+        if new.sum() < 8 or (new == use).all():
+            break
+        use = new
+    return with_residual(H, uv[use], xy[use], residual), np.where(use, r, np.nan), use
+
+
+def control_grid(H0, uv, n=5):
+    """n x n label points spanning the tracked part of the label (inner 90 %), front-facing on a cylinder."""
+    lo, hi = np.percentile(uv, 5, axis=0), np.percentile(uv, 95, axis=0)
+    if hasattr(H0, "axis_x"):
+        lo[0], hi[0] = max(lo[0], H0.axis_x - 0.8 * H0.r), min(hi[0], H0.axis_x + 0.8 * H0.r)
+    g = np.stack(np.meshgrid(np.linspace(lo[0], hi[0], n), np.linspace(lo[1], hi[1], n)), -1).reshape(-1, 2)
+    # only where the label is tracked (a tilted label leaves its box's corners empty)
+    from scipy.spatial import cKDTree
+    step = float(min((hi - lo) / max(n - 1, 1)))
+    near = cKDTree(uv).query(g)[0] <= 0.75 * step
+    return g[near] if near.sum() >= 6 else g
+
+
+def impacts(C, k=5.0, floor=3.0):
+    """Frames where the motion kinks (control-point acceleration far above the clip's usual): smoothing stops there."""
+    a = np.full(len(C), 0.0)
+    a[1:-1] = np.linalg.norm(C[2:] - 2 * C[1:-1] + C[:-2], axis=-1).mean(1)
+    return np.nonzero(a > max(floor, k * np.median(a[1:-1]) if len(C) > 2 else floor))[0]
+
+
+def smooth_controls(C, q, breaks=(), half=3):
+    """Centred local quadratic per control coordinate (T x K x 2), tricube x frame-quality weights; windows end at
+    breaks (impact frames, which keep their own fit). Zero lag: a linear or quadratic motion passes unchanged."""
+    T = len(C)
+    seg = np.zeros(T, int)
+    for b in sorted(breaks):
+        seg[b:] += 1
+        seg[b + 1:] += 1                       # the break frame is a segment of its own
+    out = C.copy()
+    for t in range(T):
+        idx = np.array([s for s in range(max(0, t - half), min(T, t + half + 1)) if seg[s] == seg[t]])
+        if len(idx) < 3:
+            continue
+        dt = (idx - t).astype(float)
+        wt = (1 - (np.abs(dt) / (half + 1)) ** 3) ** 3 * np.maximum(q[idx], 1e-3)
+        deg = 2 if len(idx) >= 5 else 1
+        B = np.vander(dt, deg + 1, increasing=True) * np.sqrt(wt)[:, None]
+        Y = C[idx].reshape(len(idx), -1) * np.sqrt(wt)[:, None]
+        out[t] = np.linalg.lstsq(B, Y, rcond=None)[0][0].reshape(C.shape[1:])
+    return out
+
+
+def model_spec(base, G, P):
+    s = {k: v for k, v in base.items() if k in ("model", "cylinder", "tube", "camera", "perspective", "perspective_reg")}
+    s["points"] = [{"ref": g.tolist(), "scene": p.tolist()} for g, p in zip(G, P)]
+    return s
+
+
+def fit_points(base, G, P, residual=None):
+    """The model (plus the residual correction) through control points: the per-frame mapping after smoothing."""
+    return with_residual(_geo_fit(model_spec(base, G, P))[0], G, P, residual)
+
+
+def sub_mappings(base, G, Cs, t, shutter, step_px=0.75, max_n=12, residual=None):
+    """Mappings across frame t's shutter (a fraction of the frame interval, centred on t): the smoothed control
+    points moved toward the previous and the next frame, refitted. As many as the motion needs for samples about
+    step_px apart (1 when the label barely moves)."""
+    T = len(Cs)
+    nxt, prv = Cs[min(t + 1, T - 1)] - Cs[t], Cs[max(t - 1, 0)] - Cs[t]
+    span = 0.5 * shutter * (np.linalg.norm(nxt, axis=1).max() + np.linalg.norm(prv, axis=1).max())
+    n = int(np.clip(np.ceil(span / step_px) + 1, 1, max_n))
+    if n == 1 or shutter <= 0:
+        return [fit_points(base, G, Cs[t], residual)], 0.0
+    out = []
+    for s in np.linspace(-0.5 * shutter, 0.5 * shutter, n):
+        P = Cs[t] + (s * nxt if s >= 0 else -s * prv)
+        out.append(fit_points(base, G, P, residual))
+    return out, float(span)
+
+
+def fit_shot(base, H0, xy0, tracks, vis, wmin=0.5, reject=2.5, half=3, cuts=(), residual=None, ngrid=5, anchor=None,
+             min_inliers=0.5, max_rms=3.0, max_rigid=12.0, shear_max=None, morph_rigid=(), morph_skip=()):
+    """All frames of a shot. -> dict with raw and smoothed mappings, per-frame errors, impact frames, and `valid`:
+    the frames around the anchor the tracks hold (enough inliers, misfit of the final mapping below max_rms, of the
+    rigid model alone below max_rigid) until a cut, a morph or the product leaving breaks them."""
+    uv, ok = label_coords(H0, xy0)
+    T = len(tracks)
+    raw, used, rig, fin = [], [], [], []
+    for t in range(T):
+        H, r, u = fit_frame(base, uv[ok], tracks[t][ok], vis[t][ok], wmin, reject, residual=residual)
+        raw.append(H)
+        used.append(u)
+        rig.append(float(np.sqrt(np.nanmean(r ** 2))) if np.isfinite(r).any() else np.inf)
+        fin.append(float(np.sqrt(np.mean(np.sum((geo.apply_H(H, uv[ok][u]) - tracks[t][ok][u]) ** 2, 1))))
+                   if H is not None and u.any() else np.inf)
+    good = [t for t in range(T) if raw[t] is not None]
+    for t in range(T):                          # a frame without enough tracks borrows its nearest fit
+        if raw[t] is None:
+            raw[t] = raw[min(good, key=lambda s: abs(s - t))]
+    G = control_grid(H0, uv[ok], ngrid)
+    C = np.stack([geo.apply_H(H, G) for H in raw])
+    q = np.array([u.mean() for u in used])
+    good_t = (q >= min_inliers) & (np.array(fin) <= max_rms) & (np.array(rig) <= max_rigid)
+    a = int(anchor if anchor is not None else np.argmax(q))
+    lo, hi = a, a
+    while lo > 0 and good_t[lo - 1]:
+        lo -= 1
+    while hi < T - 1 and good_t[hi + 1]:
+        hi += 1
+    valid = list(range(lo, hi + 1))
+    cuts = set(cuts) | ({lo - 1} if lo > 0 else set()) | ({hi + 1} if hi < T - 1 else set())
+    br = sorted(set(impacts(C).tolist()) | cuts)
+    Cs = smooth_controls(C, q, br, half)
+    sm = [fit_points(base, G, Cs[t], residual) for t in range(T)]
+    # smoothing must not argue with the tracks: generated video judders (the whole product jumps back and forth by
+    # many px between frames), and a frame whose smoothed mapping fits its tracks worse than its own fit keeps its own
+    kept_raw = []
+    for t in range(T):
+        u = used[t]
+        if raw[t] is None or not u.any():
+            continue
+        e_raw = np.sqrt(np.mean(np.sum((geo.apply_H(raw[t], uv[ok][u]) - tracks[t][ok][u]) ** 2, 1)))
+        e_sm = np.sqrt(np.mean(np.sum((geo.apply_H(sm[t], uv[ok][u]) - tracks[t][ok][u]) ** 2, 1)))
+        if e_sm > e_raw + max(0.3, 0.25 * e_raw):
+            sm[t] = raw[t]
+            Cs[t] = C[t]
+            kept_raw.append(t)
+    # a morph frame (the generator blends two poses) drags an affine camera into a shear spike, and the print would
+    # shear with it: where the final mapping's shear (or one axis' stretch) jumps past shear_max degrees (shear_max
+    # / 40) from the frames around it, the frame takes its shape from the frames either side (control points
+    # interpolated in time) and only its position, scale and in-plane turn from its own tracks (a similarity fit,
+    # which can't shear). No mesh correction there: it would follow the morph. Validity stays the affine fit's.
+    morph, morph_source = [], {}
+    if shear_max is not None and base.get("camera", "ortho") == "affine":
+        S = [shear_deg(getattr(sm[t], "base", sm[t])) for t in range(T)]
+        if all(x is not None for x in S):
+            S = np.array(S)
+            for t in range(T):
+                nb = [s for s in range(max(0, t - 4), min(T, t + 5)) if s in valid]
+                if t not in valid or len(nb) < 4 or t == a or t in morph_skip:   # the anchor frame is the truth's own
+                    continue
+                d = np.abs(S[t] - np.median(S[nb], 0))
+                if d[0] > shear_max or d[1] > shear_max / 40.0:
+                    morph.append(t)
+            ok_t = [t for t in valid if t not in morph]
+            for t in morph:
+                if t in morph_rigid:
+                    # a product turning through bad tracks (an occluder rising, print sliding): a rigid camera
+                    # (scaled orthographic: spin, tilt, scale, no shear or stretch) through its own tracks keeps
+                    # the turn the neighbours' shape would freeze
+                    u = used[t]
+                    Hr, _ = _geo_fit(_spec(dict(base, camera="ortho"), uv[ok][u], tracks[t][ok][u], np.sqrt(vis[t][ok][u])))
+                    morph_source[t] = sm[t]
+                    sm[t], Cs[t] = Hr, geo.apply_H(Hr, G)
+                    continue
+                p_ = max([s for s in ok_t if s < t], default=None)
+                n_ = min([s for s in ok_t if s > t], default=None)
+                if p_ is None and n_ is None:
+                    continue
+                if p_ is None or n_ is None:
+                    Ci = Cs[p_ if n_ is None else n_]
+                else:
+                    Ci = Cs[p_] + (Cs[n_] - Cs[p_]) * (t - p_) / (n_ - p_)
+                Hi = _geo_fit(model_spec(base, G, Ci))[0]
+                u = used[t]
+                X, Y = geo.apply_H(Hi, uv[ok][u]), tracks[t][ok][u]
+                wt = np.sqrt(vis[t][ok][u])
+                # weighted similarity X -> Y (Umeyama, no reflection)
+                mx, my = (wt[:, None] * X).sum(0) / wt.sum(), (wt[:, None] * Y).sum(0) / wt.sum()
+                Xc, Yc = X - mx, Y - my
+                Sxy = (wt[:, None] * Yc).T @ Xc / wt.sum()
+                Us, Ds, Vt = np.linalg.svd(Sxy)
+                Dm = np.diag([1.0, np.sign(np.linalg.det(Us @ Vt))])
+                Rm = Us @ Dm @ Vt
+                sc = np.trace(np.diag(Ds) @ Dm) / ((wt * (Xc ** 2).sum(1)).sum() / wt.sum())
+                M, tv = sc * Rm, my - sc * Rm @ mx
+                morph_source[t] = sm[t]            # where the source's own print is (render reads its light there)
+                sm[t] = type(Hi)(Hi.u0, Hi.Ru, Hi.R, Hi.k, M @ Hi.A, M @ Hi.a + tv)
+                Cs[t] = geo.apply_H(sm[t], G)
+    err = []
+    for t in range(T):
+        u = used[t]
+        r = np.linalg.norm(geo.apply_H(sm[t], uv[ok][u]) - tracks[t][ok][u], axis=1)
+        err.append({"frame": t, "inliers": int(u.sum()), "of": int(ok.sum()), "valid": t in valid,
+                    "rigid_rms_px": round(rig[t], 3) if np.isfinite(rig[t]) else None,
+                    "rms_px": round(float(np.sqrt(np.mean(r ** 2))), 3) if len(r) else None,
+                    "p90_px": round(float(np.percentile(r, 90)), 3) if len(r) else None,
+                    "smooth_shift_px": round(float(np.linalg.norm(Cs[t] - C[t], axis=1).max()), 3)})
+    return {"raw": raw, "smooth": sm, "uv": uv, "on_surface": ok, "controls": G, "C_raw": C, "C_smooth": Cs,
+            "impacts": br, "errors": err, "valid": valid, "kept_raw": kept_raw, "morph": morph,
+            "morph_source": morph_source}
+
+
+def silhouette_snap(H, matte, v_range, step=24.0, max_px=30.0, inner=(-1.0, -0.6, -0.2, 0.2, 0.6, 1.0), lam=0.02,
+                    hold=False):
+    """A tube's mapping corrected so its limbs land on the product's matte. The rigid tube tapers linearly, but a
+    squeezed tube or a generated bottle doesn't: its real sides drift 10-25 px from the model's at the label's ends,
+    and the source shows between them as an edge. Per label row: the matte's two edges along the row (through the
+    point facing the camera); each side's offset from the model's limb, fitted along the label by a robust quadratic
+    (rows an occluder cuts, or edges further than max_px, drop out); then a smooth scene-space correction (the
+    engine's Residual) that maps the model's [left, right] limbs onto the matte's, linearly across the row (so the
+    print in the middle moves only by the row's mean offset). -> (mapping, report)"""
+    from scipy.ndimage import map_coordinates
+    Hb = H
+    while hasattr(Hb, "base"):
+        Hb = Hb.base
+    if not hasattr(Hb, "Ru"):
+        return H, {"snap": "not a tube"}
+    d = np.cross(Hb.A[0], Hb.A[1])
+    ths = np.linspace(-np.pi, np.pi, 1441)
+    m = matte.astype(float)
+    rows, eL, eR, geo_rows = [], [], [], []
+    for v in np.arange(v_range[0], v_range[1] + 1e-6, step):
+        nd = np.sin(ths) * d[0] - Hb.k * d[1] + np.cos(ths) * d[2]
+        i = np.nonzero(np.diff(np.sign(nd)))[0]
+        if len(i) < 2:
+            continue
+        cand = ths[i]
+        thL, thR = cand[np.argmin(np.sin(cand))], cand[np.argmax(np.sin(cand))]
+        if thR < thL:
+            thR += 2 * np.pi
+        thc = 0.5 * (thL + thR)
+        pL, pc, pR = H.forward(np.c_[Hb.u0 + Hb.Ru * np.array([thL, thc, thR]), np.full(3, v)])
+        n = (pR - pL) / max(np.linalg.norm(pR - pL), 1e-6)
+        sL, sR = float((pL - pc) @ n), float((pR - pc) @ n)
+        ss = np.arange(sL - max_px - 2, sR + max_px + 2, 0.5)
+        q = pc[None] + ss[:, None] * n[None]
+        if (q < 1).any() or (q[:, 0] > m.shape[1] - 2).any() or (q[:, 1] > m.shape[0] - 2).any():
+            continue                                   # the row leaves the frame
+        val = map_coordinates(m, [q[:, 1], q[:, 0]], order=1)
+        ins = val > 0.5
+        c = int(np.argmin(np.abs(ss)))
+        if not ins[c]:
+            continue
+        lo = c
+        while lo > 0 and ins[lo - 1]:
+            lo -= 1
+        hi = c
+        while hi < len(ss) - 1 and ins[hi + 1]:
+            hi += 1
+        if lo == 0 or hi == len(ss) - 1:
+            continue                                   # the matte runs past the search: no edge there
+        # sub-pixel crossings of 0.5
+        el = ss[lo - 1] + (0.5 - val[lo - 1]) / max(val[lo] - val[lo - 1], 1e-6) * 0.5
+        er = ss[hi] + (val[hi] - 0.5) / max(val[hi] - val[hi + 1], 1e-6) * 0.5
+        rows.append(v)
+        eL.append(el - sL)
+        eR.append(er - sR)
+        geo_rows.append((v, thL, thR, thc, n))
+    rep = {"rows": len(rows)}
+    if len(rows) < 6:
+        return H, dict(rep, snap="too few rows")
+    rows, eL, eR = np.array(rows), np.array(eL), np.array(eR)
+
+    def robust_quad(y):
+        ok = np.abs(y) <= max_px
+        for _ in range(3):
+            if ok.sum() < 5:
+                return None, ok
+            c = np.polyfit(rows[ok], y[ok], 2)
+            r = y - np.polyval(c, rows)
+            mad = 1.4826 * np.median(np.abs(r[ok] - np.median(r[ok]))) + 0.5
+            ok = (np.abs(y) <= max_px) & (np.abs(r) <= 3.0 * mad)
+        return c, ok
+
+    cL, okL = robust_quad(eL)
+    cR, okR = robust_quad(eR)
+
+    def held(c, ok):
+        # hold (opt-in): only between the rows the fit used (an occluder hides the rest: a quadratic run past them
+        # can swing by 100 px), and never past max_px. Without it the quadratic runs on, as renders made before it did
+        if c is None:
+            return lambda v: 0.0 * np.asarray(v, float)
+        if not hold:
+            return lambda v: np.polyval(c, v)
+        lo, hi = rows[ok].min(), rows[ok].max()
+        return lambda v: np.clip(np.polyval(c, np.clip(v, lo, hi)), -max_px, max_px)
+
+    fL, fR = held(cL, okL), held(cR, okR)
+    C, D = [], []
+    for v, thL, thR, thc, n in geo_rows:
+        a, b = float(fL(v)), float(fR(v))
+        for x in inner:                     # x: -1 at the left limb, +1 at the right; screen-linear in x
+            th = thc + np.arcsin(np.clip(x, -1, 1)) * (thR - thL) / np.pi
+            C.append(H.forward([[Hb.u0 + Hb.Ru * th, v]])[0])
+            D.append((a * (1 - x) / 2 + b * (1 + x) / 2) * n)
+    C, D = np.array(C), np.array(D)
+    span = np.linalg.norm(C[1:] - C[:-1], axis=1)
+    sig = float(max(np.median(span[span > 0]) * 1.5, 6.0)) if (span > 0).any() else 12.0
+    Hs = geo.Residual(H, C, D, sig, lam)
+    rep.update(left_px=[round(float(fL(rows.min())), 1), round(float(fL(np.median(rows))), 1), round(float(fL(rows.max())), 1)],
+               right_px=[round(float(fR(rows.min())), 1), round(float(fR(np.median(rows))), 1), round(float(fR(rows.max())), 1)],
+               rows_used=[int(okL.sum()), int(okR.sum())], sigma=round(sig, 1))
+    return Hs, rep
+
+
+def axis_ends(H, matte, v_mid, reach=600.0):
+    """Where the product's matte ends along the label's axis (through the point facing the camera), in label v:
+    (top, bottom), or None. The ends (a crimp, a cap) are landmarks along the axis the print can't give on a blurred
+    or morphing frame."""
+    from scipy.ndimage import map_coordinates
+    Hb = H
+    while hasattr(Hb, "base"):
+        Hb = Hb.base
+    if not hasattr(Hb, "Ru"):
+        return None
+    d = np.cross(Hb.A[0], Hb.A[1])
+    uc = Hb.u0 + Hb.Ru * np.arctan2(d[0], d[2])
+    vs = np.arange(v_mid - 1200.0 - reach, v_mid + 1200.0 + reach, 1.0)
+    P = H.forward(np.c_[np.full(len(vs), uc), vs])
+    ok = (P[:, 0] > 0) & (P[:, 1] > 0) & (P[:, 0] < matte.shape[1] - 1) & (P[:, 1] < matte.shape[0] - 1)
+    ins = np.zeros(len(vs), bool)
+    ins[ok] = map_coordinates(matte.astype(float), [P[ok, 1], P[ok, 0]], order=1) > 0.5
+    c = int(np.argmin(np.abs(vs - v_mid)))
+    if not ins[c]:
+        return None
+    lo = hi = c
+    while lo > 0 and ins[lo - 1]:
+        lo -= 1
+    while hi < len(vs) - 1 and ins[hi + 1]:
+        hi += 1
+    if lo == 0 or hi == len(vs) - 1 or not ok[lo - 1] or not ok[hi + 1]:
+        return None                                   # the product runs off the frame: no end there
+    return float(vs[lo]), float(vs[hi])

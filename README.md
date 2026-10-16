@@ -6,6 +6,8 @@ It is deterministic compositing with no models. Every measurement lives in a job
 
 A job doesn't have to be measured by hand first. **Auto Draft** makes one inside ComfyUI from rough input: the scene, the packshot, where the product roughly sits (four corners or a box), and optionally a product mask from SAM 3. On a clean scene the draft is close to final; on a cluttered shelf it is a scaffold to finish by hand. [Starting from rough input](#starting-from-rough-input-auto-draft) has the scores.
 
+**Video too.** Product Label: Refine (Video) carries a corrected keyframe's label through a whole clip: track the product, fit its surface on every frame, re-project the true label with each frame's light, and change nothing outside the changed pixels. See [Video: the label through a clip](#video-the-label-through-a-clip).
+
 **Renamed from ComfyUI-ImagePost (2026-10-16).** The pack now matches the product-label-refinement skill it ports. GitHub redirects the old URL, so existing clones keep pulling. The node IDs (`ImagePostLoadJob`, `ImagePostAutoDraft`, ...) are unchanged, so saved workflows still load; only the display names ("Product Label: ..."), the menu category, the template file names and the default output folder (`output/product-label-refinement/`) changed. To rename an existing clone's remote: `git remote set-url origin https://github.com/nastyakolykhan-sudo/ComfyUI-ProductLabelRefinement`.
 
 ## Install
@@ -16,6 +18,8 @@ git clone https://github.com/nastyakolykhan-sudo/ComfyUI-ProductLabelRefinement
 ```
 
 It needs no extra dependencies: numpy, scipy and Pillow (10.1 or later) ship with ComfyUI. Restart ComfyUI. The nodes are under **image › product-label-refinement**.
+
+The video nodes also need AllTracker's weights in `ComfyUI/models/trackers/` and, optionally, matplotlib for their QA plot. See the [Swordfish checklist](#swordfish-checklist).
 
 ## Try the demo
 
@@ -75,11 +79,11 @@ With `label` set to `cylinder` (a label on a bottle or jar) or `flat` (a label o
 
 - measures the generated label's own outline from its 4 corners, each side walked along the curve it bows to (or along `product_mask`'s contour), and keeps it as the label's visible shape (`shape: generated`, the real label bled 10 px past it);
 - on a bottle, takes the axis and radius from the packshot's silhouette at the label's height, leaving out a drop shadow: the limb is where the label or glass meets the shadow;
+- where the label wraps round the bottle (a side of `outline` within 4 px of a limb, or past it), redraws that side on the limb, 2 px past it, so the real label reaches the silhouette even when `outline` was drawn short of it (a product mask's tilted rectangle had left strips the fill couldn't box);
 - makes the label's sides the fit's edges: its top and bottom as curves, the side where it meets the bottle's silhouette as a limb, plus a residual correction; the packshot's sides are snapped onto the packshot's own edges first;
 - sets `cylinder.limb_min` from how far round the packshot's print reaches, so the print isn't pressed into the silhouette;
 - grades and finishes it as the recipe does (colour `reference`, `ref_flatten: field`, `white_field`, clean paper, edge bleed, auto sharpen and prefilter) when the packshot's label shows white paper; on print straight on a coloured bottle, the plain white-level grade with the scene's colour. `light` is not used.
 
-- where the label wraps round the bottle (a side of `outline` within 4 px of a limb, or past it), redraws that side on the limb, 2 px past it, so the real label reaches the silhouette even when `outline` was drawn short of it (a product mask's tilted rectangle had left strips the fill couldn't box);
 Inputs, all in pixels (scene px unless said otherwise; numbers separated by spaces, commas or new lines):
 
 - `quad`: where the packshot outline's bounding box corners land in the scene, `x,y x,y x,y x,y` (top left, top right, bottom right, bottom left). A box `x0,y0,x1,y1` around the product also works when the product stands upright and faces the camera. A few px off is fine. Pick it on the scene the node shows ([below](#picking-the-quad-on-the-scene)) or type it. With `label` on: the generated label's own 4 corners, in the packshot label's order, within about 3 px (where a side is rounded, the sides extended).
@@ -149,6 +153,90 @@ What it shows:
 - **Labels on bottles, with `label` on: close to final.** Four of the six paper labels land within 0.2 to 0.9 px of the hand fit's print (median; 2.8 px at worst) and the frosted one within 2.9 px, against 2 to 53 px for the flat draft. Their pixels against the hand job's image fell from 52 to 94 % to 12 to 20 % of what the hand job changed, and every audit is as clean as the hand job's or cleaner (the carrier label that FAILed over the wall is now clean). With a mask of the label the frosted label comes within 0.3 px.
 - **Where a label draft stays off.** The other bottle label in the bag (4096 px) has its print 10 px round the bottle from the hand fit's (6 with a mask, 8 with a mask alone), and the frosted label's 2.9 px comes from half a pixel on its bottom edge. In the cylinder model a label's width and its turn about the axis trade off, and the edges barely tell them apart (the engine's pitfall 89): the hand fits sit on that ridge too (that label's own measured outline moves its hand fit 7.5 px). Both results read as the real label; check the print's margins against the packshot. From a mask alone, the first carrier label's corners come out about 1 px from the hand outline's, and that turns its print 4 px round the bottle (1.3 px at 0.10.0, from a slightly different trace of the same mask): give the quad with the mask on small labels. The anchor frame isn't a paper label: the print is on the bottle, and its outline on the packshot is a box whose top and bottom aren't edges in either image (12 and 17 packshot px off the collar line and the base), so it lands 5.7 px off. It has no white paper either, so the draft keeps the plain grade there (the paper grade streaked it). The hand job placed it by landmarks on the generated wordmark; give pairs there, or measure the print's position by hand.
 - **Pixels.** Even with the hand job's grade, the closest drafts (the demo, the panels, three of the labels) differ from its image by more than 8 levels on 11 to 16 % of the pixels it changed, the rest on 17 to 52 %: a 1 px shift moves every print edge. A text block on a tube's body and a fixed render as the reference are in the table for completeness; neither is a case for a draft.
+
+## Video: the label through a clip
+
+Correct one frame of a clip, by hand or with an image model given the real product as reference. **Product Label: Refine (Video)** carries that label through the shot:
+1. it tracks the product (AllTracker);
+2. fits its surface on every frame;
+3. re-projects the true label with each frame's light, softness and grain;
+4. composites it inside the product's mask.
+
+The text is right on every frame, the timing is the source's, and the pixels outside the changed area come back exactly as they went in. It's the product-label-refinement skill's video engine (`imgvideo` 0.3.0), and the skill's own `video.py --refine` gives the same pixels (see Regression).
+
+### Swordfish checklist
+
+1. **ComfyUI 0.19.3 or newer.**
+   - The video nodes themselves run on 0.18.2.
+   - SAM 3 (`SAM3_Detect`, `SAM3_VideoTrack`) and the SAM 3 helper below need 0.19.3, as does a label-fix workflow that segments with SAM 3.
+2. **AllTracker's weights:** `ComfyUI/models/trackers/alltracker.pth`.
+   - That's the `models/trackers` folder of the ComfyUI on the Modal volume. An `extra_model_paths.yaml` entry `trackers:` works too.
+   - Get them from `https://huggingface.co/aharley/alltracker/resolve/main/alltracker.pth`: 66,005,722 bytes, sha256 `ffd9ebcfb6d206d594b646999a150540f92c049cf9b2bf940facf7123f62aa1d`, MIT.
+   - The node lists what's in that folder under `tracker` and never downloads anything.
+3. **SAM 3.1:** `ComfyUI/models/checkpoints/sam3.1_multiplex_fp16.safetensors`, the checkpoint the label-fix workflow already loads. Its licence is Meta's SAM License.
+4. **pip:**
+   - `matplotlib` (optional): without it the QA plot is skipped and everything else runs.
+   - `torchvision`, `einops` and `av` ship with ComfyUI.
+   - `tesseract-ocr` (apt, optional): OCR in the QA when the settings give the label's copy (`words`).
+5. **First run:**
+   1. Copy `examples/video_demo/labelvideo_demo_clip.mov`, `labelvideo_demo_mask.mov` and `labelvideo_demo_keyframe.png` into `ComfyUI/input/`.
+   2. Load `workflows/product-label-refinement-video.json` and queue it.
+
+   Expected:
+   - 40 of 40 frames refined;
+   - the report says the keyframe is frame 20;
+   - 0 px changed outside the matte;
+   - the comp file in `output/product-label-refinement/video/refined_00001.mov`, plus an mp4 review copy.
+6. **A real clip:** the same template with your clip, its mask video (white = product) and the corrected keyframe. Set `processes` to 8 on a server (same pixels, faster render).
+   - **Inputs from a label-fix workflow:**
+     - `frames`: the frames (after any resize);
+     - `mask`: the video masks (SAM 3);
+     - `keyframes`: the corrected keyframe;
+     - `keyframe_bbox`: ImageCropByMaskToAspect's `bbox`, when the keyframe was corrected on a zoomed crop;
+     - `keyframe_index`: LoadVideoTrim's `keyframe_index`.
+   - **Out:** `frames` goes straight to SaveVideo and Save Lossless; nothing needs pasting back. With crops instead of full frames, paste back through `changed`.
+   - **Then read the report:**
+     - `not_covered` says what to do about each stretch it couldn't refine (`chain`, `reacquire`, or a new `keyframe` at the suggested frame);
+     - `flagged` lists frames to look at;
+     - `review` has the automatic checks.
+
+### Video nodes (image › product-label-refinement › video)
+
+| Node | In | Out |
+|---|---|---|
+| **Product Label: Refine (Video)** | `frames` (IMAGE batch), `mask` (MASK batch), `keyframes` (IMAGE, one per shot), `tracker`; optional `keyframe_index`, `keyframe_frames`, `keyframe_bbox`, `product` (context only), `settings` (JSON), `fps`, `processes`, `model` (tube, or flat: experimental) | `frames` (same count, size and order; outside the changed pixels the input itself), `matte` (the mask plus patched frames), `changed`, `report` (JSON), `qa_image` |
+| **Product Label: Save Lossless (Video)** | `images`, `fps`, `filename_prefix`, `format` (QuickTime PNG: exact; PNG sequence; ProRes 4444: for editors, not exact), `audio`? | the file in `output/` (never H.264) |
+| **Product Label: SAM 3 Track From Keyframe** | `images`, `model` (SAM 3), `keyframe_mask`, `keyframe_index`; optional `conditioning`, `detection_threshold`, `max_objects`, `detect_interval` | `masks`: the keyframe's mask propagated forward from it and backward on the reversed frames, one per frame. ComfyUI core's `SAM3_VideoTrack` seeds only the first frame. **First test on Swordfish** (it needs 0.19.3 and the SAM 3.1 checkpoint) |
+
+**What Refine measures by itself:**
+- shots and cuts;
+- each keyframe's frame;
+- the label's band along the product;
+- print polarity and stroke;
+- the shot each keyframe covers;
+- a colour-key patch for frames where the mask has a gap;
+- a plan, with a suggested frame, for every stretch it couldn't cover.
+
+**`settings`** (JSON) overrides any of that:
+- the engine's vjob sections: `track`, `fit`, `render`, `qa`, `review`, `artwork`, `key`;
+- `anchor` (band, model);
+- `shots` (`[[a, b] or null]` per keyframe);
+- `words` (the label's copy, for OCR);
+- `matte_patch: false`.
+
+Typical overrides after a first look at the report: `{"render": {"spark_glow": [70, 71, 72], "occluder_feather": 20}}` for a sparkle trail across the label.
+
+**Product types.**
+- **`model: tube`** (the default): anything round, such as bottles, jars, tubes and lipsticks. Every delivered example so far was a tube.
+- **`model: flat`** (experimental: it runs end to end but hasn't been tried on a real clip): one flat face. For a box, run one Refine node per visible face, each with that face's mask and its own keyframe, chaining `frames` out of one into `frames` of the next.
+- **Small or metallic print** (lipsticks): track on the print (`{"track": {"on": "print"}}`), and correct the keyframe on a zoomed crop (`keyframe_bbox`).
+
+**Re-runs** on the same frames, mask and keyframes keep the tracks, fit and still label from the last run (in ComfyUI's temp folder), so a render-only change re-renders without re-tracking.
+
+**Licences:**
+- AllTracker: code vendored in `imgvideo/alltracker` (MIT, LICENSE beside it); its weights are MIT too.
+- SAM 3: Meta's SAM License; check its use restrictions for your case.
+- No CoTracker: non-commercial, and refused here.
 
 ## Conventions
 
@@ -257,6 +345,16 @@ Measure landmarks and edges by colour change, not by the strongest gradient, and
 
 ## Regression
 
+**Video.** `tools/regress_video.py` calls Product Label: Refine (Video) the way ComfyUI does (tensors in), on the same decoded frames as the skill's `video.py --refine`, and compares frames, matte, changed mask and report.
+
+| Run (2026-10-16, imgvideo 0.3.0) | Result |
+|---|---|
+| The video demo (40 frames, 432 x 768, one keyframe): the node in-process vs `video.py --refine`, with and without the label's copy (`words`) | identical: frames 0 px, matte, changed mask and report; pixels outside `changed` are the input's |
+| The video template on a live ComfyUI 0.18.2 (CPU, no matplotlib), the demo | success in 2 min: 40 of 40 frames refined, keyframe found at frame 20, 0 px changed outside the matte |
+| A real 169-frame 1080 x 1920 clip with one corrected keyframe, the template on a live ComfyUI 0.18.2, `processes: 8` (CPU) | success in 20 min: frames 0-121 refined; the shot after the cut (122-138) reported as "reacquire, a cut at its edge", suggested keyframe 136; 0 px changed outside the matte. ComfyUI's video decode differs from ffmpeg's by a few levels, so a few flags land on other frames than in the CLI run |
+
+**Stills.**
+
 `tools/regress.py` runs the engine's own runner (`scripts/run.py`) and this pack on the same job and images, then compares them. The runner writes into a scratch folder, never to the job's own output. The check passes when fewer than 20 pixels differ by more than 8 levels and nothing outside the work box differs. With `--psd`, both sides also write the PSD, and their layers must match and flatten within 2 levels.
 
 ```bash
@@ -278,6 +376,7 @@ In-process results on 2026-10-08:
 | Engine 0.9.0 (Auto Draft, 2026-10-16): the demo and 12 production jobs, against `run.py` | all pass: 12 jobs within 1 level on 0 to 9,053 px, the shelf card within 8 levels on 1,634 px (the relight patch above); nothing outside the work boxes |
 | Engine 0.10.0 (Auto Draft's label mode, 2026-10-16): the demo and 12 production jobs, against `run.py`; the 7 label jobs drafted with `label` on, with the quad, quad and mask, and mask alone | all pass: 12 jobs within 1 level on 0 to 9,053 px, the shelf card within 8 levels on 1,634 px; the 21 label drafts' jobs identical to the engine's and their images within 8 levels everywhere; the other 6 jobs' drafts score as at 0.9.0 |
 | Engine 0.10.1 (outline tracing walks the boundary; a dropper bottle's pump head had made the traced outline zig-zag): the 7 label jobs with a quad and a mask and with a mask alone, the demo with a mask alone and with a traced outline | all 16 drafts' jobs identical to the engine's, images within 1 level; the render path doesn't trace outlines, so the stills fixture is byte-identical and the demo with `--psd` passes as before |
+| Engine 0.10.2 (label mode redraws a wrapping side of the packshot outline on the limb, 2026-10-16): the 6 bottle-label jobs with a quad, a quad and a mask, and a mask alone | all 18 drafts' jobs identical to the engine's, images within 8 levels everywhere; placement as before or closer, except the 4096 px bottle label with a mask alone (5.4 to 8.3 px, its turn round the bottle) |
 | Auto Draft against `run.py draft` (`--draft`): the same 13 jobs, each with a quad, a quad and a mask, and a mask alone | all 39 pass: identical draft jobs; images within 1 level, or both runs stop with the same FILL STOPPED (the shelf card with a mask) |
 
 ComfyUI passes images between nodes in 32-bit floats, where the engine keeps 64-bit, so a value can land on the other side of a threshold. The 12 × 11 px patch is where relight's fine pass kept a slightly different region. Nothing outside the work boxes differed in any run.
@@ -304,6 +403,16 @@ The pack runs `workflows/product-label-refinement-draft.api.json` on that input,
 `tools/offline_run.py` runs any API workflow in-process, with no server. It uses ComfyUI's own LoadImage and SaveImage conversions and validates inputs and link types the way ComfyUI does. `regress.py` uses it, and it takes the same arguments as `comfy_run.py`.
 
 ## Maintaining
+
+Video: `imgvideo/` and `imgauto/` are the skill's too, pinned under `video_engine` in `imgpost.lock.json`:
+
+```bash
+python3 -P tools/sync_video_engine.py              # check; --update copies the skill's imgvideo/ and imgauto/ here
+python -P tools/regress_video.py --comfy PATH/TO/ComfyUI   # Refine (Video) against the skill's video.py --refine, bit for bit
+python3 -P tools/make_video_demo.py examples/video_demo    # redraw the video demo (byte-identical)
+```
+
+Stills:
 
 `imgpost/` is a byte-identical copy of the product-label-refinement engine's library. The pack vendors it rather than importing it so the math stays identical and the pack stays self-contained on any server. `imgpost.lock.json` records the sha256 of every vendored file and of the runner version that `stages.py` ports.
 
@@ -333,4 +442,3 @@ Never edit `imgpost/` here. To pick up an engine change:
 - The turn of a label round its bottle isn't pinned by the edges (above): a 4096 px label can land 5 to 11 px round from where a hand fit puts it.
 - Batch mode: one job across many frames.
 - A GPU path. Everything runs the engine's numpy and scipy code on the CPU, about 4 to 15 s per product.
-| Engine 0.10.2 (label mode redraws a wrapping side of the packshot outline on the limb, 2026-10-16): the 6 bottle-label jobs with a quad, a quad and a mask, and a mask alone | all 18 drafts' jobs identical to the engine's, images within 8 levels everywhere; placement as before or closer, except the 4096 px bottle label with a mask alone (5.4 to 8.3 px, its turn round the bottle) |
