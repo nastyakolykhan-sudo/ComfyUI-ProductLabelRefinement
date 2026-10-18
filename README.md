@@ -10,6 +10,8 @@ A job doesn't have to be measured by hand first. **Auto Draft** makes one inside
 
 **Video too.** Product Label: Refine (Video) carries a corrected keyframe's label through a whole clip: track the product, fit its surface on every frame, re-project the true label with each frame's light, and change nothing outside the changed pixels. See [Video: the label through a clip](#video-the-label-through-a-clip).
 
+**One workflow for every case.** `workflows/product-label-refinement-all.json` takes an image or a clip and runs only the branch the case needs: a still, a light-ink keyframe, a measured job, or a clip through SAM 3 and Refine (Video). It is the one to deploy; the other templates stay as they are. See [One workflow for every case](#one-workflow-for-every-case).
+
 **Renamed from ComfyUI-ImagePost (2026-10-16).** The pack now matches the product-label-refinement skill it ports. GitHub redirects the old URL, so existing clones keep pulling. The node IDs (`ImagePostLoadJob`, `ImagePostAutoDraft`, ...) are unchanged, so saved workflows still load; only the display names ("Product Label: ..."), the menu category, the template file names and the default output folder (`output/product-label-refinement/`) changed. To rename an existing clone's remote: `git remote set-url origin https://github.com/nastyakolykhan-sudo/ComfyUI-ProductLabelRefinement`.
 
 ## Install
@@ -32,6 +34,8 @@ The video nodes also need AllTracker's weights in `ComfyUI/models/trackers/` and
 To start from rough input instead, load `workflows/product-label-refinement-draft.json`: Auto Draft takes the place of Load Job, with the card's corners read a few px off, the mug traced roughly and two landmarks clicked near the header band. It also appears in ComfyUI's template browser, under ComfyUI-ProductLabelRefinement. The draft job it made is saved as `output/product-label-refinement/draft_00001_.json`.
 
 For print straight on a body, copy `examples/ink_demo/inkdemo_frame.png`, `inkdemo_packshot.png` and `inkdemo_mask.png` into `ComfyUI/input/` and load `workflows/product-label-refinement-ink-draft.json` (Auto Draft from the frame, the mask and the packshot) or `product-label-refinement-ink.json` (the measured `examples/ink_demo/job.json` in Load Job). The keyframe lands in `output/product-label-refinement/`. The ink demo is a made-up frosted bottle whose white print came out garbled ("SAMPEL STUIDO", "Ligth Pirnt on a Bdoy"), seen from slightly above; `tools/make_ink_demo.py` draws it.
+
+For the one workflow, copy the ink demo's three files, load `workflows/product-label-refinement-all.json`, set **Product mask** to `inkdemo_mask.png` (or leave it at (none) with the SAM 3.1 checkpoint installed: the prompt is `bottle`) and queue it. It gives the ink-draft template's keyframe, as `output/product-label-refinement/refined_00001_.png`. Set **Source** to `labelvideo_demo_clip.mov`, **Product mask** to `labelvideo_demo_mask.mov`, **Corrected keyframe** to `labelvideo_demo_keyframe.png` and **Keyframe frame** to -1 for the video template's result.
 
 The demo is a made-up product card. In the "generated" scene its text is garbled ("PRDOUCT", "sapmle lable"), its emblem and grid are wrong, its corners are square and its top is too tall. A mug stands in front of its lower right corner and casts a shadow across it. The packshot is the clean card. `tools/make_demo.py` draws all three files from code, so they show no real product or brand. `examples/demo/job.json` is the worked example of a job.
 
@@ -196,6 +200,7 @@ The text is right on every frame, the timing is the source's, and the pixels out
    - Get them from `https://huggingface.co/aharley/alltracker/resolve/main/alltracker.pth`: 66,005,722 bytes, sha256 `ffd9ebcfb6d206d594b646999a150540f92c049cf9b2bf940facf7123f62aa1d`, MIT.
    - The node lists what's in that folder under `tracker` and never downloads anything.
 3. **SAM 3.1:** `ComfyUI/models/checkpoints/sam3.1_multiplex_fp16.safetensors`, the checkpoint the label-fix workflow already loads. Its licence is Meta's SAM License.
+   - The one workflow (`product-label-refinement-all`) also needs ComfyUI-MaskAspectCrop (Crop & Rotate) installed.
 4. **pip:**
    - `matplotlib` (optional): without it the QA plot is skipped and everything else runs.
    - `torchvision`, `einops` and `av` ship with ComfyUI.
@@ -310,6 +315,93 @@ Typical overrides after a first look at the report: `{"render": {"spark_glow": [
 - SAM 3: Meta's SAM License; check its use restrictions for your case.
 - No CoTracker: non-commercial, and refused here.
 
+## One workflow for every case
+
+`workflows/product-label-refinement-all.json` (and `.api.json` for the API) is one graph for every case the separate templates cover. The source is an image or a clip, and switches run only the branch the case needs:
+
+| The case | What runs |
+|---|---|
+| An image, paper or dark ink (`ink` off) | Auto Draft (or the given job), then the graph of `product-label-refinement-draft` (Grade To Scene, Match Finish) |
+| An image, light print on the body (`ink` light) | Auto Draft (or the given job), then the graph of `product-label-refinement-ink-draft` (no grade; the product mask is the matte the print stays inside) |
+| A measured job | Load Job instead of Auto Draft (Auto Draft doesn't run) |
+| A clip | SAM 3 on the keyframe frame, then through the clip both ways; the stills branch above on the keyframe frame; then Refine (Video) with that keyframe |
+| A clip and a corrected keyframe made elsewhere | SAM 3 and Refine (Video); the stills branch doesn't run |
+| A product mask given (image or clip) | SAM 3 doesn't run |
+| `Fix this product` false (the product looks fine on the triage sheet) | only SAM 3 on the keyframe frame and Label Triage's sheet: seconds |
+
+**Triage first.** Every run also draws Label Triage's sheet: the product's print on the frame (an image, or the clip's keyframe frame) next to the packshot's at the same size, both straightened, in colour (the engine's `imgauto/triage.py`). Run once with **Fix this product** off for each product in the input: the sheet and `triage.json` come back in seconds. Turn it on only for the products whose print is wrong; a product that looks fine never costs a draft, a track or a render. OCR on the sheet is an optional hint (`ocr`): at frame scale it can't tell a right print from a garbled one, so the call is the agent's (or yours).
+
+An image never reaches the video nodes, a light-ink job never runs Grade To Scene or Match Finish, and nothing in a skipped branch runs or fails.
+
+**What it needs** (on top of the pack): ComfyUI 0.19.3 or newer (core SAM 3 nodes; tested on 0.41.0 with frontend 1.55.17), [ComfyUI-MaskAspectCrop](https://github.com/nastyakolykhan-sudo/ComfyUI-MaskAspectCrop) for Crop & Rotate, the SAM 3.1 checkpoint `models/checkpoints/sam3.1_multiplex_fp16.safetensors`, and AllTracker's weights for clips (see the [Swordfish checklist](#swordfish-checklist)).
+
+**Same pixels as the separate templates.** Run with the same inputs, each case gives what its template gives, 0 px apart, with the same reports (`tools/regress_all.py`, see [Regression](#regression)):
+- the ink demo: Auto Draft (= `product-label-refinement-ink-draft`) and its job (= `product-label-refinement-ink`);
+- the stills demo: Auto Draft from its rough input (= `product-label-refinement-draft`) and its job (= `product-label-refinement`), the PSD included;
+- the video demo with its keyframe (= `product-label-refinement-video`): the lossless master frame for frame;
+- the video demo end to end, with a packshot of its tube: the keyframe the stills branch makes on frame 20 is the draft template's on that frame, and the clip is the video template's given that keyframe.
+
+In these checks the product mask was given, so SAM 3 itself didn't run; its part of the graph is the label-fix workflow's (SAM3 Detect on the keyframe frame, then SAM 3 Track From Keyframe).
+
+**Straightening** resamples what it changes: the crop is turned out of the frame and the changed pixels back into it (bicubic, as Crop & Rotate does), with a 2 px rim round them. On the ink demo turned upright by 3°, the print landed within 3 levels of the unturned run (median; 7 at the 95th percentile), and 39 px of the bottle's rim outside its mask changed. Leave it off unless the stills fix needs the label upright.
+
+### Its inputs
+
+The ids are the API file's (`workflows/product-label-refinement-all.api.json`), and the UI file uses the same ones.
+
+| Node | Input | What to give |
+|---|---|---|
+| 1 Load Source | `source` | the image or clip to fix, by its name in `input/` (with a subfolder: `plr/clip.mov`). A video runs the video branch |
+| 2 Packshot (Load Image) | `image` | the real product. A transparent PNG's alpha is its outline |
+| 3 Product mask (Load Optional File) | `file` | `(none)`: SAM 3 finds it. Or a mask file, white = product, the source's size; a mask video for a clip, one frame per frame |
+| 4 Corrected keyframe (Load Optional File) | `file` | clips: `(none)`: the stills branch makes it from the keyframe frame. Or a frame of the clip fixed elsewhere (by hand, an image model), the clip's size |
+| 5 Job JSON (String, multiline) | `value` | empty: Auto Draft drafts the job. Or a measured job.json's text: Load Job runs it, and Auto Draft doesn't run |
+| 6 Keyframe frame (Int) | `value` | clips: the frame the stills branch fixes (from 0), which is also Refine's `keyframe_index`. `-1` with a given keyframe: Refine finds its frame. An image ignores it |
+| 7 Video Settings | `settings` | Refine (Video)'s settings JSON (below); empty: everything measured |
+| 7 Video Settings | `product_copy` | the label's copy, as printed: it becomes the settings' `words` (OCR in the QA, text boxes) unless the settings give words, and Label Triage's OCR hint |
+| 70 Label Triage | `ocr`, `glyph` | off: optional hints (tesseract; a letter-scale match), reported only |
+| 9 Fix this product (Boolean) | `value` | `true` (default): fix it. `false`: the triage sheet says it looks fine; only SAM 3 on the keyframe frame and the sheet run |
+| 8 Auto Draft fits to the product mask (Boolean) | `value` | `true`: Auto Draft fits the outline to the mask (light ink needs it). `false`: a paper draft from `quad` and `pairs` only, as the draft template |
+| 11 SAM 3 prompt (CLIP Text Encode) | `text` | what the product is, e.g. `pump bottle`. Comma-separated prompts are joined into one mask; `name:N` takes N objects of a kind (1 by default) |
+| 13 SAM 3 on the keyframe frame | `threshold`, `refine_iterations` | 0.33 and 2, as the label-fix workflow |
+| 14 SAM 3 through the clip | `detection_threshold`, `max_objects`, `detect_interval` | 0.33, 1, 1 |
+| 21 Straighten (Crop & Rotate) | `center_x`, `center_y`, `crop_width`, `crop_height`, `rotation` | a frame round the product and the turn that puts its label upright (degrees, + turns the image clockwise behind the frame). All 0: off, the whole frame, and nothing is resampled. When on, the stills branch works on the crop (Auto Draft's `quad`, `pairs`, `occluders` and the job are in the crop's px) and only the pixels it changed go back into the frame |
+| 24 Auto Draft | `ink` | the print type: `off` for paper or dark ink, `light` for light print straight on the body |
+| 24 Auto Draft | `quad`, `model`, `light`, `label`, `outline`, `pairs`, `occluders`, `mask_skip`, `print_box`, `bow`, `suggest` | as on the node ([Starting from rough input](#starting-from-rough-input-auto-draft), [Print straight on a body](#print-straight-on-a-body-the-ink-templates)). The template holds the ink demo's |
+| 62 Refine (Video) | `processes`, `model`, `compositing`, `soft_cap`, `glue`, `keyframe_frames`, `tracker` | as on the node ([Video nodes](#video-nodes-image--product-label-refinement--video)); `processes` 8 on a server |
+
+### Its outputs
+
+| Node | File (in `output/`) | What |
+|---|---|---|
+| 71 | `product-label-refinement/triage/sheet_#####_.png` | the triage sheet: the print on the frame next to the packshot's |
+| 70 Label Triage | (its text) | `triage.json`: the triage's measures (the call is the agent's), or why it couldn't measure |
+| 44 | `product-label-refinement/refined_#####_.png` | the refined image (lossless PNG); for a clip, the refined keyframe |
+| 40 QA Sheet | (its text) | `report.json`: the stills run's report and audit |
+| 45-50 | `product-label-refinement/qa/{compare,edges,before_after,audit,align_overlay,draft_points}_#####_.png` | the QA sheets |
+| 52, 54 | `qa/grade_preview`, `qa/relight_map` | paper and dark ink only |
+| 56 | `qa/print_removed` | light ink only: the body without its garbled print |
+| 58 Save PSD | `product-label-refinement/refined_#####_.psd` | paper and dark ink only; `tools/comfy_run.py` runs it with `--psd` |
+| 24 Auto Draft | `product-label-refinement/draft_#####_.json` (and its text) | the drafted job: edit it and give it back as the Job JSON |
+| 63 | `product-label-refinement/video/refined_#####.mov` | clips: the lossless master (QuickTime PNG, exact RGB; its ui lists it under `files`) |
+| 65 | `product-label-refinement/video/review_#####_.mp4` | clips: the refined clip, to review |
+| 66 | `product-label-refinement/video/qa_plot_#####_.png` | clips: Refine's QA plot |
+| 67 Refine report | (its text) | clips: Refine's report JSON (`not_covered`, `partly_covered`, `flagged`, `review`, `geometry`) |
+
+### The flow nodes (image › product-label-refinement › flow)
+
+| Node | In | Out |
+|---|---|---|
+| **Load Source (Image or Video)** | `source`: a file in `input/` | `frames` (one for an image), `fps`, `audio`, `is_video`, `frame_count`. Images go through Load Image, videos through Load Video's decoder: the same pixels as those nodes |
+| **Load Optional File** | `file`, or `(none)` | `image` (every frame), `mask` (their red channel, as Load Image (as Mask) and Image To Mask read it), `given` |
+| **Switch** | `when`; `if_true`, `if_false` (lazy) | the one picked; only it is computed. `when` is true for true, a non-empty string, a non-zero number or anything given |
+| **Run If** | `value` (lazy), `when`, `run_when` | `value`, or a block: every node after it, output nodes included, is skipped without an error |
+| **Print Type** | `job` | `light`: the job lays light print on the body (`matte` ink, polarity light) |
+| **Pick Frame** | `index`; `images`?, `masks`? | that frame (clamped), and its index |
+| **Paste-Back Mask** | `before`, `after`, `crop_rotate`, `grow` | where a straightened crop changed (8 bit), grown by `grow` px, for Crop & Rotate Composite; `straightened` false when the crop is the whole frame unturned |
+| **Video Settings** | `settings`, `product_copy` | the settings JSON with the copy as `words`, and the copy |
+| **Label Triage** | `frame`, `mask`, `reference`; `reference_mask`?, `product_copy`?, `ocr`, `glyph` | `sheet` (the print on the frame next to the packshot's, straightened, same size), `measures` (JSON; an error there never stops the run) |
+
 ## Conventions
 
 - **Work box.** `scene` is the whole generated frame, and the job's `roi` is the work box. Every other IMAGE or MASK passed between Product Label Refinement nodes covers only the work box. Composite Behind pastes it back, and every pixel outside the box passes through untouched.
@@ -386,6 +478,44 @@ curl -s -o refined.png "http://127.0.0.1:8188/view?filename=imagepost_demo_scene
 
 A failed run has `status.status_str: "error"`, with the node and `exception_message` under `status.messages`.
 
+### The one workflow over the API
+
+`tools/comfy_run.py` drives `workflows/product-label-refinement-all.api.json` with the same flags:
+- `--source PATH` uploads the image or clip into Load Source (1); `--scene` does the same when the workflow has no scene Load Image;
+- `--reference PATH`: the packshot (2);
+- `--mask PATH`: the product mask (3); without it SAM 3 runs;
+- `--keyframe PATH`: a corrected keyframe (4);
+- `--job PATH`: the job's text into the Job JSON (5); Auto Draft doesn't run;
+- `--set ID.INPUT=VALUE` for everything else (the tables above), `--image ID=PATH` for any loader.
+
+`--out` then holds `triage.json` and the triage sheet, `report.json` (the stills report), `video_report.json` (Refine's), every image, the draft job, the lossless `.mov` and the review mp4.
+
+```bash
+# triage: is the bottle's print wrong at all? (only SAM 3 and the sheet run)
+python3 tools/comfy_run.py --server $URL --workflow workflows/product-label-refinement-all.api.json \
+  --source examples/ink_demo/inkdemo_frame.png --reference examples/ink_demo/inkdemo_packshot.png \
+  --set "11.text=bottle" --set 9.value=false --out ./triage
+
+# a still with light print on the body: the ink demo, SAM 3 finding the bottle
+python3 tools/comfy_run.py --server $URL --workflow workflows/product-label-refinement-all.api.json \
+  --source examples/ink_demo/inkdemo_frame.png --reference examples/ink_demo/inkdemo_packshot.png \
+  --set "11.text=bottle" --set 24.ink=light --set "24.print_box=176,396,432,924" --set "24.bow=-140 130/matte" --out ./run1
+
+# a clip: the stills branch fixes frame 20, then Refine carries it through (the settings and copy optional)
+python3 tools/comfy_run.py --server $URL --workflow workflows/product-label-refinement-all.api.json \
+  --source clip.mov --reference packshot.png --set "11.text=serum bottle" --set 6.value=20 \
+  --set 24.ink=off --set 24.print_box= --set 24.bow= --set 62.processes=8 \
+  --set '7.settings={"render": {"body_snap": true}}' --set "7.product_copy=SAMPLE everyday hydrating serum" --out ./run2
+
+# the same clip with a keyframe corrected elsewhere and a patched mask video: SAM 3 and the stills branch don't run
+python3 tools/comfy_run.py --server $URL --workflow workflows/product-label-refinement-all.api.json \
+  --source clip.mov --mask clip_mask.mov --keyframe keyframe.png --set 6.value=-1 --out ./run3
+```
+
+Without the tool: upload each file with `POST /upload/image` (any file type, videos too), set the same inputs by node id in the API file (`.["1"].inputs.source`, `.["3"].inputs.file`, `.["5"].inputs.value`, ...), `POST /prompt`, then read `/history/<prompt_id>`. Each Save Image lists `images`, Save Lossless lists `files`, SaveVideo lists its mp4, and the QA Sheet (40) and the Refine report (67) list `text`. Fetch files with `/view?filename=...&subfolder=...&type=output`.
+
+The loop for an agent: triage each product first (`9.value=false`, one run per product, the SAM 3 prompt naming it) and fix only those whose sheet shows a wrong print; then run with Auto Draft; read `report.json` (`audit_verdict`, `align`) and the audit sheet; fix the draft job (`draft_#####_.json`) and run it again as the Job JSON. For a clip, check the refined keyframe the same way before reading `video_report.json`: `not_covered` and `partly_covered` say which frame to fix next (run again with that keyframe frame), and `review.actions` give settings to try.
+
 ## Writing a job
 
 `examples/demo/job.json` shows every section. The main ones:
@@ -424,6 +554,20 @@ Measure landmarks and edges by colour change, not by the strongest gradient, and
 | The video demo (40 frames, 432 x 768, one keyframe): the node in-process vs `video.py --refine`, with and without the label's copy (`words`) | identical: frames 0 px, matte, changed mask and report; pixels outside `changed` are the input's |
 | The video template on a live ComfyUI 0.18.2 (CPU, no matplotlib), the demo | success in 2 min: 40 of 40 frames refined, keyframe found at frame 20, 0 px changed outside the matte |
 | A real 169-frame 1080 x 1920 clip with one corrected keyframe, the template on a live ComfyUI 0.18.2, `processes: 8` (CPU) | success in 20 min: frames 0-121 refined; the shot after the cut (122-138) reported as "reacquire, a cut at its edge", suggested keyframe 136; 0 px changed outside the matte. ComfyUI's video decode differs from ffmpeg's by a few levels, so a few flags land on other frames than in the CLI run |
+
+**The one workflow.** `tools/regress_all.py` runs each case through `workflows/product-label-refinement-all.api.json` and through its own template on a live server, with the same inputs (via `tools/comfy_run.py`), and compares every output: images to 0 px, the reports, the draft job, the PSD and the lossless master frame for frame.
+
+```bash
+python -P tools/regress_all.py --server http://127.0.0.1:8188 [--video] [--keep DIR]
+```
+
+| Run (2026-10-18, ComfyUI 0.41.0, frontend 1.55.17, CPU) | Result |
+|---|---|
+| ink-draft, ink-job, paper-draft (PSD too), paper-job (PSD too) | all PASS: every image 0 px, the same `report.json`, draft job and PSD |
+| video: the demo's clip, mask video and keyframe | PASS: the lossless master identical on 40 of 40 frames, the same Refine report |
+| The video demo end to end (by hand): the stills branch on frame 20 from a packshot of the demo's tube, then Refine, against the draft template on that frame and the video template given its keyframe | identical keyframe (0 px, same report and draft job), identical clip (40 of 40 frames, the same report); 3.5 min |
+| The UI file loaded in the frontend | no missing nodes; its own API export equals the API file |
+| Triage only (`Fix this product` off) on the ink demo and on the video demo's frame 20 | 1 s each: only the sheet and `triage.json`; the sheets show the garbled print next to the true one |
 
 **Stills.**
 
@@ -493,7 +637,8 @@ Stills:
 python3 tools/sync_imgpost.py                    # check: local edits, engine changes, runner changes
 python3 tools/sync_imgpost.py --update           # copy the engine's imgpost/ here and re-pin
 python3 tools/sync_imgpost.py --mark-ported      # after porting a runner change into stages.py
-python -I tools/build_workflows.py               # rebuild workflows/ after changing a node's inputs or outputs
+python -I tools/build_workflows.py               # rebuild workflows/ (the one workflow too) after changing a node's inputs or outputs
+python -P tools/regress_all.py --server URL --video   # the one workflow against each template, on a live server
 python3 tools/make_demo.py                       # redraw examples/demo/ (byte-identical with the same libraries)
 python3 -P tools/make_ink_demo.py                # redraw examples/ink_demo/ (the light-ink demo; uses imgpost/)
 ```

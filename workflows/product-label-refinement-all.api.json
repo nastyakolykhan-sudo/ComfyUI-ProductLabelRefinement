@@ -1,0 +1,1317 @@
+{
+  "1": {
+    "inputs": {
+      "source": "inkdemo_frame.png"
+    },
+    "class_type": "ProductLabelLoadSource",
+    "_meta": {
+      "title": "Source: the image or clip to fix"
+    }
+  },
+  "2": {
+    "inputs": {
+      "image": "inkdemo_packshot.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Packshot (the real product)"
+    }
+  },
+  "3": {
+    "inputs": {
+      "file": "(none)"
+    },
+    "class_type": "ProductLabelLoadOptional",
+    "_meta": {
+      "title": "Product mask (optional: (none) = SAM 3)"
+    }
+  },
+  "4": {
+    "inputs": {
+      "file": "(none)"
+    },
+    "class_type": "ProductLabelLoadOptional",
+    "_meta": {
+      "title": "Corrected keyframe (optional, clips: (none) = the stills branch makes it)"
+    }
+  },
+  "5": {
+    "inputs": {
+      "value": ""
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "Job JSON (optional: empty = Auto Draft)"
+    }
+  },
+  "6": {
+    "inputs": {
+      "value": 0
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Keyframe frame (clips; -1 = find the given keyframe's frame)"
+    }
+  },
+  "7": {
+    "inputs": {
+      "settings": "",
+      "product_copy": ""
+    },
+    "class_type": "ProductLabelVideoSettings",
+    "_meta": {
+      "title": "Refine settings JSON and the product's copy (clips)"
+    }
+  },
+  "8": {
+    "inputs": {
+      "value": true
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "Auto Draft fits to the product mask"
+    }
+  },
+  "9": {
+    "inputs": {
+      "value": true
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "Fix this product (false: it looks fine on the triage sheet; only the sheet runs)"
+    }
+  },
+  "10": {
+    "inputs": {
+      "ckpt_name": "sam3.1_multiplex_fp16.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "SAM 3.1 checkpoint"
+    }
+  },
+  "11": {
+    "inputs": {
+      "text": "bottle",
+      "clip": [
+        "10",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "SAM 3 prompt: the product (comma-separated; name:N for N objects)"
+    }
+  },
+  "12": {
+    "inputs": {
+      "index": [
+        "6",
+        0
+      ],
+      "images": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "ProductLabelPickFrame",
+    "_meta": {
+      "title": "Keyframe frame"
+    }
+  },
+  "13": {
+    "inputs": {
+      "model": [
+        "10",
+        0
+      ],
+      "image": [
+        "12",
+        0
+      ],
+      "threshold": 0.33,
+      "refine_iterations": 2,
+      "individual_masks": false,
+      "conditioning": [
+        "11",
+        0
+      ]
+    },
+    "class_type": "SAM3_Detect",
+    "_meta": {
+      "title": "SAM 3 on the keyframe frame"
+    }
+  },
+  "14": {
+    "inputs": {
+      "images": [
+        "1",
+        0
+      ],
+      "model": [
+        "10",
+        0
+      ],
+      "keyframe_mask": [
+        "13",
+        0
+      ],
+      "keyframe_index": [
+        "12",
+        2
+      ],
+      "conditioning": [
+        "11",
+        0
+      ],
+      "detection_threshold": 0.33,
+      "max_objects": 1,
+      "detect_interval": 1
+    },
+    "class_type": "ProductLabelVideoSAM3BothWays",
+    "_meta": {
+      "title": "SAM 3 through the clip, both ways from the keyframe"
+    }
+  },
+  "15": {
+    "inputs": {
+      "when": [
+        "1",
+        3
+      ],
+      "if_true": [
+        "14",
+        0
+      ],
+      "if_false": [
+        "13",
+        0
+      ]
+    },
+    "class_type": "ProductLabelSwitch",
+    "_meta": {
+      "title": "SAM 3 masks: the clip's, else the image's"
+    }
+  },
+  "16": {
+    "inputs": {
+      "when": [
+        "3",
+        2
+      ],
+      "if_true": [
+        "3",
+        1
+      ],
+      "if_false": [
+        "15",
+        0
+      ]
+    },
+    "class_type": "ProductLabelSwitch",
+    "_meta": {
+      "title": "Product mask: the given one, else SAM 3"
+    }
+  },
+  "18": {
+    "inputs": {
+      "when": [
+        "3",
+        2
+      ],
+      "if_true": [
+        "3",
+        1
+      ],
+      "if_false": [
+        "13",
+        0
+      ]
+    },
+    "class_type": "ProductLabelSwitch",
+    "_meta": {
+      "title": "Keyframe frame's mask: the given one, else SAM 3 on that frame"
+    }
+  },
+  "17": {
+    "inputs": {
+      "index": [
+        "6",
+        0
+      ],
+      "masks": [
+        "18",
+        0
+      ]
+    },
+    "class_type": "ProductLabelPickFrame",
+    "_meta": {
+      "title": "Keyframe frame's mask"
+    }
+  },
+  "70": {
+    "inputs": {
+      "frame": [
+        "12",
+        0
+      ],
+      "mask": [
+        "17",
+        1
+      ],
+      "reference": [
+        "2",
+        0
+      ],
+      "reference_mask": [
+        "2",
+        1
+      ],
+      "product_copy": [
+        "7",
+        1
+      ],
+      "ocr": false,
+      "glyph": false
+    },
+    "class_type": "ProductLabelTriage",
+    "_meta": {
+      "title": "Label Triage: the print on the frame | the packshot's"
+    }
+  },
+  "71": {
+    "inputs": {
+      "images": [
+        "70",
+        0
+      ],
+      "filename_prefix": "product-label-refinement/triage/sheet"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save the triage sheet"
+    }
+  },
+  "72": {
+    "inputs": {
+      "value": [
+        "12",
+        0
+      ],
+      "when": [
+        "9",
+        0
+      ],
+      "run_when": "true"
+    },
+    "class_type": "ProductLabelRunIf",
+    "_meta": {
+      "title": "Fix: only when the product needs it"
+    }
+  },
+  "73": {
+    "inputs": {
+      "value": [
+        "1",
+        0
+      ],
+      "when": [
+        "9",
+        0
+      ],
+      "run_when": "true"
+    },
+    "class_type": "ProductLabelRunIf",
+    "_meta": {
+      "title": "Video: only when the product needs fixing"
+    }
+  },
+  "20": {
+    "inputs": {
+      "value": [
+        "72",
+        0
+      ],
+      "when": [
+        "4",
+        2
+      ],
+      "run_when": "false"
+    },
+    "class_type": "ProductLabelRunIf",
+    "_meta": {
+      "title": "Stills branch: only without a given keyframe"
+    }
+  },
+  "21": {
+    "inputs": {
+      "image": [
+        "20",
+        0
+      ],
+      "center_x": 0.0,
+      "center_y": 0.0,
+      "crop_width": 0,
+      "crop_height": 0,
+      "rotation": 0.0,
+      "aspect_ratio": "free",
+      "mask": [
+        "17",
+        1
+      ]
+    },
+    "class_type": "CropRotate",
+    "_meta": {
+      "title": "Straighten: crop and turn (optional; all 0 = the whole frame)"
+    }
+  },
+  "22": {
+    "inputs": {
+      "value": [
+        "21",
+        0
+      ],
+      "when": [
+        "5",
+        0
+      ],
+      "run_when": "false"
+    },
+    "class_type": "ProductLabelRunIf",
+    "_meta": {
+      "title": "Auto Draft: only without a given job"
+    }
+  },
+  "23": {
+    "inputs": {
+      "when": [
+        "8",
+        0
+      ],
+      "if_true": [
+        "21",
+        1
+      ]
+    },
+    "class_type": "ProductLabelSwitch",
+    "_meta": {
+      "title": "Auto Draft's product mask (on, off)"
+    }
+  },
+  "24": {
+    "inputs": {
+      "scene": [
+        "22",
+        0
+      ],
+      "reference": [
+        "2",
+        0
+      ],
+      "quad": "",
+      "model": "affine",
+      "light": "off",
+      "suggest": false,
+      "filename_prefix": "product-label-refinement/draft",
+      "product_mask": [
+        "23",
+        0
+      ],
+      "reference_mask": [
+        "2",
+        1
+      ],
+      "pairs": "",
+      "occluders": "",
+      "outline": "",
+      "mask_skip": "",
+      "label": "off",
+      "ink": "light",
+      "print_box": "176,396,432,924",
+      "bow": "-140 130/matte"
+    },
+    "class_type": "ImagePostAutoDraft",
+    "_meta": {
+      "title": "Auto Draft"
+    }
+  },
+  "25": {
+    "inputs": {
+      "job_json": [
+        "5",
+        0
+      ],
+      "job_path": ""
+    },
+    "class_type": "ImagePostLoadJob",
+    "_meta": {
+      "title": "Load Job (the given job)"
+    }
+  },
+  "26": {
+    "inputs": {
+      "when": [
+        "5",
+        0
+      ],
+      "if_true": [
+        "25",
+        0
+      ],
+      "if_false": [
+        "24",
+        0
+      ]
+    },
+    "class_type": "ProductLabelSwitch",
+    "_meta": {
+      "title": "Job: the given one, else the draft"
+    }
+  },
+  "27": {
+    "inputs": {
+      "job": [
+        "26",
+        0
+      ]
+    },
+    "class_type": "ProductLabelPrintType",
+    "_meta": {
+      "title": "Print type (from the job)"
+    }
+  },
+  "28": {
+    "inputs": {
+      "job": [
+        "26",
+        0
+      ],
+      "scene": [
+        "21",
+        0
+      ],
+      "product_mask": [
+        "30",
+        1
+      ]
+    },
+    "class_type": "ImagePostJobMasks",
+    "_meta": {
+      "title": "Job Masks"
+    }
+  },
+  "29": {
+    "inputs": {
+      "job": [
+        "26",
+        0
+      ]
+    },
+    "class_type": "ImagePostFitWarp",
+    "_meta": {
+      "title": "Fit Warp"
+    }
+  },
+  "30": {
+    "inputs": {
+      "job": [
+        "26",
+        0
+      ],
+      "homography": [
+        "29",
+        0
+      ],
+      "scene": [
+        "21",
+        0
+      ],
+      "reference": [
+        "2",
+        0
+      ],
+      "reference_mask": [
+        "2",
+        1
+      ]
+    },
+    "class_type": "ImagePostWarpReference",
+    "_meta": {
+      "title": "Warp Reference"
+    }
+  },
+  "31": {
+    "inputs": {
+      "job": [
+        "26",
+        0
+      ],
+      "scene": [
+        "21",
+        0
+      ],
+      "warped": [
+        "30",
+        0
+      ],
+      "product_mask": [
+        "30",
+        1
+      ],
+      "old_silhouette": [
+        "28",
+        0
+      ],
+      "occluder_mask": [
+        "28",
+        1
+      ],
+      "colour": "job",
+      "shading": "job",
+      "reference": [
+        "2",
+        0
+      ],
+      "coords": [
+        "30",
+        3
+      ],
+      "relight": "job"
+    },
+    "class_type": "ImagePostGradeToScene",
+    "_meta": {
+      "title": "Grade To Scene (paper, dark ink)"
+    }
+  },
+  "32": {
+    "inputs": {
+      "job": [
+        "26",
+        0
+      ],
+      "scene": [
+        "21",
+        0
+      ],
+      "graded": [
+        "31",
+        0
+      ],
+      "product_mask": [
+        "30",
+        1
+      ],
+      "old_silhouette": [
+        "28",
+        0
+      ],
+      "occluder_mask": [
+        "28",
+        1
+      ],
+      "coords": [
+        "30",
+        3
+      ]
+    },
+    "class_type": "ImagePostMatchFinish",
+    "_meta": {
+      "title": "Match Finish (paper, dark ink)"
+    }
+  },
+  "33": {
+    "inputs": {
+      "when": [
+        "27",
+        0
+      ],
+      "if_true": [
+        "21",
+        1
+      ],
+      "if_false": [
+        "28",
+        0
+      ]
+    },
+    "class_type": "ProductLabelSwitch",
+    "_meta": {
+      "title": "Old silhouette: the product mask (light ink), else the job's"
+    }
+  },
+  "34": {
+    "inputs": {
+      "job": [
+        "26",
+        0
+      ],
+      "scene": [
+        "21",
+        0
+      ],
+      "product_mask": [
+        "30",
+        1
+      ],
+      "old_silhouette": [
+        "33",
+        0
+      ],
+      "occluder_mask": [
+        "28",
+        1
+      ],
+      "coords": [
+        "30",
+        3
+      ]
+    },
+    "class_type": "ImagePostFillLeftovers",
+    "_meta": {
+      "title": "Fill Leftovers"
+    }
+  },
+  "35": {
+    "inputs": {
+      "when": [
+        "27",
+        0
+      ],
+      "if_true": [
+        "30",
+        0
+      ],
+      "if_false": [
+        "32",
+        0
+      ]
+    },
+    "class_type": "ProductLabelSwitch",
+    "_meta": {
+      "title": "Product layer: the warped print (light ink), else graded"
+    }
+  },
+  "36": {
+    "inputs": {
+      "when": [
+        "27",
+        0
+      ],
+      "if_true": [
+        "34",
+        3
+      ],
+      "if_false": [
+        "31",
+        4
+      ]
+    },
+    "class_type": "ProductLabelSwitch",
+    "_meta": {
+      "title": "Ink: Fill Leftovers' (light), else Grade To Scene's"
+    }
+  },
+  "37": {
+    "inputs": {
+      "job": [
+        "26",
+        0
+      ],
+      "scene": [
+        "21",
+        0
+      ],
+      "background": [
+        "34",
+        0
+      ],
+      "product": [
+        "35",
+        0
+      ],
+      "product_mask": [
+        "30",
+        1
+      ],
+      "occluder_mask": [
+        "28",
+        1
+      ],
+      "ink": [
+        "36",
+        0
+      ],
+      "coords": [
+        "30",
+        3
+      ]
+    },
+    "class_type": "ImagePostCompositeBehind",
+    "_meta": {
+      "title": "Composite Behind"
+    }
+  },
+  "38": {
+    "inputs": {
+      "when": [
+        "27",
+        0
+      ],
+      "if_false": [
+        "31",
+        2
+      ]
+    },
+    "class_type": "ProductLabelSwitch",
+    "_meta": {
+      "title": "Grade report (paper, dark ink)"
+    }
+  },
+  "39": {
+    "inputs": {
+      "when": [
+        "27",
+        0
+      ],
+      "if_false": [
+        "32",
+        1
+      ]
+    },
+    "class_type": "ProductLabelSwitch",
+    "_meta": {
+      "title": "Finish report (paper, dark ink)"
+    }
+  },
+  "40": {
+    "inputs": {
+      "job": [
+        "26",
+        0
+      ],
+      "before": [
+        "21",
+        0
+      ],
+      "after": [
+        "37",
+        0
+      ],
+      "reference": [
+        "2",
+        0
+      ],
+      "matte": [
+        "37",
+        1
+      ],
+      "fill_mask": [
+        "34",
+        1
+      ],
+      "reference_mask": [
+        "2",
+        1
+      ],
+      "align_report": [
+        "29",
+        1
+      ],
+      "grade_report": [
+        "38",
+        0
+      ],
+      "finish_report": [
+        "39",
+        0
+      ],
+      "fill_report": [
+        "34",
+        2
+      ],
+      "old_silhouette": [
+        "33",
+        0
+      ],
+      "occluder_mask": [
+        "28",
+        1
+      ],
+      "coords": [
+        "30",
+        3
+      ],
+      "ink": [
+        "34",
+        3
+      ]
+    },
+    "class_type": "ImagePostQASheet",
+    "_meta": {
+      "title": "QA Sheet (its text: report.json)"
+    }
+  },
+  "41": {
+    "inputs": {
+      "before": [
+        "21",
+        0
+      ],
+      "after": [
+        "37",
+        0
+      ],
+      "crop_rotate": [
+        "21",
+        2
+      ],
+      "grow": 2
+    },
+    "class_type": "ProductLabelPasteBackMask",
+    "_meta": {
+      "title": "Paste-back mask (straightened crops)"
+    }
+  },
+  "42": {
+    "inputs": {
+      "destination": [
+        "20",
+        0
+      ],
+      "source": [
+        "37",
+        0
+      ],
+      "crop_rotate": [
+        "21",
+        2
+      ],
+      "feather": 0,
+      "mask": [
+        "41",
+        0
+      ]
+    },
+    "class_type": "CropRotateComposite",
+    "_meta": {
+      "title": "Straightened crop back into its frame"
+    }
+  },
+  "43": {
+    "inputs": {
+      "when": [
+        "41",
+        1
+      ],
+      "if_true": [
+        "42",
+        0
+      ],
+      "if_false": [
+        "37",
+        0
+      ]
+    },
+    "class_type": "ProductLabelSwitch",
+    "_meta": {
+      "title": "Refined frame: pasted back (straightened), else as it is"
+    }
+  },
+  "44": {
+    "inputs": {
+      "images": [
+        "43",
+        0
+      ],
+      "filename_prefix": "product-label-refinement/refined"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save refined image (a clip: the refined keyframe)"
+    }
+  },
+  "45": {
+    "inputs": {
+      "images": [
+        "40",
+        0
+      ],
+      "filename_prefix": "product-label-refinement/qa/compare"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA compare"
+    }
+  },
+  "46": {
+    "inputs": {
+      "images": [
+        "40",
+        1
+      ],
+      "filename_prefix": "product-label-refinement/qa/edges"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA edges"
+    }
+  },
+  "47": {
+    "inputs": {
+      "images": [
+        "40",
+        2
+      ],
+      "filename_prefix": "product-label-refinement/qa/before_after"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA before_after"
+    }
+  },
+  "48": {
+    "inputs": {
+      "images": [
+        "40",
+        4
+      ],
+      "filename_prefix": "product-label-refinement/qa/audit"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA audit"
+    }
+  },
+  "49": {
+    "inputs": {
+      "images": [
+        "30",
+        2
+      ],
+      "filename_prefix": "product-label-refinement/qa/align_overlay"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA align_overlay"
+    }
+  },
+  "50": {
+    "inputs": {
+      "images": [
+        "24",
+        2
+      ],
+      "filename_prefix": "product-label-refinement/qa/draft_points"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA draft_points"
+    }
+  },
+  "51": {
+    "inputs": {
+      "value": [
+        "31",
+        1
+      ],
+      "when": [
+        "27",
+        0
+      ],
+      "run_when": "false"
+    },
+    "class_type": "ProductLabelRunIf",
+    "_meta": {
+      "title": "Grade preview: paper only"
+    }
+  },
+  "52": {
+    "inputs": {
+      "images": [
+        "51",
+        0
+      ],
+      "filename_prefix": "product-label-refinement/qa/grade_preview"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA grade_preview"
+    }
+  },
+  "53": {
+    "inputs": {
+      "value": [
+        "31",
+        3
+      ],
+      "when": [
+        "27",
+        0
+      ],
+      "run_when": "false"
+    },
+    "class_type": "ProductLabelRunIf",
+    "_meta": {
+      "title": "Relight map: paper only"
+    }
+  },
+  "54": {
+    "inputs": {
+      "images": [
+        "53",
+        0
+      ],
+      "filename_prefix": "product-label-refinement/qa/relight_map"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA relight_map"
+    }
+  },
+  "55": {
+    "inputs": {
+      "value": [
+        "34",
+        0
+      ],
+      "when": [
+        "27",
+        0
+      ],
+      "run_when": "true"
+    },
+    "class_type": "ProductLabelRunIf",
+    "_meta": {
+      "title": "Garbled print removed: light ink only"
+    }
+  },
+  "56": {
+    "inputs": {
+      "images": [
+        "55",
+        0
+      ],
+      "filename_prefix": "product-label-refinement/qa/print_removed"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA garbled print removed"
+    }
+  },
+  "57": {
+    "inputs": {
+      "value": [
+        "32",
+        0
+      ],
+      "when": [
+        "27",
+        0
+      ],
+      "run_when": "false"
+    },
+    "class_type": "ProductLabelRunIf",
+    "_meta": {
+      "title": "Product layer for the PSD: paper only"
+    }
+  },
+  "58": {
+    "inputs": {
+      "job": [
+        "26",
+        0
+      ],
+      "scene": [
+        "21",
+        0
+      ],
+      "image": [
+        "37",
+        0
+      ],
+      "background": [
+        "34",
+        0
+      ],
+      "fill_mask": [
+        "34",
+        1
+      ],
+      "product": [
+        "57",
+        0
+      ],
+      "matte": [
+        "37",
+        1
+      ],
+      "filename_prefix": "product-label-refinement/refined"
+    },
+    "class_type": "ImagePostSavePSD",
+    "_meta": {
+      "title": "Save PSD (paper)"
+    }
+  },
+  "60": {
+    "inputs": {
+      "value": [
+        "73",
+        0
+      ],
+      "when": [
+        "1",
+        3
+      ],
+      "run_when": "true"
+    },
+    "class_type": "ProductLabelRunIf",
+    "_meta": {
+      "title": "Video branch: only for a clip"
+    }
+  },
+  "61": {
+    "inputs": {
+      "when": [
+        "4",
+        2
+      ],
+      "if_true": [
+        "4",
+        0
+      ],
+      "if_false": [
+        "43",
+        0
+      ]
+    },
+    "class_type": "ProductLabelSwitch",
+    "_meta": {
+      "title": "Keyframe: the given one, else the stills branch's"
+    }
+  },
+  "62": {
+    "inputs": {
+      "frames": [
+        "60",
+        0
+      ],
+      "mask": [
+        "16",
+        0
+      ],
+      "keyframes": [
+        "61",
+        0
+      ],
+      "tracker": "alltracker.pth",
+      "keyframe_index": [
+        "6",
+        0
+      ],
+      "keyframe_frames": "auto",
+      "settings": [
+        "7",
+        0
+      ],
+      "fps": [
+        "1",
+        1
+      ],
+      "processes": 1,
+      "model": "tube (round products)",
+      "compositing": "settings (render.alpha, else measured)",
+      "soft_cap": -1.0,
+      "glue": false
+    },
+    "class_type": "ProductLabelVideoRefine",
+    "_meta": {
+      "title": "Product Label: Refine (Video)"
+    }
+  },
+  "63": {
+    "inputs": {
+      "images": [
+        "62",
+        0
+      ],
+      "fps": [
+        "1",
+        1
+      ],
+      "filename_prefix": "product-label-refinement/video/refined",
+      "format": "mov (PNG, exact RGB)",
+      "audio": [
+        "1",
+        2
+      ]
+    },
+    "class_type": "ProductLabelVideoSaveLossless",
+    "_meta": {
+      "title": "Save the lossless master (QuickTime PNG)"
+    }
+  },
+  "64": {
+    "inputs": {
+      "images": [
+        "62",
+        0
+      ],
+      "fps": [
+        "1",
+        1
+      ],
+      "audio": [
+        "1",
+        2
+      ],
+      "bit_depth": "auto",
+      "color_space": "sRGB",
+      "codec": "none"
+    },
+    "class_type": "CreateVideo",
+    "_meta": {
+      "title": "Review copy"
+    }
+  },
+  "65": {
+    "inputs": {
+      "video": [
+        "64",
+        0
+      ],
+      "filename_prefix": "product-label-refinement/video/review",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto"
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "Save the refined clip (mp4, to review)"
+    }
+  },
+  "66": {
+    "inputs": {
+      "images": [
+        "62",
+        4
+      ],
+      "filename_prefix": "product-label-refinement/video/qa_plot"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save the clip's QA plot"
+    }
+  },
+  "67": {
+    "inputs": {
+      "source": [
+        "62",
+        3
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "Refine report (JSON)"
+    }
+  }
+}

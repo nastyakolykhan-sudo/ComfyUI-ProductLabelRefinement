@@ -240,7 +240,7 @@ def run(workflow, out, scene=None, reference=None, images=(), job=None, stage="a
     if job:
         cr.set_job(wf, job)
     cr.set_inputs(wf, sets)
-    targets = cr.image_targets(wf, scene, reference, images, mask)
+    targets = {nid: path for nid, (_, path) in cr.image_targets(wf, scene, reference, images, mask).items()}
     wf = cr.prune(cr.keep_psd(wf, cr.psd_wanted(wf, psd)), stage)
     out = Path(out).expanduser()
     out.mkdir(parents=True, exist_ok=True)

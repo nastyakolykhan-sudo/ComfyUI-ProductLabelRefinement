@@ -8,8 +8,11 @@ ComfyUI editor loads), with the job embedded in Load Job; and workflows/product-
 graph started by Auto Draft from the demo's rough input instead; and workflows/product-label-refinement-ink.{api.json,json}
 and -ink-draft.{api.json,json}, the light-ink graph (print straight on a coloured body, matte ink with polarity
 light): a keyframe from a frame, its product mask and the packshot, with the ink demo's measured job in Load Job, or
-started by Auto Draft from the frame, the mask and the packshot alone. Each UI file is converted back the way the
-frontend does (links by slot, widgets by position) and checked to give its API file again. Re-run it after changing a
+started by Auto Draft from the frame, the mask and the packshot alone; and workflows/product-label-refinement-all.
+{api.json,json}, the one workflow for every case (an image or a clip; flow_nodes.py switches the branches), with
+ComfyUI's core and SAM 3 nodes and Crop & Rotate (ComfyUI-MaskAspectCrop) as the frontend 1.55 stores them. Each UI
+file is converted back the way the frontend does (links by slot, widgets by position) and checked to give its API
+file again. Re-run it after changing a
 node's inputs or outputs. Needs a Python with torch (the pack imports it), like tools/offline_run.py.
 """
 import argparse
@@ -148,8 +151,253 @@ def definition_ink_draft():
     return nodes
 
 
+def definition_all():
+    """One workflow for every case (the graph above, the ink graph and Refine (Video)), started by Auto Draft or a
+    given job, on an image or a clip. Switches (lazy) and Run If gates (an ExecutionBlocker) run only the branch a
+    case needs: an image never reaches the video nodes; a light-ink job never runs Grade To Scene or Match Finish; a
+    given keyframe skips the stills branch; a given job skips Auto Draft; a given mask skips SAM 3. It is set up as
+    the ink demo (examples/ink_demo) with SAM 3 on: set the product mask to inkdemo_mask.png to run it without SAM 3."""
+    SW, RUN = "ProductLabelSwitch", "ProductLabelRunIf"
+    qa = "product-label-refinement/qa/"
+    light, job = L(27, 0), L(26, 0)
+    nodes = {
+        # inputs: what an agent or a person sets
+        1: ("ProductLabelLoadSource", "Source: the image or clip to fix", {"source": "inkdemo_frame.png"}, (0, 0)),
+        2: ("LoadImage", "Packshot (the real product)", {"image": "inkdemo_packshot.png"}, (0, 400)),
+        3: ("ProductLabelLoadOptional", "Product mask (optional: (none) = SAM 3)", {"file": "(none)"}, (0, 800)),
+        4: ("ProductLabelLoadOptional", "Corrected keyframe (optional, clips: (none) = the stills branch makes it)",
+            {"file": "(none)"}, (0, 1200)),
+        5: ("PrimitiveStringMultiline", "Job JSON (optional: empty = Auto Draft)", {"value": ""}, (0, 1600)),
+        6: ("PrimitiveInt", "Keyframe frame (clips; -1 = find the given keyframe's frame)", {"value": 0}, (0, 1880)),
+        7: ("ProductLabelVideoSettings", "Refine settings JSON and the product's copy (clips)",
+            {"settings": "", "product_copy": ""}, (0, 2040)),
+        8: ("PrimitiveBoolean", "Auto Draft fits to the product mask", {"value": True}, (0, 2400)),
+        9: ("PrimitiveBoolean", "Fix this product (false: it looks fine on the triage sheet; only the sheet runs)",
+            {"value": True}, (0, 2560)),
+        # SAM 3: the product's mask on the keyframe frame (an image: the image), then through the clip both ways
+        10: ("CheckpointLoaderSimple", "SAM 3.1 checkpoint", {"ckpt_name": "sam3.1_multiplex_fp16.safetensors"}, (480, 0)),
+        11: ("CLIPTextEncode", "SAM 3 prompt: the product (comma-separated; name:N for N objects)",
+             {"text": "bottle", "clip": L(10, 1)}, (480, 160)),
+        12: ("ProductLabelPickFrame", "Keyframe frame", {"index": L(6, 0), "images": L(1, 0)}, (480, 420)),
+        13: ("SAM3_Detect", "SAM 3 on the keyframe frame", {
+            "model": L(10, 0), "image": L(12, 0), "threshold": 0.33, "refine_iterations": 2, "individual_masks": False,
+            "conditioning": L(11, 0)}, (480, 600)),
+        14: ("ProductLabelVideoSAM3BothWays", "SAM 3 through the clip, both ways from the keyframe", {
+            "images": L(1, 0), "model": L(10, 0), "keyframe_mask": L(13, 0), "keyframe_index": L(12, 2),
+            "conditioning": L(11, 0), "detection_threshold": 0.33, "max_objects": 1, "detect_interval": 1}, (480, 880)),
+        15: (SW, "SAM 3 masks: the clip's, else the image's", {"when": L(1, 3), "if_true": L(14, 0),
+                                                              "if_false": L(13, 0)}, (480, 1200)),
+        16: (SW, "Product mask: the given one, else SAM 3", {"when": L(3, 2), "if_true": L(3, 1), "if_false": L(15, 0)},
+             (480, 1340)),
+        18: (SW, "Keyframe frame's mask: the given one, else SAM 3 on that frame", {
+            "when": L(3, 2), "if_true": L(3, 1), "if_false": L(13, 0)}, (480, 1620)),
+        17: ("ProductLabelPickFrame", "Keyframe frame's mask", {"index": L(6, 0), "masks": L(18, 0)}, (480, 1480)),
+        # triage: does the product need fixing at all? (the agent looks at the sheet and sets node 9)
+        70: ("ProductLabelTriage", "Label Triage: the print on the frame | the packshot's", {
+            "frame": L(12, 0), "mask": L(17, 1), "reference": L(2, 0), "reference_mask": L(2, 1),
+            "product_copy": L(7, 1), "ocr": False, "glyph": False}, (0, 0)),
+        71: ("SaveImage", "Save the triage sheet", {"images": L(70, 0),
+                                                    "filename_prefix": "product-label-refinement/triage/sheet"}, (0, 0)),
+        72: (RUN, "Fix: only when the product needs it", {"value": L(12, 0), "when": L(9, 0), "run_when": "true"},
+             (0, 0)),
+        73: (RUN, "Video: only when the product needs fixing", {"value": L(1, 0), "when": L(9, 0), "run_when": "true"},
+             (0, 0)),
+        # stills: the image, or the clip's keyframe frame; Auto Draft, or the given job
+        20: (RUN, "Stills branch: only without a given keyframe", {"value": L(72, 0), "when": L(4, 2),
+                                                                  "run_when": "false"}, (960, 0)),
+        21: ("CropRotate", "Straighten: crop and turn (optional; all 0 = the whole frame)", {
+            "image": L(20, 0), "center_x": 0.0, "center_y": 0.0, "crop_width": 0, "crop_height": 0, "rotation": 0.0,
+            "aspect_ratio": "free", "mask": L(17, 1)}, (960, 140)),
+        22: (RUN, "Auto Draft: only without a given job", {"value": L(21, 0), "when": L(5, 0), "run_when": "false"},
+             (960, 700)),
+        23: (SW, "Auto Draft's product mask (on, off)", {"when": L(8, 0), "if_true": L(21, 1)}, (960, 840)),
+        24: ("ImagePostAutoDraft", "Auto Draft", {
+            "scene": L(22, 0), "reference": L(2, 0), "quad": "", "model": "affine", "light": "off", "suggest": False,
+            "filename_prefix": "product-label-refinement/draft", "product_mask": L(23, 0), "reference_mask": L(2, 1),
+            "pairs": "", "occluders": "", "outline": "", "mask_skip": "", "label": "off", "ink": "light",
+            "print_box": INK_DRAFT_INPUT["print_box"], "bow": INK_DRAFT_INPUT["bow"]}, (960, 980)),
+        25: ("ImagePostLoadJob", "Load Job (the given job)", {"job_json": L(5, 0), "job_path": ""}, (960, 1800)),
+        26: (SW, "Job: the given one, else the draft", {"when": L(5, 0), "if_true": L(25, 0), "if_false": L(24, 0)},
+             (960, 2000)),
+        27: ("ProductLabelPrintType", "Print type (from the job)", {"job": job}, (960, 2140)),
+        28: ("ImagePostJobMasks", "Job Masks", {"job": job, "scene": L(21, 0), "product_mask": L(30, 1)}, (1500, 180)),
+        29: ("ImagePostFitWarp", "Fit Warp", {"job": job}, (1500, 0)),
+        30: ("ImagePostWarpReference", "Warp Reference", {"job": job, "homography": L(29, 0), "scene": L(21, 0),
+                                                          "reference": L(2, 0), "reference_mask": L(2, 1)}, (1500, 400)),
+        31: ("ImagePostGradeToScene", "Grade To Scene (paper, dark ink)", {
+            "job": job, "scene": L(21, 0), "warped": L(30, 0), "product_mask": L(30, 1), "old_silhouette": L(28, 0),
+            "occluder_mask": L(28, 1), "colour": "job", "shading": "job", "reference": L(2, 0), "coords": L(30, 3),
+            "relight": "job"}, (1500, 700)),
+        32: ("ImagePostMatchFinish", "Match Finish (paper, dark ink)", {
+            "job": job, "scene": L(21, 0), "graded": L(31, 0), "product_mask": L(30, 1), "old_silhouette": L(28, 0),
+            "occluder_mask": L(28, 1), "coords": L(30, 3)}, (1500, 1080)),
+        33: (SW, "Old silhouette: the product mask (light ink), else the job's", {
+            "when": light, "if_true": L(21, 1), "if_false": L(28, 0)}, (1980, 0)),
+        34: ("ImagePostFillLeftovers", "Fill Leftovers", {
+            "job": job, "scene": L(21, 0), "product_mask": L(30, 1), "old_silhouette": L(33, 0),
+            "occluder_mask": L(28, 1), "coords": L(30, 3)}, (1980, 140)),
+        35: (SW, "Product layer: the warped print (light ink), else graded", {
+            "when": light, "if_true": L(30, 0), "if_false": L(32, 0)}, (1980, 420)),
+        36: (SW, "Ink: Fill Leftovers' (light), else Grade To Scene's", {
+            "when": light, "if_true": L(34, 3), "if_false": L(31, 4)}, (1980, 560)),
+        37: ("ImagePostCompositeBehind", "Composite Behind", {
+            "job": job, "scene": L(21, 0), "background": L(34, 0), "product": L(35, 0), "product_mask": L(30, 1),
+            "occluder_mask": L(28, 1), "ink": L(36, 0), "coords": L(30, 3)}, (1980, 700)),
+        38: (SW, "Grade report (paper, dark ink)", {"when": light, "if_false": L(31, 2)}, (1980, 1000)),
+        39: (SW, "Finish report (paper, dark ink)", {"when": light, "if_false": L(32, 1)}, (1980, 1140)),
+        40: ("ImagePostQASheet", "QA Sheet (its text: report.json)", {
+            "job": job, "before": L(21, 0), "after": L(37, 0), "reference": L(2, 0), "matte": L(37, 1),
+            "fill_mask": L(34, 1), "reference_mask": L(2, 1), "align_report": L(29, 1), "grade_report": L(38, 0),
+            "finish_report": L(39, 0), "fill_report": L(34, 2), "old_silhouette": L(33, 0), "occluder_mask": L(28, 1),
+            "coords": L(30, 3), "ink": L(34, 3)}, (2460, 0)),
+        41: ("ProductLabelPasteBackMask", "Paste-back mask (straightened crops)", {
+            "before": L(21, 0), "after": L(37, 0), "crop_rotate": L(21, 2), "grow": 2}, (2460, 560)),
+        42: ("CropRotateComposite", "Straightened crop back into its frame", {
+            "destination": L(20, 0), "source": L(37, 0), "crop_rotate": L(21, 2), "feather": 0, "mask": L(41, 0)},
+            (2460, 760)),
+        43: (SW, "Refined frame: pasted back (straightened), else as it is", {
+            "when": L(41, 1), "if_true": L(42, 0), "if_false": L(37, 0)}, (2460, 980)),
+        44: ("SaveImage", "Save refined image (a clip: the refined keyframe)", {
+            "images": L(43, 0), "filename_prefix": "product-label-refinement/refined"}, (2940, 0)),
+        45: ("SaveImage", "Save QA compare", {"images": L(40, 0), "filename_prefix": qa + "compare"}, (2940, 360)),
+        46: ("SaveImage", "Save QA edges", {"images": L(40, 1), "filename_prefix": qa + "edges"}, (2940, 720)),
+        47: ("SaveImage", "Save QA before_after", {"images": L(40, 2), "filename_prefix": qa + "before_after"}, (2940, 1080)),
+        48: ("SaveImage", "Save QA audit", {"images": L(40, 4), "filename_prefix": qa + "audit"}, (2940, 1440)),
+        49: ("SaveImage", "Save QA align_overlay", {"images": L(30, 2), "filename_prefix": qa + "align_overlay"}, (3420, 0)),
+        50: ("SaveImage", "Save QA draft_points", {"images": L(24, 2), "filename_prefix": qa + "draft_points"}, (3420, 360)),
+        51: (RUN, "Grade preview: paper only", {"value": L(31, 1), "when": light, "run_when": "false"}, (3420, 720)),
+        52: ("SaveImage", "Save QA grade_preview", {"images": L(51, 0), "filename_prefix": qa + "grade_preview"}, (3420, 860)),
+        53: (RUN, "Relight map: paper only", {"value": L(31, 3), "when": light, "run_when": "false"}, (3420, 1220)),
+        54: ("SaveImage", "Save QA relight_map", {"images": L(53, 0), "filename_prefix": qa + "relight_map"}, (3420, 1360)),
+        55: (RUN, "Garbled print removed: light ink only", {"value": L(34, 0), "when": light, "run_when": "true"},
+             (3900, 0)),
+        56: ("SaveImage", "Save QA garbled print removed", {"images": L(55, 0), "filename_prefix": qa + "print_removed"},
+             (3900, 140)),
+        57: (RUN, "Product layer for the PSD: paper only", {"value": L(32, 0), "when": light, "run_when": "false"},
+             (3900, 500)),
+        58: ("ImagePostSavePSD", "Save PSD (paper)", {
+            "job": job, "scene": L(21, 0), "image": L(37, 0), "background": L(34, 0), "fill_mask": L(34, 1),
+            "product": L(57, 0), "matte": L(37, 1), "filename_prefix": "product-label-refinement/refined"}, (3900, 640)),
+        # video: Refine (Video) through the clip from the keyframe (the stills branch's, or the given one)
+        60: (RUN, "Video branch: only for a clip", {"value": L(73, 0), "when": L(1, 3), "run_when": "true"}, (960, 2300)),
+        61: (SW, "Keyframe: the given one, else the stills branch's", {"when": L(4, 2), "if_true": L(4, 0),
+                                                                       "if_false": L(43, 0)}, (960, 2440)),
+        62: ("ProductLabelVideoRefine", "Product Label: Refine (Video)", {
+            "frames": L(60, 0), "mask": L(16, 0), "keyframes": L(61, 0), "tracker": "alltracker.pth",
+            "keyframe_index": L(6, 0), "keyframe_frames": "auto", "settings": L(7, 0), "fps": L(1, 1), "processes": 1,
+            "model": "tube (round products)", "compositing": "settings (render.alpha, else measured)", "soft_cap": -1.0,
+            "glue": False}, (1500, 2300)),
+        63: ("ProductLabelVideoSaveLossless", "Save the lossless master (QuickTime PNG)", {
+            "images": L(62, 0), "fps": L(1, 1), "filename_prefix": "product-label-refinement/video/refined",
+            "format": "mov (PNG, exact RGB)", "audio": L(1, 2)}, (1980, 2300)),
+        64: ("CreateVideo", "Review copy", {"images": L(62, 0), "fps": L(1, 1), "audio": L(1, 2), "bit_depth": "auto",
+                                            "color_space": "sRGB", "codec": "none"}, (1980, 2560)),
+        65: ("SaveVideo", "Save the refined clip (mp4, to review)", {
+            "video": L(64, 0), "filename_prefix": "product-label-refinement/video/review", "format": "auto",
+            "format.codec": "auto", "codec": "auto"}, (2460, 2300)),
+        66: ("SaveImage", "Save the clip's QA plot", {"images": L(62, 4),
+                                                      "filename_prefix": "product-label-refinement/video/qa_plot"},
+             (2460, 2620)),
+        67: ("PreviewAny", "Refine report (JSON)", {"source": L(62, 3)}, (2940, 2300)),
+    }
+    pos = column_layout(ALL_COLUMNS, {k: v[0] for k, v in nodes.items()})
+    return {k: (ct, title, inp, pos[k]) for k, (ct, title, inp, _) in nodes.items()}
+
+
+# the one workflow's layout: columns left to right, nodes top to bottom (heights as the frontend draws them)
+ALL_COLUMNS = [[1, 2, 3, 4, 5, 6, 7, 8, 9], [10, 11, 12, 13, 18, 17, 14, 15, 16], [70, 71, 72, 73],
+               [20, 21, 22, 23, 24], [25, 26, 27, 29, 28, 30],
+               [31, 32, 33, 34, 35, 36], [37, 38, 39, 40], [41, 42, 43, 44], [45, 46, 47, 48], [49, 50, 51, 52, 53, 54],
+               [55, 56, 57, 58], [60, 61, 62], [63, 64, 65], [66, 67]]
+ALL_HEIGHTS = {1: 374, 21: 520, 24: 852, 31: 246, 70: 300}
+ALL_WIDTHS = {4: 510, 6: 439, 11: 504, 33: 416, 35: 397, 43: 400}
+
+
+def column_layout(columns, cls, gap=70, col_gap=110):
+    """-> {node id: (x, y)}; cls: {node id: class_type}, for the sizes in SIZE."""
+    pos, x = {}, 0
+    for col in columns:
+        y, width = 0, 0
+        for nid in col:
+            w, h = SIZE.get(cls[nid], (380, 220))
+            w, h = ALL_WIDTHS.get(nid, w), ALL_HEIGHTS.get(nid, h)
+            pos[nid] = (x, y)
+            y += h + gap
+            width = max(width, w)
+        x += width + col_gap
+    return pos
+
+
+# UI-only notes and groups of the one workflow (the API file has neither)
+ALL_NOTES = {
+    90: ("What to set", (-600, 0), (480, 980), (
+        "ONE WORKFLOW FOR EVERY CASE\n\n"
+        "Source: an image or a clip (Load Source). An image runs the stills branch only; a clip runs SAM 3 through "
+        "the clip, the stills branch on the keyframe frame, then Refine (Video).\n\n"
+        "Packshot: the real product photo.\n"
+        "Product mask: (none) = SAM 3 with the prompt; or a mask file (white = product; a clip: one per frame).\n"
+        "Corrected keyframe (clips): (none) = the stills branch makes it; or a frame fixed elsewhere.\n"
+        "Fix this product: false = the product looks fine on the triage sheet: only SAM 3 on the keyframe frame and "
+        "the sheet run.\n"
+        "Job JSON: empty = Auto Draft from its inputs; or a measured job.\n"
+        "Keyframe frame (clips): the frame the stills branch fixes, from 0.\n"
+        "Refine settings JSON and product copy (clips).\n"
+        "SAM 3 prompt: the product, e.g. 'pump bottle'.\n"
+        "Straighten: Crop & Rotate's frame and rotation (all 0: off).\n"
+        "Print type: Auto Draft's ink (off: paper or dark ink; light: print on the body).\n\n"
+        "Outputs: the refined image (a clip: the refined keyframe), QA sheets and report.json (QA Sheet's text); "
+        "for a clip, the lossless master (.mov), the mp4 review copy, the QA plot and the Refine report.\n\n"
+        "Only the needed branch runs: Switch and Run If nodes skip the rest.")),
+}
+
+ALL_GROUPS = [
+    ("Inputs: set these", [1, 2, 3, 4, 5, 6, 7, 8, 9], "#3f789e"),
+    ("SAM 3: the product's mask (skipped when a mask is given)", [10, 11, 12, 13, 14, 15, 16, 17, 18], "#8A8"),
+    ("Triage: does the product need fixing? (the agent sets Fix this product)", [70, 71, 72, 73], "#2a7"),
+    ("Stills: the image, or the clip's keyframe frame (Auto Draft, or the given job)",
+     [20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32], "#b58b2a"),
+    ("Paper or light ink, composite and QA", [33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43], "#a1309b"),
+    ("Stills outputs", [44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58], "#444"),
+    ("Video: Refine (Video) through the clip (clips only)", [60, 61, 62, 63, 64, 65, 66, 67], "#335"),
+]
+
+
 SIZE = {"LoadImage": (400, 360), "LoadImageMask": (400, 360), "SaveImage": (400, 330), "ImagePostLoadJob": (420, 560), "ImagePostAutoDraft": (460, 760),
-        "ImagePostQASheet": (420, 520), "ImagePostFitWarp": (380, 140), "ImagePostSavePSD": (420, 300)}
+        "ImagePostQASheet": (420, 520), "ImagePostFitWarp": (380, 140), "ImagePostSavePSD": (420, 300),
+        "ProductLabelLoadSource": (400, 360), "ProductLabelLoadOptional": (400, 360), "ProductLabelSwitch": (380, 100),
+        "ProductLabelRunIf": (380, 100), "ProductLabelPrintType": (380, 80), "ProductLabelPickFrame": (380, 120),
+        "PrimitiveStringMultiline": (400, 240), "PrimitiveInt": (400, 100), "PrimitiveBoolean": (400, 80),
+        "ProductLabelVideoSettings": (400, 320), "CLIPTextEncode": (400, 200), "CheckpointLoaderSimple": (400, 120),
+        "SAM3_Detect": (400, 240), "ProductLabelVideoSAM3BothWays": (400, 260), "CropRotate": (440, 520),
+        "ProductLabelVideoRefine": (420, 440), "PreviewAny": (420, 300), "CreateVideo": (380, 180), "SaveVideo": (400, 300)}
+
+# Nodes of ComfyUI core and other packs, as the frontend (1.55) serializes them: (slot inputs, widgets in
+# widgets_values order, RETURN_TYPES, RETURN_NAMES). Widgets in FRONTEND_ONLY aren't inputs in the API file.
+FOREIGN = {
+    "LoadImage": ([], ["image", "upload"], ("IMAGE", "MASK"), ("IMAGE", "MASK")),
+    "SaveImage": ([("images", "IMAGE")], ["filename_prefix"], (), ()),
+    "LoadImageMask": ([], ["image", "channel", "upload"], ("MASK",), ("MASK",)),
+    "CheckpointLoaderSimple": ([], ["ckpt_name"], ("MODEL", "CLIP", "VAE"), ("MODEL", "CLIP", "VAE")),
+    "CLIPTextEncode": ([("clip", "CLIP")], ["text"], ("CONDITIONING",), ("CONDITIONING",)),
+    "SAM3_Detect": ([("model", "MODEL"), ("image", "IMAGE"), ("conditioning", "CONDITIONING"),
+                     ("bboxes", "BOUNDING_BOX"), ("positive_coords", "STRING"), ("negative_coords", "STRING")],
+                    ["threshold", "refine_iterations", "individual_masks"], ("MASK", "BOUNDING_BOX"), ("masks", "bboxes")),
+    "CropRotate": ([("image", "IMAGE"), ("mask", "MASK")],
+                   ["center_x", "center_y", "crop_width", "crop_height", "rotation", "aspect_ratio", "crop_rotate_editor"],
+                   ("IMAGE", "MASK", "CROP_ROTATE"), ("image", "mask", "crop_rotate")),
+    "CropRotateComposite": ([("destination", "IMAGE"), ("source", "IMAGE"), ("crop_rotate", "CROP_ROTATE"),
+                             ("mask", "MASK")], ["feather"], ("IMAGE",), ("image",)),
+    "PrimitiveStringMultiline": ([], ["value"], ("STRING",), ("STRING",)),
+    "PrimitiveInt": ([], ["value", "control_after_generate"], ("INT",), ("INT",)),
+    "PrimitiveBoolean": ([], ["value"], ("BOOLEAN",), ("BOOLEAN",)),
+    "CreateVideo": ([("images", "IMAGE"), ("audio", "AUDIO")], ["fps", "bit_depth", "color_space", "codec"],
+                    ("VIDEO",), ("VIDEO",)),
+    "SaveVideo": ([("video", "VIDEO")], ["filename_prefix", "format", "format.codec", "codec"], ("VIDEO",), ("video",)),
+    "PreviewAny": ([("source", "*")], [], ("STRING",), ("STRING",)),
+}
+FRONTEND_ONLY = {"upload": "image", "control_after_generate": "fixed", "crop_rotate_editor": ""}
+UI_ONLY = {"Note"}
+WIDGET_PLACEHOLDER = {"INT": 0, "FLOAT": 0.0, "STRING": "", "BOOLEAN": False}
 
 
 def load_pack():
@@ -163,12 +411,8 @@ def load_pack():
 
 def node_spec(classes, ct):
     """-> (slot inputs [(name, type)], widget names, RETURN_TYPES, RETURN_NAMES)"""
-    if ct == "LoadImage":
-        return [], ["image", "upload"], ("IMAGE", "MASK"), ("IMAGE", "MASK")
-    if ct == "SaveImage":
-        return [("images", "IMAGE")], ["filename_prefix"], (), ()
-    if ct == "LoadImageMask":                    # the frontend stores image, channel, then the upload button
-        return [], ["image", "channel", "upload"], ("MASK",), ("MASK",)
+    if ct in FOREIGN:
+        return FOREIGN[ct]
     c = classes[ct]
     it = c.INPUT_TYPES()
     slots, widgets = [], []
@@ -177,9 +421,21 @@ def node_spec(classes, ct):
             o = opt[0] if opt else {}
             if (isinstance(t, list) or t in WIDGET) and not o.get("forceInput"):
                 widgets.append(name)
+                if o.get("image_upload"):         # the frontend's upload button follows its combo
+                    widgets.append("upload")
             else:
                 slots.append((name, t))
     return slots, widgets, c.RETURN_TYPES, getattr(c, "RETURN_NAMES", c.RETURN_TYPES)
+
+
+def widget_type(classes, ct, name):
+    """The socket type of a widget turned input (a link into it)."""
+    if ct in classes:
+        for sec in ("required", "optional"):
+            t = classes[ct].INPUT_TYPES().get(sec, {}).get(name)
+            if t:
+                return "COMBO" if isinstance(t[0], list) else t[0]
+    return {"value": {"PrimitiveStringMultiline": "STRING", "PrimitiveInt": "INT"}.get(ct, "*")}.get(name, "*")
 
 
 def main():
@@ -196,9 +452,10 @@ def main():
     build("product-label-refinement-draft", definition_draft(), classes)
     build("product-label-refinement-ink", definition_ink(ink_text), classes)
     build("product-label-refinement-ink-draft", definition_ink_draft(), classes)
+    build("product-label-refinement-all", definition_all(), classes, ALL_NOTES, ALL_GROUPS)
 
 
-def build(wf_name, nodes_def, classes):
+def build(wf_name, nodes_def, classes, notes=None, groups=None):
     api = {str(k): {"inputs": inp, "class_type": ct, "_meta": {"title": title}}
            for k, (ct, title, inp, _) in nodes_def.items()}
     (PACK / "workflows" / f"{wf_name}.api.json").write_text(json.dumps(api, indent=2) + "\n")
@@ -224,30 +481,50 @@ def build(wf_name, nodes_def, classes):
         for name in n["inputs"]:
             if name not in widgets and name not in [s for s, _ in slots]:
                 sys.exit(f"node {nid} ({n['class_type']}): {name} is not an input of the node")
-        wv = [n["inputs"].get(w, "image" if w == "upload" else None) for w in widgets]
+        wv = [n["inputs"].get(w, FRONTEND_ONLY.get(w)) for w in widgets]
+        for i, (w, v) in enumerate(zip(widgets, wv)):   # a widget fed by a link keeps a value of its own type
+            if isinstance(v, list):
+                wv[i] = WIDGET_PLACEHOLDER.get(widget_type(classes, n["class_type"], w))
+        inputs = [{"name": s, "type": t, "link": None} for s, t in slots]
+        inputs += [{"name": w, "type": widget_type(classes, n["class_type"], w), "widget": {"name": w}, "link": None}
+                   for w in widgets if isinstance(n["inputs"].get(w), list)]
         nodes[nid] = {"id": int(nid), "type": n["class_type"], "pos": list(nodes_def[int(nid)][3]),
                       "size": list(SIZE.get(n["class_type"], (380, 220))), "flags": {}, "order": order.index(nid),
-                      "mode": 0, "inputs": [{"name": s, "type": t, "link": None} for s, t in slots],
+                      "mode": 0, "inputs": inputs,
                       "outputs": [{"name": o, "type": t, "links": None, "slot_index": i}
                                   for i, (o, t) in enumerate(zip(rn, rt))],
                       "title": n["_meta"]["title"], "properties": {"Node name for S&R": n["class_type"]},
                       "widgets_values": wv}
     for nid in sorted(api, key=int):
-        for slot, (name, t) in enumerate(specs[nid][0]):
-            v = api[nid]["inputs"].get(name)
+        for slot, inp in enumerate(nodes[nid]["inputs"]):
+            v = api[nid]["inputs"].get(inp["name"])
             if v is None:
                 continue
             src, idx = v
-            if specs[src][2][idx] != t:
-                sys.exit(f"node {nid}.{name} expects {t}, linked to node {src} output {idx} ({specs[src][2][idx]})")
+            t, got = inp["type"], specs[src][2][idx]
+            if got != t and "*" not in (got, t) and not (t == "COMBO" and isinstance(got, list)):
+                sys.exit(f"node {nid}.{inp['name']} expects {t}, linked to node {src} output {idx} ({got})")
             lid = len(links) + 1
             links.append([lid, int(src), idx, int(nid), slot, t])
-            nodes[nid]["inputs"][slot]["link"] = lid
+            inp["link"] = lid
             out = nodes[src]["outputs"][idx]
             out["links"] = (out["links"] or []) + [lid]
+    for nid, (title, pos, size, text) in (notes or {}).items():
+        nodes[str(nid)] = {"id": nid, "type": "Note", "pos": list(pos), "size": list(size), "flags": {}, "order": len(order),
+                           "mode": 0, "inputs": [], "outputs": [], "title": title, "properties": {},
+                           "widgets_values": [text], "color": "#432", "bgcolor": "#653"}
+    ui_groups = []
+    for gi, (title, members, colour) in enumerate(groups or [], 1):
+        boxes = [(nodes[str(m)]["pos"], nodes[str(m)]["size"]) for m in members]
+        x0 = min(p[0] for p, _ in boxes) - 20
+        y0 = min(p[1] for p, _ in boxes) - 80
+        x1 = max(p[0] + s[0] for p, s in boxes) + 20
+        y1 = max(p[1] + s[1] for p, s in boxes) + 20
+        ui_groups.append({"id": gi, "title": title, "bounding": [x0, y0, x1 - x0, y1 - y0], "color": colour,
+                          "font_size": 24, "flags": {}})
     ui = {"id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"imagepost/{wf_name}")), "revision": 0,
-          "last_node_id": max(int(n) for n in api), "last_link_id": len(links),
-          "nodes": [nodes[n] for n in sorted(nodes, key=int)], "links": links, "groups": [], "config": {},
+          "last_node_id": max(int(n) for n in nodes), "last_link_id": len(links),
+          "nodes": [nodes[n] for n in sorted(nodes, key=int)], "links": links, "groups": ui_groups, "config": {},
           "extra": {"ds": {"scale": 0.55, "offset": [40, 40]}}, "version": 0.4}
     (PACK / "workflows" / f"{wf_name}.json").write_text(json.dumps(ui, indent=1) + "\n")
 
@@ -255,8 +532,10 @@ def build(wf_name, nodes_def, classes):
     lk = {l[0]: l for l in links}
     back = {}
     for n in ui["nodes"]:
+        if n["type"] in UI_ONLY:
+            continue
         slots, widgets, _, _ = specs[str(n["id"])]
-        inputs = {w: v for w, v in zip(widgets, n["widgets_values"]) if w != "upload" and v is not None}
+        inputs = {w: v for w, v in zip(widgets, n["widgets_values"]) if w not in FRONTEND_ONLY and v is not None}
         for inp in n["inputs"]:
             if inp["link"] is not None:
                 l = lk[inp["link"]]

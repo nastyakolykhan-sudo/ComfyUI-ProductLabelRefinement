@@ -9,16 +9,22 @@
       --set "ImagePostAutoDraft.quad=X,Y X,Y X,Y X,Y" [--mask product_mask.png] --out ./ip-draft
 
 --scene / --reference upload the files (POST /upload/image, into input/product-label-refinement/) and point the Load Image
-nodes that feed Warp Reference at them; --image NODE_ID=PATH does the same for any Load Image node.
---job replaces the job text in every Load Job node. --set NODE.INPUT=VALUE sets a widget value on a node, NODE being
-its id or its class_type (every node of that class): the Auto Draft node's quad, pairs, occluders, outline.
+nodes that feed Warp Reference at them; --image NODE_ID=PATH does the same for any Load Image (or Load Video) node.
+The one workflow (workflows/product-label-refinement-all.api.json): --source PATH uploads the image or clip into its
+Load Source node (--scene does the same there), --mask PATH into its product mask's Load Optional File, --keyframe PATH
+a corrected keyframe into the other one, and --job fills its Job JSON text node.
+--job replaces the job text in every Load Job node (or in the text node that feeds it). --set NODE.INPUT=VALUE sets a
+widget value on a node, NODE being its id or its class_type (every node of that class): the Auto Draft node's quad,
+pairs, occluders, outline.
 --mask PATH adds a Load Image (as Mask) node, red channel (white = product), feeding every Auto Draft node's
 product_mask; in the ink templates it fills their own product mask loader (Fill Leftovers' old_silhouette, and Auto
 Draft's product_mask). --stage prunes the graph like run.py --stage
 (align: fit, warp, overlay; grade: + grade preview and relight map; all: everything).
 Save PSD nodes run only with --psd or "psd": true in the job, like run.py --psd.
---out receives every output file (server folder layout: images, the PSD), report.json (from the QA node), the
-other nodes' ui text as CLASS-ID.txt, and history.json. Exit codes: 0 done, 2 prompt rejected, 3 execution
+--out receives every output file (server folder layout: images, the PSD, a lossless .mov), report.json (from the QA
+node), video_report.json (Refine (Video)'s report, from the node showing it), triage.json (Label Triage's
+measures), the other nodes' ui text as
+CLASS-ID.txt, and history.json. Exit codes: 0 done, 2 prompt rejected, 3 execution
 error, 4 timeout. Stdlib only. Servers behind an auth proxy: --header "Name: value" (repeatable).
 """
 import argparse
@@ -58,28 +64,64 @@ def loaders(wf, input_name):
     return sorted(i for i in ids if wf[i]["class_type"] == "LoadImage")
 
 
-def image_targets(wf, scene=None, reference=None, images=(), mask=None):
-    """-> {load image node id: local path}. mask: adds the product mask's loader (add_mask)."""
+FILE_INPUT = {"LoadImage": "image", "LoadImageMask": "image", "LoadVideo": "file", "ProductLabelLoadSource": "source",
+              "ProductLabelLoadOptional": "file"}
+
+
+def optional_loader(wf, output):
+    """The one workflow's Load Optional File node whose `output` (0: image, the corrected keyframe; 1: mask, the
+    product mask) feeds something, or None."""
+    ids = sorted({v[0] for n in wf.values() for v in n["inputs"].values()
+                  if is_link(v) and v[1] == output and wf[v[0]]["class_type"] == "ProductLabelLoadOptional"})
+    return ids[0] if len(ids) == 1 else None
+
+
+def image_targets(wf, scene=None, reference=None, images=(), mask=None, source=None, keyframe=None):
+    """-> {node id: (input name, local path)}. mask: the one workflow's mask loader, else adds the product mask's
+    loader (add_mask)."""
     out = {}
+    sources = sorted(nid for nid, n in wf.items() if n["class_type"] == "ProductLabelLoadSource")
+    if scene and not loaders(wf, "scene") and sources:
+        source, scene = source or scene, None   # the one workflow: the scene is its source
+    if source:
+        if len(sources) != 1:
+            sys.exit(f"--source: expected one Load Source node, found {sources}")
+        out[sources[0]] = path_of("source", source)
     for role, path in (("scene", scene), ("reference", reference)):
         if path:
             ids = loaders(wf, role)
             if len(ids) != 1:
                 sys.exit(f"--{role}: expected one Load Image node feeding Warp Reference's {role}, found {ids}; use --image ID=PATH")
-            out[ids[0]] = path
+            out[ids[0]] = path_of("image", path)
     for spec in images:
         nid, _, path = spec.partition("=")
-        if nid not in wf or wf[nid]["class_type"] != "LoadImage":
-            sys.exit(f"--image {spec}: node {nid} is not a Load Image node")
-        out[nid] = path
+        if nid not in wf or wf[nid]["class_type"] not in FILE_INPUT:
+            sys.exit(f"--image {spec}: node {nid} is not a Load Image, Load Video, Load Source or Load Optional File node")
+        out[nid] = path_of(FILE_INPUT[wf[nid]["class_type"]], path)
+    if keyframe:
+        nid = optional_loader(wf, 0)
+        if nid is None:
+            sys.exit("--keyframe: the workflow has no corrected keyframe loader (Load Optional File)")
+        out[nid] = path_of("file", keyframe)
     if mask:
-        out[add_mask(wf)] = mask
-    for nid, path in out.items():
-        p = Path(path).expanduser()
-        if not p.is_file():
-            sys.exit(f"image not found: {p}")
-        out[nid] = p
+        nid = optional_loader(wf, 1)
+        out[nid or add_mask(wf)] = path_of("file" if nid else "image", mask)
     return out
+
+
+def path_of(name, path):
+    p = Path(path).expanduser()
+    if not p.is_file():
+        sys.exit(f"file not found: {p}")
+    return name, p
+
+
+def job_text_node(wf, node):
+    """Load Job's job_json, or the node whose `value` feeds it (the one workflow's Job JSON) -> (node, key)."""
+    v = node["inputs"].get("job_json")
+    if is_link(v) and "value" in wf[v[0]]["inputs"]:
+        return wf[v[0]], "value"
+    return node, "job_json"
 
 
 def set_job(wf, job_path):
@@ -88,7 +130,8 @@ def set_job(wf, job_path):
     n = 0
     for node in wf.values():
         if node["class_type"] == "ImagePostLoadJob":
-            node["inputs"]["job_json"], node["inputs"]["job_path"] = text, ""
+            holder, key = job_text_node(wf, node)
+            holder["inputs"][key], node["inputs"]["job_path"] = text, ""
             n += 1
     if not n:
         sys.exit("--job: the workflow has no Product Label Refinement Load Job node")
@@ -141,9 +184,13 @@ def psd_wanted(wf, flag=False):
     if flag:
         return True
     for node in wf.values():
-        if node["class_type"] == "ImagePostLoadJob" and node["inputs"].get("job_json", "").strip():
+        if node["class_type"] != "ImagePostLoadJob":
+            continue
+        holder, key = job_text_node(wf, node)
+        text = holder["inputs"].get(key)
+        if isinstance(text, str) and text.strip():
             try:
-                return bool(json.loads(node["inputs"]["job_json"]).get("psd"))
+                return bool(json.loads(text).get("psd"))
             except (json.JSONDecodeError, AttributeError):
                 return False
     return False
@@ -215,7 +262,10 @@ def save_outputs(entry, wf, fetch, out):
             written.append(dest)
         if ui.get("text"):
             text = "\n".join(ui["text"])
-            dest = out / ("report.json" if cls == "ImagePostQASheet" else f"{cls}-{nid}.txt")
+            src = wf.get(nid, {}).get("inputs", {}).get("source")
+            refine = cls == "PreviewAny" and is_link(src) and wf[src[0]]["class_type"] == "ProductLabelVideoRefine"
+            dest = out / ("report.json" if cls == "ImagePostQASheet" else "video_report.json" if refine
+                          else "triage.json" if cls == "ProductLabelTriage" else f"{cls}-{nid}.txt")
             dest.write_text(text)
             written.append(dest)
     (out / "history.json").write_text(json.dumps(entry, indent=1))
@@ -243,8 +293,10 @@ def main():
     ap.add_argument("--image", action="append", default=[], metavar="NODE_ID=PATH")
     ap.add_argument("--job", help="job.json to run instead of the one embedded in the workflow")
     ap.add_argument("--set", action="append", default=[], metavar="NODE.INPUT=VALUE", help="a widget value, e.g. the Auto Draft quad")
-    ap.add_argument("--mask", help="the product's mask (white = product, scene-sized) for the Auto Draft nodes, or the ink "
-                    "templates' product mask loader")
+    ap.add_argument("--mask", help="the product's mask (white = product, scene-sized) for the Auto Draft nodes, the ink "
+                    "templates' product mask loader, or the one workflow's (a mask video for a clip)")
+    ap.add_argument("--source", help="the one workflow: the image or clip to fix (its Load Source node)")
+    ap.add_argument("--keyframe", help="the one workflow: a corrected keyframe (else its stills branch makes one)")
     ap.add_argument("--stage", choices=("align", "grade", "all"), default="all")
     ap.add_argument("--psd", action="store_true", help="also run the Save PSD nodes (same as \"psd\": true in the job)")
     ap.add_argument("--out", required=True)
@@ -257,16 +309,16 @@ def main():
     if a.job:
         set_job(wf, a.job)
     set_inputs(wf, a.set)
-    targets = image_targets(wf, a.scene, a.reference, a.image, a.mask)
+    targets = image_targets(wf, a.scene, a.reference, a.image, a.mask, a.source, a.keyframe)
     wf = prune(keep_psd(wf, psd_wanted(wf, a.psd)), a.stage)
     out = Path(a.out).expanduser()
     out.mkdir(parents=True, exist_ok=True)
     srv = Server(a.server, a.header)
 
-    for nid, path in targets.items():
+    for nid, (name, path) in targets.items():
         if nid in wf:
-            wf[nid]["inputs"]["image"] = srv.upload(path)
-            print(f"uploaded   {path} -> {wf[nid]['inputs']['image']}")
+            wf[nid]["inputs"][name] = srv.upload(path)
+            print(f"uploaded   {path} -> {wf[nid]['inputs'][name]}")
     (out / "prompt.json").write_text(json.dumps(wf, indent=1))
     try:
         r = srv.json("/prompt", {"prompt": wf, "client_id": uuid.uuid4().hex})

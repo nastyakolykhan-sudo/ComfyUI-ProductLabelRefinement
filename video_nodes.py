@@ -307,7 +307,7 @@ class ProductLabelVideoSaveLossless:
             return {"ui": {"text": [str(d)]}}
         path = Path(out_dir) / f"{name}_{counter:05}.mov"
         _write_mov(path, frames, fps, prores=format.startswith("prores"), audio=audio)
-        return {"ui": {"text": [str(path)]}}
+        return {"ui": {"text": [str(path)], "files": [{"filename": path.name, "subfolder": sub, "type": "output"}]}}
 
 
 def _write_mov(path, frames, fps, prores=False, audio=None):
