@@ -775,6 +775,42 @@ def label_draft(scene_u8, ref_u8, ref_alpha=None, quad=None, outline=None, kind=
             "sheet": af.match_sheet(scene, ref, H, points) if points else None, "label": info}
 
 
+def print_on_body(d, scene_u8, mask=None, ink=None, print_box=None, bow=None):
+    """Print straight on a coloured body (pitfalls 92-95), added to a draft from draft() (either mode), in place:
+      ink "light"  job matte {"type": "ink", "polarity": "light", "print_box"}: the packshot's light print laid on
+                   the frame's own body (imgpost/ink.py). print_box: [x0, y0, x1, y1] reference px, the print's rows
+                   inside the frosted rims. The matte the ink stays inside is the product's mask: run.py draft sets
+                   old_silhouette to its file, the ComfyUI template wires it into Fill Leftovers.
+      bow          text for bow.parse ("-150:0 146.5"): align.bow, its centre, axis and half-widths measured from the
+                   product mask (needed), b given or measured at the seams.
+    Adds a line per change to d["notes"]."""
+    from . import bow as bw
+    job = d["job"]
+    if ink not in (None, "off"):
+        if ink != "light":
+            raise DraftError(f"ink {ink!r}: only 'light' (print lighter than the body it sits on)")
+        job["matte"] = {"type": "ink", "polarity": "light"}
+        if print_box:
+            job["matte"]["print_box"] = [int(round(v)) for v in print_box]
+        d["notes"].append("matte ink, light: the packshot's print on the frame's own body" +
+                          ("" if print_box else "; no print_box: a frosted body's highlights may be taken for print "
+                                                "(pitfall 93), give the print's rows on the packshot"))
+    spec = bw.parse(bow) if isinstance(bow, str) else bow
+    if spec:
+        if mask is None:
+            raise DraftError("bow: needs the product mask (its centre, axis and half-widths)")
+        try:
+            filled, rep = bw.resolve(spec, scene_u8, mask)
+        except ValueError as e:
+            raise DraftError(str(e)) from e
+        job["align"]["bow"] = filled
+        seams = ", ".join(f"t {s['t']:g}: {s['b']:g}" + ("" if s.get("given") else f" (rms {s['rms_px']} px)")
+                          for s in rep.get("seams", []))
+        d["notes"].append("bow " + (seams or ", ".join(f"t {t:g}: {b:g}" for t, b in filled["b"])) +
+                          " px: the print bows like the body's seams (check the outer print lines at 6x)")
+    return d
+
+
 def summary(d):
     """The draft's lines run.py prints (and the Auto Draft node shows): outline, points, sides, silhouette,
     orientation, grade, notes."""

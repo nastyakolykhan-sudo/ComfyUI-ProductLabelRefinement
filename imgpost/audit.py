@@ -185,9 +185,10 @@ def run(crop_u8, after_u8, alpha, old, vis, F, offset, align_rep=None, squeeze=N
                                   f"packshot (silhouette at {v['limb']:.0f} deg): pressed into the edge. Set "
                                   "cylinder.limb_min (88) and make the label's printed edge one_sided"})
 
-    # edges: residuals after the fit (after the residual correction when there is one)
+    # edges: residuals after the fit (after the residual correction and the bow when there are)
     if align_rep:
         after = {l["label"]: l["max_px"] for l in (align_rep.get("residual") or {}).get("lines_after", [])}
+        after.update({l["label"]: l["max_px"] for l in (align_rep.get("bow") or {}).get("lines_after", [])})
         for l in align_rep.get("lines", []):
             m = after.get(l["label"], l["max_px"])
             if m > 1.5:

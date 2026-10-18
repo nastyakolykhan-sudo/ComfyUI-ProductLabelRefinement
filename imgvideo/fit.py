@@ -163,6 +163,46 @@ def sub_mappings(base, G, Cs, t, shutter, step_px=0.75, max_n=12, residual=None)
     return out, float(span)
 
 
+def _stop_reason(t_out, t_in, valid, ok, tracks, vis, q, fin, rig, min_inliers, max_rms, max_rigid):
+    """Why the held run ends where it does, at one end: the first frame past it (t_out; None at the shot range's own
+    edge) against the run's last frame (t_in). Checked in this order, every criterion that fails listed:
+      cut           the tracks jump at once: their median move from t_in is over 5x the run's usual frame-to-frame
+                    move (and 20 px), or their visibility halves from one frame to the next;
+      product left  too few tracks hold (occluded, out of frame, turned away) without a jump;
+      morph         the rigid model can't follow the tracks (the generator redraws the product);
+      misfit        only the final mapping misses (the mesh or smoothing can't follow).
+    -> {"frame", "reason", "failed", "values"}: what an autopilot needs to choose between chaining the next shot
+    (the product continues) and re-acquiring the label on it (a cut)."""
+    if t_out is None:
+        return {"frame": None, "reason": "shot edge", "failed": [], "values": {}}
+    trk = tracks[:, ok] if ok is not None else tracks
+    vv = vis[:, ok] if ok is not None else vis
+    both = (vv[t_out] > 0.5) & (vv[t_in] > 0.5)
+    jump = float(np.median(np.linalg.norm(trk[t_out][both] - trk[t_in][both], axis=1))) if both.sum() >= 8 else float("inf")
+    steps = []
+    for a_, b_ in zip(valid[:-1], valid[1:]):
+        m = (vv[a_] > 0.5) & (vv[b_] > 0.5)
+        if m.sum() >= 8:
+            steps.append(float(np.median(np.linalg.norm(trk[b_][m] - trk[a_][m], axis=1))))
+    usual = float(np.median(steps)) if steps else 0.0
+    vis_in, vis_out = float((vv[t_in] > 0.5).mean()), float((vv[t_out] > 0.5).mean())
+    failed = []
+    if (np.isfinite(jump) and jump > max(5.0 * usual, 20.0)) or vis_out < 0.5 * vis_in:
+        failed.append("cut")
+    if q[t_out] < min_inliers:
+        failed.append("product left")
+    if rig[t_out] > max_rigid:
+        failed.append("morph")
+    if fin[t_out] > max_rms:
+        failed.append("misfit")
+    def r3(x):
+        return round(float(x), 3) if np.isfinite(x) else None
+    return {"frame": int(t_out), "reason": failed[0] if failed else "misfit", "failed": failed,
+            "values": {"inliers": r3(q[t_out]), "min_inliers": min_inliers, "rms_px": r3(fin[t_out]), "max_rms": max_rms,
+                       "rigid_rms_px": r3(rig[t_out]), "max_rigid": max_rigid, "track_jump_px": r3(jump),
+                       "usual_step_px": r3(usual), "visible_before": r3(vis_in), "visible_after": r3(vis_out)}}
+
+
 def fit_shot(base, H0, xy0, tracks, vis, wmin=0.5, reject=2.5, half=3, cuts=(), residual=None, ngrid=5, anchor=None,
              min_inliers=0.5, max_rms=3.0, max_rigid=12.0, shear_max=None, morph_rigid=(), morph_skip=()):
     """All frames of a shot. -> dict with raw and smoothed mappings, per-frame errors, impact frames, and `valid`:
@@ -193,6 +233,10 @@ def fit_shot(base, H0, xy0, tracks, vis, wmin=0.5, reject=2.5, half=3, cuts=(), 
     while hi < T - 1 and good_t[hi + 1]:
         hi += 1
     valid = list(range(lo, hi + 1))
+    stops = {"start": _stop_reason(lo - 1 if lo > 0 else None, lo, valid, ok, tracks, vis, q, fin, rig,
+                                   min_inliers, max_rms, max_rigid),
+             "end": _stop_reason(hi + 1 if hi < T - 1 else None, hi, valid, ok, tracks, vis, q, fin, rig,
+                                 min_inliers, max_rms, max_rigid)}
     cuts = set(cuts) | ({lo - 1} if lo > 0 else set()) | ({hi + 1} if hi < T - 1 else set())
     br = sorted(set(impacts(C).tolist()) | cuts)
     Cs = smooth_controls(C, q, br, half)
@@ -272,7 +316,7 @@ def fit_shot(base, H0, xy0, tracks, vis, wmin=0.5, reject=2.5, half=3, cuts=(), 
                     "p90_px": round(float(np.percentile(r, 90)), 3) if len(r) else None,
                     "smooth_shift_px": round(float(np.linalg.norm(Cs[t] - C[t], axis=1).max()), 3)})
     return {"raw": raw, "smooth": sm, "uv": uv, "on_surface": ok, "controls": G, "C_raw": C, "C_smooth": Cs,
-            "impacts": br, "errors": err, "valid": valid, "kept_raw": kept_raw, "morph": morph,
+            "impacts": br, "errors": err, "valid": valid, "kept_raw": kept_raw, "morph": morph, "stops": stops,
             "morph_source": morph_source}
 
 
@@ -373,6 +417,7 @@ def silhouette_snap(H, matte, v_range, step=24.0, max_px=30.0, inner=(-1.0, -0.6
     span = np.linalg.norm(C[1:] - C[:-1], axis=1)
     sig = float(max(np.median(span[span > 0]) * 1.5, 6.0)) if (span > 0).any() else 12.0
     Hs = geo.Residual(H, C, D, sig, lam)
+    Hs.__dict__["limb_snap"] = True                 # (print_mapping: the mapping under it orients the print)
     rep.update(left_px=[round(float(fL(rows.min())), 1), round(float(fL(np.median(rows))), 1), round(float(fL(rows.max())), 1)],
                right_px=[round(float(fR(rows.min())), 1), round(float(fR(np.median(rows))), 1), round(float(fR(rows.max())), 1)],
                rows_used=[int(okL.sum()), int(okR.sum())], sigma=round(sig, 1))
@@ -407,3 +452,195 @@ def axis_ends(H, matte, v_mid, reach=600.0):
     if lo == 0 or hi == len(vs) - 1 or not ok[lo - 1] or not ok[hi + 1]:
         return None                                   # the product runs off the frame: no end there
     return float(vs[lo]), float(vs[hi])
+
+
+# ---------------------------------------------------------------- the label against the body (V39)
+
+BODY_SNAP = {"top": "auto", "bottom": "auto", "reach": [0.37, 0.42], "across": 0.65, "inside": 0.05, "window": 0.5,
+             "median": 5, "outlier_k": 4.0, "stretch": [0.9, 1.1], "roll_max": 4.0, "shift_max": 0.15}
+
+
+def _edge_profile(p, ax, lum, reach):
+    """The frame's luminance from p along ax, every 0.25 px up to reach px, lightly smoothed: (s, its gradient)."""
+    from scipy.ndimage import gaussian_filter1d, map_coordinates
+    s = np.arange(0, reach, 0.25)
+    g = gaussian_filter1d(map_coordinates(lum, [p[1] + s * ax[1], p[0] + s * ax[0]], order=1), 1.0)
+    return s, np.gradient(g)
+
+
+def _edge_along(p, ax, lum, matte, reach, kind, inside=0.0, lo=None):
+    """px from p along ax to the body's edge: "matte" the matte's end (the first sample off it), "rise" / "fall" the
+    strongest brightening / darkening of the frame's luminance (a white collar or cap seam / a dark one), "edge"
+    either, "dark" / "light" the darkest / brightest line (a cap's seam line), searched from `inside` px back inside
+    the label. lo: search only from there (px) on, up to reach (a window round the expected gap). -> px (negative:
+    inside the label), or None (no matte end within reach, or the matte already ends before lo)"""
+    from scipy.ndimage import gaussian_filter1d, map_coordinates
+    if kind == "matte":
+        s0 = 0.0 if lo is None else max(0.0, lo)
+        s = np.arange(s0, reach, 0.25)
+        if not len(s):
+            return None
+        on = map_coordinates(matte, [p[1] + s * ax[1], p[0] + s * ax[0]], order=1) >= 0.5
+        if lo is not None and not on[0]:
+            return None
+        off = np.nonzero(~on)[0]
+        return float(s[off[0]]) if len(off) else None
+    if kind in ("dark", "light"):
+        s = np.arange(-inside if lo is None else lo, reach, 0.25)
+        if not len(s):
+            return None
+        g = gaussian_filter1d(map_coordinates(lum, [p[1] + s * ax[1], p[0] + s * ax[0]], order=1), 0.8)
+        return float(s[int(np.argmin(g) if kind == "dark" else np.argmax(g))])
+    s, d = _edge_profile(p, ax, lum, reach)
+    if lo is not None:
+        k = s >= lo
+        if not k.any():
+            return None
+        s, d = s[k], d[k]
+    i = int(np.argmax(d if kind == "rise" else -d if kind == "fall" else np.abs(d)))
+    return float(s[i])
+
+
+def body_edges(H, lum, matte, v_range, uc, reach=(0.37, 0.42)):
+    """Which edge bounds the body above and below the label (body_snap's "auto", decided on the reference frame):
+    "matte" where the matte ends within reach (a crimp, a base), else "rise" or "fall", the stronger of the frame's
+    brightening and darkening there (a white collar, a dark cap). -> {"top": kind, "bottom": kind}"""
+    v0, v1 = v_range
+    p = geo.apply_H(H, np.array([[uc, v0], [uc, v1]]))
+    L = float(np.linalg.norm(p[1] - p[0]))
+    ax = (p[1] - p[0]) / max(L, 1e-6)
+    out = {}
+    for side, q, d, r in (("top", p[0], -ax, reach[0] * L), ("bottom", p[1], ax, reach[1] * L)):
+        if _edge_along(q, d, lum, matte, r, "matte") is not None:
+            out[side] = "matte"
+        else:
+            g = _edge_profile(q, d, lum, r)[1]
+            out[side] = "rise" if g.max() >= -g.min() else "fall"
+    return out
+
+
+def print_mapping(H):
+    """The mapping that orients a rendered label's print: under the limb snap (which only moves its rows sideways onto
+    the matte, shearing the label's sides, never turning its text lines), else H itself."""
+    return H.base if getattr(H, "__dict__", {}).get("limb_snap") else H
+
+
+def body_measure(H, lum, matte, v_range, uc, top="rise", bottom="matte", reach=(0.37, 0.42), across=0.65, inside=0.05,
+                 H_print=None, ref=None, window=0.5):
+    """The label against the product's body on one frame, along the label's axis (the line u = uc through its band
+    v_range). lum: the frame's luminance (mean of R, G, B, levels); matte: the product's matte (0/1 float).
+    -> {"top": px from the label's top edge up to the body's edge above it (a collar seam or a cap: `top`), "bot": px
+    from its bottom edge down to the body's end (`bottom`), "L": the label's length, px, "roll": deg from the print's
+    axis (H_print's, default print_mapping(H)) to the body's centreline (the matte limbs' midpoints across the label's
+    middle 60 %; + = the body runs clockwise from the print on screen: turning the label by +roll puts it on the
+    body), "pivot": the label's middle, px}, or None (no body end within reach).
+    reach: how far to search above / below, as shares of the label's length; across: half the search across; inside:
+    how far back inside the label a "dark" / "light" line is searched (share of its length). ref: the reference
+    frame's measure: then each edge is searched only round the gap the reference's proportion predicts for this frame
+    (+- window x that gap + 2 % of the label's length), so a frame can't jump to another edge (a cap's top, a
+    reflection) or to a split in the matte."""
+    from scipy.ndimage import map_coordinates
+    v0, v1 = v_range
+    p = geo.apply_H(H, np.array([[uc, v0], [uc, v1], [uc, 0.5 * (v0 + v1)]]))
+    L = float(np.linalg.norm(p[1] - p[0]))
+    if L < 4:
+        return None
+    ax = (p[1] - p[0]) / L
+    n = np.array([ax[1], -ax[0]])
+    win = [(None, reach[0] * L), (None, reach[1] * L)]
+    if ref is not None:
+        for i, k in enumerate(("top", "bot")):
+            e = ref[k] * L / ref["L"]
+            w = max(3.0, window * abs(e) + 0.02 * L)
+            win[i] = (e - w, e + w)
+    tp = _edge_along(p[0], -ax, lum, matte, win[0][1], top, inside * L, win[0][0]) if top not in (None, "none") else 0.0
+    bt = _edge_along(p[1], ax, lum, matte, win[1][1], bottom, inside * L, win[1][0]) if bottom not in (None, "none") else 0.0
+    if tp is None or bt is None:
+        return None
+    R = max(60.0, np.round(across * L * 2) / 2)
+    S_ = np.arange(-R, R + 0.5, 0.5)
+    mids = []
+    for fr in np.linspace(0.2, 0.8, 9):
+        c = p[0] + (p[1] - p[0]) * fr
+        on = np.nonzero(map_coordinates(matte, [c[1] + S_ * n[1], c[0] + S_ * n[0]], order=1) > 0.5)[0]
+        if len(on) >= 10:
+            mids.append(c + n * 0.5 * (S_[on.min()] + S_[on.max()]))
+    roll = np.nan
+    if len(mids) >= 5:
+        m = np.array(mids)
+        cc = m - m.mean(0)
+        bax = np.linalg.eigh(cc.T @ cc)[1][:, 1]
+        q = geo.apply_H(print_mapping(H) if H_print is None else H_print, np.array([[uc, v0], [uc, v1]]))
+        pa = (q[1] - q[0]) / max(float(np.linalg.norm(q[1] - q[0])), 1e-6)
+        bax = bax if bax @ pa > 0 else -bax
+        roll = float(np.degrees(np.arctan2(pa[0] * bax[1] - pa[1] * bax[0], pa @ bax)))
+    return {"top": tp, "bot": bt, "L": L, "roll": roll, "pivot": p[2].tolist()}
+
+
+def body_offsets(m, ref):
+    """One frame's measure against the reference frame's (the keyframe's): px the label's top and bottom edges sit
+    off where the reference's proportion of the body puts them (+ = the gap is larger: the label too low at the top,
+    too high at the bottom), the roll off the reference's (deg), and the label's share of the body over the
+    reference's (stretch)."""
+    B, Bk = m["top"] + m["L"] + m["bot"], ref["top"] + ref["L"] + ref["bot"]
+    return {"top_px": m["top"] - B * ref["top"] / Bk, "bottom_px": m["bot"] - B * ref["bot"] / Bk,
+            "roll_deg": m["roll"] - ref["roll"] if np.isfinite(m["roll"]) and np.isfinite(ref["roll"]) else np.nan,
+            "stretch": (m["L"] / B) / (ref["L"] / Bk)}
+
+
+def body_corrections(meas, ref, v_range, median=5, outlier_k=4.0, stretch=(0.9, 1.1), roll_max=4.0, shift_max=0.15):
+    """Per frame, the tube correction that puts the label back at the reference frame's proportion of the body and its
+    print at the reference's angle to the body's centreline: {t: (f, p, roll_deg)} for Tube v -> p + f v (label px)
+    and a turn by roll_deg about the label's middle (body_snapped).
+    meas: {t: body_measure}. Each series is cleared of outliers (a sparkle trail splitting the matte) against a
+    `median`-frame running median, then median-filtered, then clamped (stretch, roll_max deg, shift_max of the
+    label's length). A frame measured as None takes its neighbours' correction."""
+    from scipy import ndimage as ndi
+    v0, v1 = v_range
+    ts = sorted(meas)
+    raw = []
+    for t in ts:
+        m = meas[t]
+        if m is None:                                    # not measured here: its neighbours' correction
+            raw.append([np.nan, np.nan, np.nan])
+            continue
+        o = body_offsets(m, ref)
+        sig = m["L"] / (v1 - v0)
+        vt = v0 - o["top_px"] / sig                      # where the label's top should go, in the old label v
+        vb = v1 + o["bottom_px"] / sig
+        f = (vb - vt) / (v1 - v0)
+        raw.append([f, vt - f * v0, o["roll_deg"]])          # (a turn by +roll puts the print on the body's axis)
+    arr = np.array(raw, float).reshape(-1, 3)
+    if not len(arr):
+        return {}
+    for j in range(3):
+        x = arr[:, j]
+        if not np.isfinite(x).any():
+            arr[:, j] = 0.0 if j else 1.0
+            continue
+        med = ndi.median_filter(np.nan_to_num(x, nan=np.nanmedian(x)), median, mode="nearest")
+        bad = ~np.isfinite(x) | (np.abs(x - med) > outlier_k * 1.4826 * np.nanmedian(np.abs(x - med)) + 1e-9)
+        x = np.where(bad, med, x)
+        arr[:, j] = ndi.median_filter(x, median, mode="nearest")
+    arr[:, 0] = np.clip(arr[:, 0], *stretch)
+    arr[:, 1] = np.clip(arr[:, 1], -shift_max * (v1 - v0), shift_max * (v1 - v0))
+    arr[:, 2] = np.clip(arr[:, 2], -roll_max, roll_max)
+    return {t: (float(a[0]), float(a[1]), float(a[2])) for t, a in zip(ts, arr)}
+
+
+def body_snapped(H, p, f, roll_deg, pivot):
+    """H with its tube's label moved along the axis and stretched (Tube v -> p + f v) and turned by roll_deg about
+    pivot (scene px); a Residual on top (the fit's) keeps its scene-space correction."""
+    import copy
+    from .surface import Tube
+    if hasattr(H, "base"):
+        R = copy.copy(H)
+        R.__dict__["base"] = body_snapped(H.base, p, f, roll_deg, pivot)
+        return R
+    A = H.A.copy()
+    a = H.a + H.A[:, 1] * p
+    A[:, 1] = A[:, 1] * f
+    c, s = np.cos(np.radians(roll_deg)), np.sin(np.radians(roll_deg))
+    Rm = np.array([[c, -s], [s, c]])
+    pv = np.asarray(pivot, float)
+    return Tube(H.u0, H.Ru, H.R + H.k * p, H.k * f, Rm @ A, Rm @ (a - pv) + pv)

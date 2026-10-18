@@ -5,8 +5,11 @@
 
 Writes workflows/product-label-refinement.api.json (what tools/comfy_run.py submits) and workflows/product-label-refinement.json (what the
 ComfyUI editor loads), with the job embedded in Load Job; and workflows/product-label-refinement-draft.{api.json,json}, the same
-graph started by Auto Draft from the demo's rough input instead. Each UI file is converted back the way the frontend
-does (links by slot, widgets by position) and checked to give its API file again. Re-run it after changing a
+graph started by Auto Draft from the demo's rough input instead; and workflows/product-label-refinement-ink.{api.json,json}
+and -ink-draft.{api.json,json}, the light-ink graph (print straight on a coloured body, matte ink with polarity
+light): a keyframe from a frame, its product mask and the packshot, with the ink demo's measured job in Load Job, or
+started by Auto Draft from the frame, the mask and the packshot alone. Each UI file is converted back the way the
+frontend does (links by slot, widgets by position) and checked to give its API file again. Re-run it after changing a
 node's inputs or outputs. Needs a Python with torch (the pack imports it), like tools/offline_run.py.
 """
 import argparse
@@ -84,13 +87,68 @@ def definition_draft():
     nodes[3] = ("ImagePostAutoDraft", "Auto Draft", {
         "scene": L(1, 0), "reference": L(2, 0), "quad": DRAFT_INPUT["quad"], "model": "homography", "light": "relight",
         "suggest": False, "filename_prefix": "product-label-refinement/draft", "reference_mask": L(2, 1), "pairs": DRAFT_INPUT["pairs"],
-        "occluders": DRAFT_INPUT["occluders"], "outline": "", "mask_skip": "", "label": "off"}, (0, 780))
+        "occluders": DRAFT_INPUT["occluders"], "outline": "", "mask_skip": "", "label": "off", "ink": "off",
+        "print_box": "", "bow": ""}, (0, 780))
     nodes[21] = ("SaveImage", "Save QA draft_points", {"images": L(3, 2), "filename_prefix": "product-label-refinement/qa/draft_points"},
                  (0, 1800))
     return nodes
 
 
-SIZE = {"LoadImage": (400, 360), "SaveImage": (400, 330), "ImagePostLoadJob": (420, 560), "ImagePostAutoDraft": (460, 760),
+def definition_ink(job_text):
+    """The light-ink graph (matte ink, polarity light; imgpost/ink.py): the packshot's print laid on the frame's own
+    body. The product mask (SAM 3) is the matte the print stays inside: it goes into Fill Leftovers' old_silhouette.
+    No Grade or Finish: the body stays the frame's, the ink takes the frame's own print colour (Fill Leftovers' ink)."""
+    out = "product-label-refinement/inkdemo_frame_keyframe"
+    return {
+        1: ("LoadImage", "Frame (generated)", {"image": "inkdemo_frame.png"}, (0, 0)),
+        2: ("LoadImage", "Packshot (real product)", {"image": "inkdemo_packshot.png"}, (0, 390)),
+        22: ("LoadImageMask", "Product mask (SAM 3)", {"image": "inkdemo_mask.png", "channel": "red"}, (0, 1180)),
+        3: ("ImagePostLoadJob", "Load Job", {"job_json": job_text, "job_path": ""}, (0, 780)),
+        4: ("ImagePostJobMasks", "Job Masks", {"job": L(3, 0), "scene": L(1, 0), "product_mask": L(6, 1)}, (470, 180)),
+        5: ("ImagePostFitWarp", "Fit Warp", {"job": L(3, 0)}, (470, 0)),
+        6: ("ImagePostWarpReference", "Warp Reference", {"job": L(3, 0), "homography": L(5, 0), "scene": L(1, 0),
+                                                         "reference": L(2, 0), "reference_mask": L(2, 1)}, (470, 400)),
+        9: ("ImagePostFillLeftovers", "Fill Leftovers (garbled print)", {
+            "job": L(3, 0), "scene": L(1, 0), "product_mask": L(6, 1), "old_silhouette": L(22, 0),
+            "occluder_mask": L(4, 1), "coords": L(6, 3)}, (900, 0)),
+        10: ("ImagePostCompositeBehind", "Composite Behind", {"job": L(3, 0), "scene": L(1, 0), "background": L(9, 0),
+                                                              "product": L(6, 0), "product_mask": L(6, 1),
+                                                              "occluder_mask": L(4, 1), "ink": L(9, 3),
+                                                              "coords": L(6, 3)}, (1330, 0)),
+        11: ("ImagePostQASheet", "QA Sheet", {"job": L(3, 0), "before": L(1, 0), "after": L(10, 0), "reference": L(2, 0),
+                                              "matte": L(10, 1), "fill_mask": L(9, 1), "reference_mask": L(2, 1),
+                                              "align_report": L(5, 1), "fill_report": L(9, 2),
+                                              "old_silhouette": L(22, 0), "occluder_mask": L(4, 1), "coords": L(6, 3),
+                                              "ink": L(9, 3)}, (1760, 0)),
+        12: ("SaveImage", "Save keyframe", {"images": L(10, 0), "filename_prefix": out}, (1330, 420)),
+        13: ("SaveImage", "Save QA compare", {"images": L(11, 0), "filename_prefix": "product-label-refinement/qa/compare"}, (2220, 0)),
+        14: ("SaveImage", "Save QA edges", {"images": L(11, 1), "filename_prefix": "product-label-refinement/qa/edges"}, (2220, 360)),
+        15: ("SaveImage", "Save QA before_after", {"images": L(11, 2), "filename_prefix": "product-label-refinement/qa/before_after"}, (2220, 720)),
+        16: ("SaveImage", "Save QA align_overlay", {"images": L(6, 2), "filename_prefix": "product-label-refinement/qa/align_overlay"}, (470, 700)),
+        17: ("SaveImage", "Save QA garbled print removed", {"images": L(9, 0), "filename_prefix": "product-label-refinement/qa/print_removed"}, (900, 420)),
+        20: ("SaveImage", "Save QA audit", {"images": L(11, 4), "filename_prefix": "product-label-refinement/qa/audit"}, (2220, 1080)),
+    }
+
+
+# the ink demo's input, as an agent would give it: the print's box on the packshot (its rows inside the frosted rims)
+# and the bow read off the frame, a seam under the shoulder and the base's own end, measured from the mask
+INK_DRAFT_INPUT = {"print_box": "176,396,432,924", "bow": "-140 130/matte"}
+
+
+def definition_ink_draft():
+    """The light-ink graph started by Auto Draft from the frame, its product mask and the packshot alone (node 3)."""
+    nodes = definition_ink("")
+    nodes[3] = ("ImagePostAutoDraft", "Auto Draft", {
+        "scene": L(1, 0), "reference": L(2, 0), "quad": "", "model": "affine", "light": "off", "suggest": False,
+        "filename_prefix": "product-label-refinement/draft", "product_mask": L(22, 0), "reference_mask": L(2, 1),
+        "pairs": "", "occluders": "", "outline": "", "mask_skip": "", "label": "off", "ink": "light",
+        "print_box": INK_DRAFT_INPUT["print_box"], "bow": INK_DRAFT_INPUT["bow"]}, (0, 780))
+    nodes[21] = ("SaveImage", "Save QA draft_points", {"images": L(3, 2), "filename_prefix": "product-label-refinement/qa/draft_points"},
+                 (0, 1560))
+    return nodes
+
+
+SIZE = {"LoadImage": (400, 360), "LoadImageMask": (400, 360), "SaveImage": (400, 330), "ImagePostLoadJob": (420, 560), "ImagePostAutoDraft": (460, 760),
         "ImagePostQASheet": (420, 520), "ImagePostFitWarp": (380, 140), "ImagePostSavePSD": (420, 300)}
 
 
@@ -109,6 +167,8 @@ def node_spec(classes, ct):
         return [], ["image", "upload"], ("IMAGE", "MASK"), ("IMAGE", "MASK")
     if ct == "SaveImage":
         return [("images", "IMAGE")], ["filename_prefix"], (), ()
+    if ct == "LoadImageMask":                    # the frontend stores image, channel, then the upload button
+        return [], ["image", "channel", "upload"], ("MASK",), ("MASK",)
     c = classes[ct]
     it = c.INPUT_TYPES()
     slots, widgets = [], []
@@ -125,12 +185,17 @@ def node_spec(classes, ct):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--job", default=str(PACK / "examples" / "demo" / "job.json"))
+    ap.add_argument("--ink-job", default=str(PACK / "examples" / "ink_demo" / "job.json"))
     a = ap.parse_args()
     job_text = Path(a.job).expanduser().read_text()
     json.loads(job_text)
+    ink_text = Path(a.ink_job).expanduser().read_text()
+    json.loads(ink_text)
     classes = load_pack()
     build("product-label-refinement", definition(job_text), classes)
     build("product-label-refinement-draft", definition_draft(), classes)
+    build("product-label-refinement-ink", definition_ink(ink_text), classes)
+    build("product-label-refinement-ink-draft", definition_ink_draft(), classes)
 
 
 def build(wf_name, nodes_def, classes):

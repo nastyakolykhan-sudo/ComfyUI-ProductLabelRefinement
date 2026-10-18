@@ -187,7 +187,10 @@
     "polygon: 593,428 593,662 650,666 705,662 705,428 650,424",
     "",
     "",
-    "off"
+    "off",
+    "off",
+    "",
+    ""
    ]
   },
   {
@@ -642,6 +645,12 @@
       52
      ],
      "slot_index": 2
+    },
+    {
+     "name": "ink",
+     "type": "IMAGEPOST_INK",
+     "links": null,
+     "slot_index": 3
     }
    ],
    "title": "Fill Leftovers",
@@ -817,6 +826,11 @@
      "name": "coords",
      "type": "IMAGEPOST_COORDS",
      "link": 55
+    },
+    {
+     "name": "ink",
+     "type": "IMAGEPOST_INK",
+     "link": null
     }
    ],
    "outputs": [

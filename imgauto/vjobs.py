@@ -15,7 +15,15 @@ TRACK = {"on": "print", "print_thresh": 0.06, "points": 900, "erode": 4, "crop":
 FIT = {"wmin": 0.5, "reject": 2.5, "half": 3, "grid": 7, "camera": "affine", "min_inliers": 0.5, "max_rms": 6.0,
        "max_rigid": 12.0, "shear_max": 0.9, "residual": {"sigma": "auto", "lam": 1.0}}
 RENDER = {"blur": "auto", "shutter": "auto", "inset": 1.5, "supersample": 4, "print_thresh": 0.03,
-          "limb_snap": {"step": 24, "max_px": 30}, "feather": {"theta_deg": 10, "v_px": 24}}
+          "limb_snap": {"step": 24, "max_px": 30}, "feather": {"theta_deg": 10, "v_px": 24},
+          "soft_cap": 0.3, "smear": False, "body_snap": True, "glue": True, "level": True}
+# The user's look rules from the first real run (2026-10-17): a restored label stays sharp (softness capped at 0.3 px,
+# no smear: false smears happen), no patch outline shows (light print: only the print changes, carried onto the
+# source's own body, alpha "print", V40, feather v_px 4; dark print still takes the label band until printalpha
+# handles dark ink), and the label keeps the body's proportions and axis (body_snap, V39). imgvideo 0.4.2.
+# Round products (tubes) also get (imgvideo 0.5.0): the label glued to the product's own motion (glue, V42: it swam
+# against the body on near-still frames; edge "line", the review's "ends" check says when an end wants "mean"), and its
+# lines level with the product's base (level, V45: it runs only where the matte shows a steady base, offset "base").
 QA = {"step": 2.0, "ncc_min": 0.6, "ncc_drop": 0.08, "lock_min": 0.3, "unseen_max": 0.02}
 
 
@@ -30,9 +38,15 @@ def has_holes(stats, frames, share=0.001):
 
 
 def build(clip, mask, shot, anchor, words, crop_size, polarity="both", tophat=9, body_width=300,
-          sparks=(), holes=False, ends_at_cut=False, out_dir="work"):
-    """One vjob dict. shot: [a, b) in the clip; anchor: a video.py anchor dict; crop_size: (w, h)."""
-    render = dict(RENDER, polarity=polarity, print_tophat=int(tophat) | 1, ease=[2, 0 if ends_at_cut else 2])
+          sparks=(), holes=False, ends_at_cut=False, out_dir="work", alpha=None, model="tube"):
+    """One vjob dict. shot: [a, b) in the clip; anchor: a video.py anchor dict; crop_size: (w, h). alpha: "print" |
+    "label"; by default "print" for light print, the label band otherwise."""
+    alpha = alpha or ("print" if polarity == "light" else "label")
+    render = dict(RENDER, polarity=polarity, print_tophat=int(tophat) | 1, ease=[2, 0 if ends_at_cut else 2],
+                  alpha=alpha, feather=dict(RENDER["feather"], v_px=4 if alpha == "print" else 24))
+    if model != "tube":
+        for k in ("body_snap", "glue", "level"):
+            render.pop(k)
     if sparks:
         render["spark_glow"] = sorted(int(t) for t in sparks)
     else:
@@ -57,8 +71,13 @@ def keyframe_anchor(keyframe, frame, band, model="tube"):
             "theta_lim": 75}
 
 
-def reacquire_anchor(texture_job, frame):
-    return {"texture_job": str(texture_job), "reacquire": int(frame), "scales": [1.0]}
+def reacquire_anchor(texture_job, frame, pitch="auto"):
+    """Another shot: the keyframe's (or the stitched) texture found again on its frame. A re-acquired tube has no pitch
+    of its own (V28): imgvideo 0.4.1 measures it from the source's text lines ("auto", work/pitch.json)."""
+    a = {"texture_job": str(texture_job), "reacquire": int(frame), "scales": [1.0]}
+    if pitch is not None:
+        a["pitch_sag_px"] = pitch
+    return a
 
 
 def chain_anchor(texture_job, job, frame):

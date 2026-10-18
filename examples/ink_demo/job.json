@@ -1,0 +1,292 @@
+{
+  "about": "Ink demo (tools/make_ink_demo.py): a made-up frosted bottle whose white print came out garbled in a generated frame, seen from slightly above. The landmarks come from the geometry that placed the bottle (the affine part; the bow lies over it); on a real image they are measured.",
+  "scene": "inkdemo_frame.png",
+  "reference": "inkdemo_packshot.png",
+  "output": "inkdemo_frame_refined.png",
+  "scene_size": [
+    768,
+    1024
+  ],
+  "reference_size": [
+    600,
+    1100
+  ],
+  "roi": [
+    278,
+    291,
+    491,
+    736
+  ],
+  "reference_outline": {
+    "type": "polygon",
+    "pts": [
+      [
+        150,
+        330
+      ],
+      [
+        450,
+        330
+      ],
+      [
+        450,
+        1000
+      ],
+      [
+        150,
+        1000
+      ]
+    ]
+  },
+  "align": {
+    "model": "affine",
+    "points": [
+      {
+        "label": "wordmark top",
+        "ref": [
+          205,
+          414
+        ],
+        "scene": [
+          351.31,
+          457.75
+        ],
+        "w": 1
+      },
+      {
+        "label": "wordmark bottom",
+        "ref": [
+          205,
+          946
+        ],
+        "scene": [
+          340.17,
+          670.26
+        ],
+        "w": 1
+      },
+      {
+        "label": "heading start",
+        "ref": [
+          254,
+          560
+        ],
+        "scene": [
+          367.82,
+          517.09
+        ],
+        "w": 1
+      },
+      {
+        "label": "heading end",
+        "ref": [
+          420,
+          560
+        ],
+        "scene": [
+          434.13,
+          520.57
+        ],
+        "w": 1
+      },
+      {
+        "label": "seal centre",
+        "ref": [
+          367,
+          845
+        ],
+        "scene": [
+          407.0,
+          633.3
+        ],
+        "w": 1
+      }
+    ],
+    "y_only": [],
+    "lines": [],
+    "bow": {
+      "b": [
+        [
+          -140.0,
+          4.0
+        ],
+        [
+          130.0,
+          7.0
+        ]
+      ],
+      "centre": [
+        385.1097,
+        536.0478
+      ],
+      "axis": [
+        -0.05240675,
+        0.99862582
+      ],
+      "half_widths": [
+        [
+          -200.0,
+          24.54
+        ],
+        [
+          -190.0,
+          24.05
+        ],
+        [
+          -180.0,
+          24.54
+        ],
+        [
+          -170.0,
+          24.05
+        ],
+        [
+          -160.0,
+          24.57
+        ],
+        [
+          -150.0,
+          24.07
+        ],
+        [
+          -140.0,
+          24.54
+        ],
+        [
+          -130.0,
+          28.07
+        ],
+        [
+          -120.0,
+          28.57
+        ],
+        [
+          -110.0,
+          59.58
+        ],
+        [
+          -100.0,
+          59.6
+        ],
+        [
+          -90.0,
+          59.6
+        ],
+        [
+          -80.0,
+          59.6
+        ],
+        [
+          -70.0,
+          59.6
+        ],
+        [
+          -60.0,
+          59.6
+        ],
+        [
+          -50.0,
+          59.63
+        ],
+        [
+          -40.0,
+          59.63
+        ],
+        [
+          -30.0,
+          59.63
+        ],
+        [
+          -20.0,
+          59.63
+        ],
+        [
+          -10.0,
+          59.63
+        ],
+        [
+          0.0,
+          59.63
+        ],
+        [
+          10.0,
+          59.63
+        ],
+        [
+          20.0,
+          59.6
+        ],
+        [
+          30.0,
+          59.63
+        ],
+        [
+          40.0,
+          59.6
+        ],
+        [
+          50.0,
+          59.63
+        ],
+        [
+          60.0,
+          59.6
+        ],
+        [
+          70.0,
+          59.63
+        ],
+        [
+          80.0,
+          59.63
+        ],
+        [
+          90.0,
+          59.63
+        ],
+        [
+          100.0,
+          59.63
+        ],
+        [
+          110.0,
+          59.63
+        ],
+        [
+          120.0,
+          59.6
+        ],
+        [
+          130.0,
+          59.63
+        ],
+        [
+          140.0,
+          59.6
+        ],
+        [
+          150.0,
+          58.58
+        ]
+      ]
+    }
+  },
+  "old_silhouette": {
+    "type": "mask",
+    "path": "inkdemo_mask.png"
+  },
+  "occluders": [],
+  "matte": {
+    "type": "ink",
+    "polarity": "light",
+    "print_box": [
+      176,
+      396,
+      432,
+      924
+    ]
+  },
+  "grade": {},
+  "finish": {},
+  "fill": {}
+}

@@ -33,6 +33,19 @@ def runs_of(ts):
     return out
 
 
+STOP_PLAN = {"cut": "reacquire", "morph": "keyframe"}      # imgvideo 0.4.1 (R2); every other reason: chain
+
+
+def job_stops(job_dir, offset):
+    """The engine's reasons a run job's held run ended (qa/fit.json "stops", imgvideo 0.4.1, R2), frames in master
+    frames: {"start"|"end": {"frame", "reason", "failed", "values"}}; {} for an older job."""
+    fj = Path(job_dir) / "qa" / "fit.json"
+    if not fj.exists():
+        return {}
+    return {k: dict(v, frame=None if v.get("frame") is None else offset + v["frame"])
+            for k, v in (json.loads(fj.read_text()).get("stops") or {}).items()}
+
+
 def job_coverage(job_dir, offset):
     """Held frames and unseen frames of a run job, in master frames. -> (held set, unseen set) or None"""
     jd = Path(job_dir)
@@ -55,14 +68,24 @@ def redrawn(M, a, b, iou_min=0.9):
     return refangle.shape_iou(M[b], M[a]) < iou_min
 
 
-def plan(shot, kinds, held, unseen, stats, bounds, M, n_frames, angle=None):
-    """The uncovered runs of one shot and a plan for each. -> {"held", "uncovered": [{run, plan, why, suggest}]}"""
+def plan(shot, kinds, held, unseen, stats, bounds, M, n_frames, angle=None, stops=None):
+    """The uncovered runs of one shot and a plan for each. stops: the engine's reasons the held run ended (R2); where
+    one applies to a run's edge it decides (cut: re-acquire, morph: a keyframe of the new pose, else chain), and the
+    measured tests below are the fallback. -> {"held", "uncovered": [{run, plan, why, edge, suggest}]}"""
     want = {t for a, b in shot["trims"] for t in range(a, b)}
     gaps = (want - held) | (want & unseen)
     out = []
     for a, b in runs_of(gaps):
         edge = a - 1 if (a - 1) in held else (b if b in held else None)
-        if edge is None:
+        stop = None
+        if stops and edge is not None:
+            stop = stops.get("end") if edge < a else stops.get("start")
+        if stop and stop.get("reason") and stop["reason"] != "shot edge":
+            p = STOP_PLAN.get(stop["reason"], "chain")
+            why = f"the engine's held run stopped there: {stop['reason']}"
+            if set(range(a, b)) <= unseen and p == "chain":
+                p, why = "keyframe", why + ", and the label turns into view past what the keyframe saw"
+        elif edge is None:
             p, why = "keyframe", "no held frame next to it"
         elif edge < a and kinds[a - 1] == "cut" or edge >= b and kinds[b - 1] == "cut":
             p, why = "reacquire", "a cut at its edge"
@@ -73,5 +96,5 @@ def plan(shot, kinds, held, unseen, stats, bounds, M, n_frames, angle=None):
         else:
             p, why = "chain", f"carries on from held frame {edge}"
         sug = keypick.suggest(stats, bounds, [[a, b]], n_frames, angle=angle)
-        out.append({"run": [a, b], "plan": p, "why": why, "suggest": sug[0] if sug else None})
+        out.append({"run": [a, b], "plan": p, "why": why, "edge": edge, "suggest": sug[0] if sug else None})
     return {"held": ranges(sorted(held & set(range(*shot["shot"])))), "uncovered": out}

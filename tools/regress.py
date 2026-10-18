@@ -132,7 +132,9 @@ def main():
     ap.add_argument("--job", help="default: this pack's examples/demo/job.json")
     ap.add_argument("--scene", help="default: the job's scene")
     ap.add_argument("--reference", help="default: the job's reference")
-    ap.add_argument("--workflow", help="default: workflows/product-label-refinement.api.json (with --draft: product-label-refinement-draft.api.json)")
+    ap.add_argument("--workflow", help="default: workflows/product-label-refinement.api.json (with --draft: "
+                    "product-label-refinement-draft.api.json; a job with matte ink, polarity light: "
+                    "product-label-refinement-ink.api.json, its old_silhouette mask file into the template's mask loader)")
     ap.add_argument("--psd", action="store_true", help="also write and compare the layered PSDs")
     ap.add_argument("--server", help="run the pack on this ComfyUI server instead of in-process")
     ap.add_argument("--header", action="append", default=[])
@@ -156,10 +158,15 @@ def main():
                         "label's shape, else off)")
     d.add_argument("--name", help="the row's name (default: the job folder's)")
     a = ap.parse_args()
-    a.workflow = a.workflow or str(PACK / "workflows" / ("product-label-refinement-draft.api.json" if a.draft else "product-label-refinement.api.json"))
-
     job_p = Path(a.job).expanduser().resolve() if a.job else PACK / "examples" / "demo" / "job.json"
     job = json.loads(job_p.read_text())
+    m = job.get("matte")
+    light = isinstance(m, dict) and m.get("type") == "ink" and m.get("polarity") == "light"
+    a.workflow = a.workflow or str(PACK / "workflows" / ("product-label-refinement-draft.api.json" if a.draft else
+                                                         "product-label-refinement-ink.api.json" if light else
+                                                         "product-label-refinement.api.json"))
+    osil = job.get("old_silhouette")
+    matte_file = resolve(osil["path"], job_p.parent) if isinstance(osil, dict) and osil.get("type") == "mask" else None
     scene = Path(a.scene).expanduser() if a.scene else resolve(job["scene"], job_p.parent)
     reference = Path(a.reference).expanduser() if a.reference else resolve(job["reference"], job_p.parent)
     work = Path(a.work).expanduser().resolve() if a.work else Path(tempfile.mkdtemp(prefix="imagepost-regress-"))
@@ -179,13 +186,13 @@ def main():
     # 2. the pack, through the same API workflow an agent would submit
     out = work / "pack"
     _, pack_out, pack_rep = run_pack(a, ["--job", job_p, "--scene", scene, "--reference", reference] +
-                                     (["--psd"] if a.psd else []), out)
+                                     (["--mask", matte_file] if matte_file else []) + (["--psd"] if a.psd else []), out)
 
     # 3. compare
     res = compare(pack_out, skill_out, pack_rep, a.levels)
     if skill_rep:
         res["report_sections_identical"] = {k: pack_rep.get(k) == skill_rep.get(k)
-                                            for k in ("align", "grade", "finish", "fill", "change")}
+                                            for k in ("align", "grade", "finish", "fill", "change") + (("matte",) if light else ())}
     psd_ok = True
     if a.psd:
         texts = sorted(out.glob("ImagePostSavePSD-*.txt"))

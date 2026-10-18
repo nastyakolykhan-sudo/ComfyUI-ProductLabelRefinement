@@ -40,7 +40,10 @@
       "occluders": "polygon: 593,428 593,662 650,666 705,662 705,428 650,424",
       "outline": "",
       "mask_skip": "",
-      "label": "off"
+      "label": "off",
+      "ink": "off",
+      "print_box": "",
+      "bow": ""
     },
     "class_type": "ImagePostAutoDraft",
     "_meta": {

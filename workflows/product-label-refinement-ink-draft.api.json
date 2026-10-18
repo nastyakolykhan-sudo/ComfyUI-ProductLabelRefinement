@@ -1,0 +1,363 @@
+{
+  "1": {
+    "inputs": {
+      "image": "inkdemo_frame.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Frame (generated)"
+    }
+  },
+  "2": {
+    "inputs": {
+      "image": "inkdemo_packshot.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Packshot (real product)"
+    }
+  },
+  "22": {
+    "inputs": {
+      "image": "inkdemo_mask.png",
+      "channel": "red"
+    },
+    "class_type": "LoadImageMask",
+    "_meta": {
+      "title": "Product mask (SAM 3)"
+    }
+  },
+  "3": {
+    "inputs": {
+      "scene": [
+        "1",
+        0
+      ],
+      "reference": [
+        "2",
+        0
+      ],
+      "quad": "",
+      "model": "affine",
+      "light": "off",
+      "suggest": false,
+      "filename_prefix": "product-label-refinement/draft",
+      "product_mask": [
+        "22",
+        0
+      ],
+      "reference_mask": [
+        "2",
+        1
+      ],
+      "pairs": "",
+      "occluders": "",
+      "outline": "",
+      "mask_skip": "",
+      "label": "off",
+      "ink": "light",
+      "print_box": "176,396,432,924",
+      "bow": "-140 130/matte"
+    },
+    "class_type": "ImagePostAutoDraft",
+    "_meta": {
+      "title": "Auto Draft"
+    }
+  },
+  "4": {
+    "inputs": {
+      "job": [
+        "3",
+        0
+      ],
+      "scene": [
+        "1",
+        0
+      ],
+      "product_mask": [
+        "6",
+        1
+      ]
+    },
+    "class_type": "ImagePostJobMasks",
+    "_meta": {
+      "title": "Job Masks"
+    }
+  },
+  "5": {
+    "inputs": {
+      "job": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "ImagePostFitWarp",
+    "_meta": {
+      "title": "Fit Warp"
+    }
+  },
+  "6": {
+    "inputs": {
+      "job": [
+        "3",
+        0
+      ],
+      "homography": [
+        "5",
+        0
+      ],
+      "scene": [
+        "1",
+        0
+      ],
+      "reference": [
+        "2",
+        0
+      ],
+      "reference_mask": [
+        "2",
+        1
+      ]
+    },
+    "class_type": "ImagePostWarpReference",
+    "_meta": {
+      "title": "Warp Reference"
+    }
+  },
+  "9": {
+    "inputs": {
+      "job": [
+        "3",
+        0
+      ],
+      "scene": [
+        "1",
+        0
+      ],
+      "product_mask": [
+        "6",
+        1
+      ],
+      "old_silhouette": [
+        "22",
+        0
+      ],
+      "occluder_mask": [
+        "4",
+        1
+      ],
+      "coords": [
+        "6",
+        3
+      ]
+    },
+    "class_type": "ImagePostFillLeftovers",
+    "_meta": {
+      "title": "Fill Leftovers (garbled print)"
+    }
+  },
+  "10": {
+    "inputs": {
+      "job": [
+        "3",
+        0
+      ],
+      "scene": [
+        "1",
+        0
+      ],
+      "background": [
+        "9",
+        0
+      ],
+      "product": [
+        "6",
+        0
+      ],
+      "product_mask": [
+        "6",
+        1
+      ],
+      "occluder_mask": [
+        "4",
+        1
+      ],
+      "ink": [
+        "9",
+        3
+      ],
+      "coords": [
+        "6",
+        3
+      ]
+    },
+    "class_type": "ImagePostCompositeBehind",
+    "_meta": {
+      "title": "Composite Behind"
+    }
+  },
+  "11": {
+    "inputs": {
+      "job": [
+        "3",
+        0
+      ],
+      "before": [
+        "1",
+        0
+      ],
+      "after": [
+        "10",
+        0
+      ],
+      "reference": [
+        "2",
+        0
+      ],
+      "matte": [
+        "10",
+        1
+      ],
+      "fill_mask": [
+        "9",
+        1
+      ],
+      "reference_mask": [
+        "2",
+        1
+      ],
+      "align_report": [
+        "5",
+        1
+      ],
+      "fill_report": [
+        "9",
+        2
+      ],
+      "old_silhouette": [
+        "22",
+        0
+      ],
+      "occluder_mask": [
+        "4",
+        1
+      ],
+      "coords": [
+        "6",
+        3
+      ],
+      "ink": [
+        "9",
+        3
+      ]
+    },
+    "class_type": "ImagePostQASheet",
+    "_meta": {
+      "title": "QA Sheet"
+    }
+  },
+  "12": {
+    "inputs": {
+      "images": [
+        "10",
+        0
+      ],
+      "filename_prefix": "product-label-refinement/inkdemo_frame_keyframe"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save keyframe"
+    }
+  },
+  "13": {
+    "inputs": {
+      "images": [
+        "11",
+        0
+      ],
+      "filename_prefix": "product-label-refinement/qa/compare"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA compare"
+    }
+  },
+  "14": {
+    "inputs": {
+      "images": [
+        "11",
+        1
+      ],
+      "filename_prefix": "product-label-refinement/qa/edges"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA edges"
+    }
+  },
+  "15": {
+    "inputs": {
+      "images": [
+        "11",
+        2
+      ],
+      "filename_prefix": "product-label-refinement/qa/before_after"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA before_after"
+    }
+  },
+  "16": {
+    "inputs": {
+      "images": [
+        "6",
+        2
+      ],
+      "filename_prefix": "product-label-refinement/qa/align_overlay"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA align_overlay"
+    }
+  },
+  "17": {
+    "inputs": {
+      "images": [
+        "9",
+        0
+      ],
+      "filename_prefix": "product-label-refinement/qa/print_removed"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA garbled print removed"
+    }
+  },
+  "20": {
+    "inputs": {
+      "images": [
+        "11",
+        4
+      ],
+      "filename_prefix": "product-label-refinement/qa/audit"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA audit"
+    }
+  },
+  "21": {
+    "inputs": {
+      "images": [
+        "3",
+        2
+      ],
+      "filename_prefix": "product-label-refinement/qa/draft_points"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA draft_points"
+    }
+  }
+}

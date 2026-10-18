@@ -13,15 +13,19 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-from scipy.ndimage import binary_dilation, binary_erosion
+from scipy.ndimage import binary_dilation, binary_erosion, map_coordinates
 
 from imgpost import geometry as geo
 from imgpost import images as im
 from imgpost.raster import fill_polygon
 
 from . import fit as vf
+from . import glue as gl
 from . import labelspace as ls
+from . import level as lvl
+from . import lookchecks as lk
 from . import optics as op
+from . import printalpha as pa
 from . import render as rd
 from . import track as tk
 from . import vio
@@ -80,6 +84,56 @@ class _InfoMedia:
         self.info, self.has_masks = info, True
 
 
+def pitched(H, sag, polygon, quiet=False):
+    """A tube tilted toward the camera (V28). A re-acquired mapping has no pitch of its own (it comes from the matte's
+    outline), so circles round the product stay straight lines. sag: px the label's line through the middle of its
+    band bows toward the base at the point facing the camera, as the source's own print lines show it (+ = a smile,
+    the camera looking down). It pivots on the point facing the camera (where re-acquisition registered the print):
+    that point stays, the sides lift."""
+    from .surface import Tube
+    P = np.asarray(polygon, float)
+    r_mid = H.R + H.k * 0.5 * (P[:, 1].min() + P[:, 1].max())
+    ax = H.A[:, 1] / np.linalg.norm(H.A[:, 1])
+    A = H.A.copy()
+    A[:, 2] = A[:, 2] + ax * (sag / r_mid)
+    a = H.a - ax * sag
+    if not quiet:
+        print(f"pitched    the re-acquired tube toward the camera: {sag:+g} px of sag at the label's middle")
+    return Tube(H.u0, H.Ru, H.R, H.k, A, a)
+
+
+def auto_pitch(H, label_img, polygon, frame, matte, rows=None):
+    """The sag (pitched) that makes the label's print, through H, bow like the lines in `frame` (V28): both measured
+    strip by strip (surface.line_bow), corrected by secant steps to within 1 px. -> (sag, report)"""
+    from . import surface
+    rows = rows or list(surface.text_rows(label_img, polygon))
+    target = surface.line_bow(surface.image_sampler(frame), H, matte, rows)[0]
+
+    def bow(sag):
+        Hp = pitched(H, sag, polygon, quiet=True)
+        return surface.line_bow(surface.texture_sampler(label_img, Hp), Hp, matte, rows)[0]
+    steps = [(0.0, bow(0.0))]
+    sag = target - steps[0][1]
+    for _ in range(5):
+        b = bow(sag)
+        steps.append((sag, b))
+        if abs(target - b) <= 1.0:
+            break
+        (s0, b0), (s1, b1) = steps[-2], steps[-1]
+        g = (b1 - b0) / (s1 - s0) if abs(s1 - s0) > 1e-6 and abs(b1 - b0) > 1e-6 else 1.0
+        sag = s1 + (target - b1) / (g if 0.2 < g < 3.0 else 1.0)
+    sag, got = min(steps, key=lambda sb: abs(target - sb[1]))
+    # a camera can't look down a tube by more than about 30 degrees and still read its label: past that the bow
+    # came from garbled print, not from pitch
+    P = np.asarray(polygon, float)
+    lim = 0.5 * (H.R + H.k * 0.5 * (P[:, 1].min() + P[:, 1].max()))
+    clamped = abs(sag) > lim
+    sag = float(np.clip(sag, -lim, lim))
+    return sag, {"sag_px": round(sag, 2), "source_bow_px": round(float(target), 2), "render_bow_px": round(float(got), 2),
+                 "rows": [round(float(r), 1) for r in rows], "steps": [[round(a, 2), round(b, 2)] for a, b in steps],
+                 **({"clamped_to_px": round(lim, 1)} if clamped else {})}
+
+
 class Job:
     """One shot job. `path` is its vjob.json (the CLI: the clip and the mask are video files), or {"vjob": dict, "dir":
     folder} with `media` (ArrayMedia: frames and mattes in memory; nothing is written but the work/ caches) and
@@ -104,6 +158,8 @@ class Job:
         self.media, self.info, self.has_masks = media, media.info, media.has_masks
         self.sink = None if self.clip is not None else {}       # in memory: the refined frames, by clip frame
         self.s0, self.s1 = self.v.get("shot", [0, self.info["frames"]])
+        if self.v.get("render"):
+            self.v["render"] = print_defaults(self.v["render"])
         self._frames = self._masks = None
         anc = self.v["anchor"]
         self.keyframe = bool(anc.get("keyframe") or anc.get("texture_job"))
@@ -135,7 +191,9 @@ class Job:
                          "reference_outline": {"type": "polygon", "pts": self.kmeta["label_polygon"]}}
             self.ajob_path = self.path
             self.H_reacq = self._chain(anc) if anc.get("chain") else self._reacquire(anc, tj)
-            if anc.get("pitch_sag_px"):
+            if anc.get("pitch_sag_px") == "auto":
+                self.H_reacq = self._pitched(self.H_reacq, self._auto_pitch(anc))
+            elif anc.get("pitch_sag_px"):
                 self.H_reacq = self._pitched(self.H_reacq, float(anc["pitch_sag_px"]))
         elif self.keyframe:
             if str(anc["keyframe"]) in self.keyframes:           # in memory
@@ -252,21 +310,29 @@ class Job:
         print(f"chained   frame {anc['chain']['frame']} takes {cdir.name}'s mapping as this shot's anchor")
         return H
 
-    def _pitched(self, H, sag):
-        """The re-acquired tube tilted toward the camera: a re-acquired mapping has no pitch of its own (it comes
-        from the matte's outline), so circles round the product stay straight lines. sag: px the label's line
-        through the middle of its band bows toward the base at the point facing the camera, as the source's own
-        print lines show it (+ = a smile, the camera looking down)."""
-        from .surface import Tube
-        P = np.asarray(self.kmeta["label_polygon"], float)
-        r_mid = H.R + H.k * 0.5 * (P[:, 1].min() + P[:, 1].max())
-        ax = H.A[:, 1] / np.linalg.norm(H.A[:, 1])
-        A = H.A.copy()
-        A[:, 2] = A[:, 2] + ax * (sag / r_mid)
-        # pivot on the point facing the camera (where re-acquisition registered the print): it stays, the sides lift
-        a = H.a - ax * sag
-        print(f"pitched    the re-acquired tube toward the camera: {sag:+g} px of sag at the label's middle")
-        return Tube(H.u0, H.Ru, H.R, H.k, A, a)
+    def _pitched(self, H, sag, quiet=False):
+        return pitched(H, sag, self.kmeta["label_polygon"], quiet)
+
+    def _auto_pitch(self, anc):
+        """pitch_sag_px "auto" (V28): the sag that makes the label's print bow like the source's own lines on the anchor
+        frame. The source's bow is measured strip by strip; so is a render of the label's print alone through the
+        pitched mapping; the sag is corrected by secant steps until they agree within 1 px (the render's bow isn't the
+        sag itself: example2's 32 px rendered as 22). Cached in work/pitch.json."""
+        from . import surface
+        cache = self.work / "pitch.json"
+        rows = anc.get("pitch_rows") or list(surface.text_rows(self.label_img, self.kmeta["label_polygon"]))
+        key = {"frame": self.anchor, "rows": [round(float(r), 1) for r in rows], "tube": self.H_reacq.to_json()}
+        if cache.exists():
+            c = json.loads(cache.read_text())
+            if c.get("key") == key:
+                return float(c["sag_px"])
+        fr = self.media.frames(self.anchor, self.anchor + 1)[0]
+        mf = self.media.masks(self.anchor, self.anchor + 1)[0]
+        sag, rep = auto_pitch(self.H_reacq, self.label_img, self.kmeta["label_polygon"], fr, mf, rows)
+        cache.write_text(json.dumps(dict(rep, key=key)))
+        print(f"pitch      auto: the source's lines bow {rep['source_bow_px']:+.1f} px (label rows {rows[0]:.0f}-{rows[1]:.0f}); "
+              f"a sag of {sag:+.1f} px makes the label's bow {rep['render_bow_px']:+.1f} px")
+        return sag
 
     def _reacquire(self, anc, tj):
         """The keyframe's label found on this shot's anchor frame (cached in work/reacquire.json)."""
@@ -412,8 +478,13 @@ def stage_fit(J):
     E = res["errors"]
     for e in E:
         e["frame"] += J.s0
+    stops = _confirm_cuts(J, res)
+    res["stops"] = stops
+    pickle.dump(res, open(J.work / "fit.pkl", "wb"))
+    stops = {k: dict(v, frame=None if v["frame"] is None else v["frame"] + J.s0) for k, v in stops.items()}
     (J.qa / "fit.json").write_text(json.dumps({"impacts": [int(i) + J.s0 for i in res["impacts"]],
-                                               "valid": [int(t) + J.s0 for t in res["valid"]], "frames": E}, indent=0))
+                                               "valid": [int(t) + J.s0 for t in res["valid"]], "stops": stops,
+                                               "frames": E}, indent=0))
     V = res["valid"]
     rms = np.array([E[t]["rms_px"] for t in V])
     rig = np.array([E[t]["rigid_rms_px"] for t in V])
@@ -425,7 +496,58 @@ def stage_fit(J):
           f"; smoothing moved the label {np.median(sh):.2f} px (median), {sh.max():.2f} max; "
           f"{sum(t in res['kept_raw'] for t in V)} frames kept their own fit (smoothing fought their tracks: judder)" +
           (f"; morph frames (a shear spike: shape from the frames either side) {[t + J.s0 for t in res['morph']]}"
-           if res.get("morph") else ""))
+           if res.get("morph") else "") + "; the run stops: " + _stops_text(stops))
+
+
+def _frame_hist(f, bins=8):
+    q = (f // (256 // bins)).astype(np.int32)
+    h = np.bincount(((q[..., 0] * bins + q[..., 1]) * bins + q[..., 2]).ravel(), minlength=bins ** 3).astype(float)
+    return h / h.sum()
+
+
+def _confirm_cuts(J, res):
+    """A track jump is a cut only if the picture jumps too: the whole frame's colour histogram changes far more
+    between the two frames than it does from frame to frame inside the run. A product moving fast (a blurred entry)
+    jumps its tracks without one; a box rising into view (V15) changes the histogram without a track jump. The
+    frame evidence goes into each stop's values; a "cut" without it becomes the next reason that fails (or
+    "fast motion")."""
+    stops = res.get("stops")
+    if not stops:
+        return stops or {}
+    V = res["valid"]
+    fr = J.frames()
+    H = {}
+
+    def hist(t):
+        if t not in H:
+            H[t] = _frame_hist(fr[t])
+        return H[t]
+    steps = [0.5 * np.abs(hist(a) - hist(b)).sum() for a, b in zip(V[:-1], V[1:])][::max(1, len(V) // 40)]
+    usual = float(np.median(steps)) if steps else 0.0
+    out = {}
+    for k, v in stops.items():
+        if v["frame"] is None:
+            out[k] = v
+            continue
+        t_in = V[0] if k == "start" else V[-1]
+        d = float(0.5 * np.abs(hist(v["frame"]) - hist(t_in)).sum())
+        spike = d > max(0.2, 4.0 * usual)
+        failed = list(v["failed"])
+        if "cut" in failed and not spike:
+            failed.remove("cut")
+            failed.append("fast motion")
+        reason = failed[0] if failed else "misfit"
+        out[k] = dict(v, reason=reason, failed=failed,
+                      values=dict(v["values"], frame_change=round(d, 3), usual_frame_change=round(usual, 3)))
+    return out
+
+
+def _stops_text(stops):
+    out = []
+    for k, v in stops.items():
+        where = "at the shot edge" if v["frame"] is None else "at %d (%s)" % (v["frame"], v["reason"])
+        out.append("%s %s" % (k, where))
+    return ", ".join(out)
 
 
 def _fit(J):
@@ -587,55 +709,380 @@ def _render_context(J, rc, optics, shutter, ax_ref, res=None, art=None):
     return {"res": res, "art": art, "rc": rc, "optics": optics, "shutter": shutter, "still": still, "ax_ref": ax_ref,
             "Pv": Pv, "vmid": 0.5 * (Pv.min() + Pv.max()), "morph": set(res.get("morph", [])),
             "ax_mode": rc["limb_snap"].get("axial") if isinstance(rc.get("limb_snap"), dict) else None,
-            "residual": J.v.get("fit", {}).get("residual")}
+            "residual": J.v.get("fit", {}).get("residual"), "body": rc.get("_body") or {},
+            "sparkles": frame_set(rc["sparkles"]) if isinstance(rc.get("sparkles"), list) else None,
+            "glow": frame_set(rc["spark_glow"]) if isinstance(rc.get("spark_glow"), list) else None,
+            "print": rc.get("_print"), "glue": rc.get("_glue"), "level": rc.get("_level")}
 
 
-def _render_one(C, J, t, frame):
-    """Shot frame t, from its source frame. -> (output, info, motion span px, motion samples, the mapping that placed
-    the print where it isn't the tracked one, else None)"""
-    res, rc, optics, art = C["res"], C["rc"], C["optics"], C["art"]
-    Pv, vmid, morph, ax_ref, ax_mode = C["Pv"], C["vmid"], C["morph"], C["ax_ref"], C["ax_mode"]
-    H = res["smooth"][t]
-    Hs, span = vf.sub_mappings(J.base(), res["controls"], res["C_smooth"], t, C["shutter"], residual=C["residual"])
-    rct = dict(rc, blur=float(np.hypot(rc["blur"], optics.get("soft", {}).get(str(t + J.s0), 0.0))),
-               smear=optics.get("smear", {}).get(str(t + J.s0)))
-    if t in res.get("morph_source", {}):
-        rct["source_H"] = res["morph_source"][t]
-    snap_rep = None
-    H0_ = H
-    if ax_ref is not None and t in morph:
+def frame_set(spec):
+    """Clip frames from a settings list: frames (98) and half-open runs ([98, 119]: 98-118), mixed freely."""
+    out = set()
+    for x in spec or []:
+        if isinstance(x, (list, tuple)):
+            out.update(range(int(x[0]), int(x[1])))
+        else:
+            out.add(int(x))
+    return out
+
+
+PRINT_RENDER = {"soft_cap": 0.3, "smear": False}   # what render.alpha "print" sets unless the settings do (V40)
+PRINT_FEATHER_V_PX = 4
+
+
+def print_defaults(render, given=None):
+    """render.alpha "print" (V40) and the defaults that go with it, wherever `given` (the settings as written; default:
+    `render` itself) doesn't set them: the still stage's per-frame softness capped at 0.3 px and no motion smear (a
+    restored label stays sharp and legible; a false 26 px smear happens), the label's end fade (feather.v_px) 4 px (the
+    24 px default dimmed print that starts inside it: the tube's top N), and the sparkle re-add off, always (it ghosts
+    the garbled print where that morphs away from its still median, V37; the source's glitter stays anyway, off the
+    letters). What it sets goes into render._defaults ({key: {"value", "by"}}), which the render logs and reports.
+    -> the render settings (`render` itself when alpha isn't "print")"""
+    if not isinstance(render, dict) or render.get("alpha", "label") != "print":
+        return render
+    given = render if given is None else (given or {})
+    out = dict(render)
+    added = {}
+    by = "render.alpha \"print\""
+    for k, v in PRINT_RENDER.items():
+        if k not in given:
+            if out.get(k) != v:
+                added[k] = {"value": v, "by": by}
+            out[k] = v
+    if isinstance(out.get("feather"), dict) and "v_px" not in (given.get("feather") or {}):
+        if out["feather"].get("v_px") != PRINT_FEATHER_V_PX:
+            added["feather.v_px"] = {"value": PRINT_FEATHER_V_PX, "by": by}
+        out["feather"] = dict(out["feather"], v_px=PRINT_FEATHER_V_PX)
+    if out.get("sparkles", True) is not False:
+        if "sparkles" in out:                # asked for: said so in the render's log
+            out["_sparkles_asked"] = out["sparkles"]
+        out["sparkles"] = False
+        added["sparkles"] = {"value": False, "by": by}
+    if added:
+        out["_defaults"] = dict(out.get("_defaults") or {}, **added)
+    return out
+
+
+# the render stages and looks the measured job (imgauto vjobs) switches on that a run's settings may not name: the
+# render logs and reports which of them came from a default rather than the settings
+DEFAULT_KEYS = ("body_snap", "glue", "level", "alpha", "limb_snap", "soft_cap", "smear")
+
+
+def defaults_on(render, given, by):
+    """{key: {"value", "by"}}: the DEFAULT_KEYS `render` has on that `given` (the settings as written) doesn't set; by:
+    who set them, a text or {key: text}."""
+    given = given or {}
+    return {k: {"value": render[k], "by": by.get(k, by.get("*")) if isinstance(by, dict) else by} for k in DEFAULT_KEYS
+            if k in render and k not in given and render[k] not in (None, "label") and
+            not (k == "smear" and render[k] == "auto")}
+
+
+def defaults_text(d):
+    def v(x):
+        return "on" if x is True else "off" if x is False else json.dumps(x)
+    return "; ".join(f"{k} {v(e['value'])} ({e['by']})" for k, e in d.items())
+
+
+def render_optics(optics, rc):
+    """optics.json (the still stage's measures) as the render uses them: the per-frame softness capped at
+    render.soft_cap px (none: as measured), the motion smear only where render.smear keeps it ("auto", the default: as
+    measured; false: none; [clip frames | [a, b)]: only there, for motion blur the source clearly shows)."""
+    o = dict(optics)
+    cap = rc.get("soft_cap")
+    if cap is not None:
+        o["soft"] = {k: min(float(v), float(cap)) for k, v in o.get("soft", {}).items()}
+    sm = rc.get("smear", "auto")
+    if sm is False:
+        o["smear"] = {}
+    elif isinstance(sm, list):
+        keep = frame_set(sm)
+        o["smear"] = {k: v for k, v in o.get("smear", {}).items() if int(k) in keep}
+    elif sm not in ("auto", True):
+        raise ValueError(f"render.smear {sm!r}: \"auto\", false or a list of clip frames")
+    return o
+
+
+def _print_setup(J, C, fr, frames):
+    """render.alpha "print": its settings (printalpha.DEFAULTS under render.print_alpha) and the keyframe's own ink in
+    label space, read on the keyframe's frame through the mapping the render places there. Where that can't be read (a
+    re-acquired shot: its keyframe's frame is in another shot), the render's own print stands in (ink "render").
+    -> (settings, ink label px N x 2 or None, report)"""
+    rc = C["rc"]
+    if rc.get("polarity", "light") != "light":
+        raise ValueError(f"render.alpha \"print\" carries light print (white ink on a body) only for now; this job's "
+                         f"print polarity is {rc.get('polarity')!r}")
+    c = pa.settings(rc.get("print_alpha"))
+    rep, pts = {"ink": c["ink"]}, None
+    if c["ink"] == "keyframe":
+        a = J.anchor - J.s0
+        anc = J.v["anchor"]
+        why = None
+        if not anc.get("keyframe") or anc.get("texture_job"):
+            why = "the keyframe's own frame isn't in this shot (texture_job)"
+        elif a not in frames:
+            why = f"the tracks don't hold the keyframe's frame {J.anchor}"
+        else:
+            H = _place(C, J, a)[0]
+            pts, n = pa.keyframe_ink(J.kf, fr[a], J.key(a, H), H, J.label_img.shape[:2], c)
+            rep["ink_px"] = n
+            if not n:
+                pts, why = None, "no ink found on the keyframe (ink_levels, ink_p90)"
+        if why:
+            rep.update(ink="render", ink_fallback=why)
+    return c, pts, rep
+
+
+def _axial(C, J, t, H):
+    """A reconstructed (morph) frame's position along the axis, from the product's ends (limb_snap "axial"). -> (H,
+    the shift in label px or None)"""
+    rc, ax_ref, ax_mode = C["rc"], C["ax_ref"], C["ax_mode"]
+    if ax_ref is not None and t in C["morph"]:
         # a reconstructed frame's position along the axis came from blurred or bad tracks: the product's end
         # (a crimp, a cap) lands where the frames with good tracks put it. Motion blur lengthens the matte at
         # both ends, so half of the extra length comes off the measured end
-        e = vf.axis_ends(H, J.key(t, H), vmid)
+        e = vf.axis_ends(H, J.key(t, H), C["vmid"])
         if e is not None:
             ext = max(0.0, 0.5 * ((e[1] - e[0]) - (ax_ref[1] - ax_ref[0])))
             vm, vr = (e[0] + ext, ax_ref[0]) if ax_mode == "top" else (e[1] - ext, ax_ref[1])
             c = vm - vr
             if abs(c) <= float(rc["limb_snap"].get("axial_max", 60.0)):
-                H = rd.shift_ref(H, 0.0, c)
-                rct["axial_shift"] = round(float(c), 1)
-    if rc.get("limb_snap"):
-        # the label's sides onto the product's matte (the model's straight taper misses a real tube's sides by
-        # 10-25 px at the label's ends); light and sparkles stay read through the tracked mapping
-        sc_ = {k: v for k, v in (rc["limb_snap"] if isinstance(rc["limb_snap"], dict) else {}).items()
-               if k in ("step", "max_px", "inner", "lam", "hold")}
-        Hn, snap_rep = vf.silhouette_snap(H, J.key(t, H), (Pv.min(), Pv.max()), **sc_)
-        if Hn is not H:
-            rct.setdefault("source_H", H0_)
-            H = Hn
+                return rd.shift_ref(H, 0.0, c), round(float(c), 1)
+    return H, None
+
+
+def _limb(C, J, t, H):
+    """The label's sides onto the product's matte (render.limb_snap). -> (mapping, report or None)"""
+    rc, Pv = C["rc"], C["Pv"]
+    if not rc.get("limb_snap"):
+        return H, None
+    # the model's straight taper misses a real tube's sides by 10-25 px at the label's ends; light and sparkles stay
+    # read through the tracked mapping
+    sc_ = {k: v for k, v in (rc["limb_snap"] if isinstance(rc["limb_snap"], dict) else {}).items()
+           if k in ("step", "max_px", "inner", "lam", "hold")}
+    return vf.silhouette_snap(H, J.key(t, H), (Pv.min(), Pv.max()), **sc_)
+
+
+def _place(C, J, t):
+    """Where the render puts the label on shot frame t: the tracked mapping, moved along the axis on a morph frame
+    (limb_snap axial), placed by the product's body (render.body_snap) and snapped onto the limbs (limb_snap).
+    -> (the mapping, the tracked mapping, the axial shift or None, the body correction or None, the limb snap's report
+    or None). With render.glue the glued mapping (the placement carried along the product's own motion, V42); with
+    render.level that mapping levelled with the product's base (V45)."""
+    H0_ = C["res"]["smooth"][t]
+    lv = C.get("level")
+    if lv and t in lv:
+        return lv[t], H0_, None, C["body"].get(t), None
+    g = C.get("glue")
+    if g and t in g:
+        return g[t], H0_, None, C["body"].get(t), None
+    H, sh = _axial(C, J, t, H0_)
+    bs = C["body"].get(t)
+    if bs is not None:
+        # the label placed by the product's body, not by the generated print it tracks (render.body_snap, V39): along
+        # the axis and turned onto the body's centreline; the limb snap then puts its sides on the matte
+        H = vf.body_snapped(H, bs[1], bs[0], bs[2], bs[3])
+    H, snap_rep = _limb(C, J, t, H)
+    return H, H0_, sh, bs, snap_rep
+
+
+def _render_one(C, J, t, frame, extras=None):
+    """Shot frame t, from its source frame. extras (render.alpha "print"): {"gain": the print's presence gain, "blur":
+    (direction, px) or None}, or {"measure": True} (the presence pre-pass: -> source / render presence or None).
+    -> (output, info, motion span px, motion samples, the mapping that placed the print where it isn't the tracked one,
+    else None)"""
+    res, rc, optics, art = C["res"], C["rc"], C["optics"], C["art"]
+    Hs, span = vf.sub_mappings(J.base(), res["controls"], res["C_smooth"], t, C["shutter"], residual=C["residual"])
+    rct = dict(rc, blur=float(np.hypot(rc["blur"], optics.get("soft", {}).get(str(t + J.s0), 0.0))),
+               smear=optics.get("smear", {}).get(str(t + J.s0)))
+    if t in res.get("morph_source", {}):
+        rct["source_H"] = res["morph_source"][t]
+    H, H0_, sh, bs, snap_rep = _place(C, J, t)
+    if sh is not None:
+        rct["axial_shift"] = sh
     placed = None
     if H is not H0_:
         rct.setdefault("source_H", H0_)
         placed = H
-    if isinstance(rc.get("spark_glow"), list):              # the glow only on the frames a sparkle trail crosses
-        rct["spark_glow"] = t + J.s0 in rc["spark_glow"]
+    if C["glow"] is not None:                                # the glow only on the frames a sparkle trail crosses
+        rct["spark_glow"] = t + J.s0 in C["glow"]
+    if C["sparkles"] is not None:                            # the re-add only on these frames (glitter in front, V37)
+        rct["sparkles"] = t + J.s0 in C["sparkles"]
     out, info, _ = rd.render(frame, H, Hs, art, J.key(t, H), rct, label_median=C["still"], seed=t + J.s0)
+    pr = C["print"]
+    if pr is not None:
+        # render.alpha "print" (V40): only the print changes, carried onto the source's own body
+        ch = np.any(out != frame, axis=-1)
+        ex = extras or {}
+        if ex.get("measure"):
+            return pa.measure_presence(frame, out, ch, J.key(t, H), pr["c"], pa.ink_mask(H, pr["pts"], ch.shape)
+                                       if pr["pts"] is not None else None) if ch.any() else None
+        if ch.any():
+            ink = pa.ink_mask(H, pr["pts"], ch.shape) if pr["pts"] is not None else None
+            g, bl = float(ex.get("gain", 1.0)), ex.get("blur")
+            out, pi = pa.composite(frame, out, ch, J.key(t, H), pr["c"], ink, gain=g, blur=bl)
+            if ink is None:                  # (lost print is measured against the keyframe's own ink only)
+                pi.pop("lost_print_px")
+                pi.pop("ink_px")
+            info["print_alpha"] = dict(pi, render_px=int(ch.sum()), presence_gain=round(g, 3),
+                                       blur_px=round(float(bl[1]), 2) if bl is not None else 0.0)
+    elif C["sparkles"] is not None and rct.get("sparkles"):
+        # the review's ghost check on a sparkle re-add frame (V37: the re-add can bring the garbled print back): this
+        # render against one without the re-add, which only exists here
+        clean, _, _ = rd.render(frame, H, Hs, art, J.key(t, H), dict(rct, sparkles=False), label_median=C["still"],
+                                seed=t + J.s0)
+        info["ghost_px"] = lk.ghost_px(frame, clean, out, J.key(t, H))
     if snap_rep:
         info["snap"] = {k: v for k, v in snap_rep.items() if k in ("left_px", "right_px", "snap")}
     if "axial_shift" in rct:
         info["axial_shift"] = rct["axial_shift"]
+    if bs is not None:
+        info["body_snap"] = {"stretch": round(bs[0], 5), "shift": round(bs[1], 3), "roll_deg": round(bs[2], 3)}
     return out, info, span, len(Hs), placed
+
+
+def _body_snap(J, C, fr, frames):
+    """render.body_snap (V39): per frame, the correction that keeps the label at the reference frame's (the keyframe's)
+    proportion of the product's body along its axis and on the body's centreline, measured on the mapping the render
+    would place (the tracked one, snapped onto the limbs), median-filtered over the shot. -> ({shot frame: (f, p,
+    roll_deg, pivot)} for the frames it moves, the report for render.json)"""
+    rc = C["rc"]
+    bc = dict(vf.BODY_SNAP, **(rc["body_snap"] if isinstance(rc["body_snap"], dict) else {}))
+    P = J.outline()
+    (u0, v0), (u1, v1) = P.min(0), P.max(0)
+    uc, vr = 0.5 * (u0 + u1), (float(v0), float(v1))
+    a = int(bc.get("ref_frame", J.anchor)) - J.s0
+    if a not in frames:
+        return {}, {"skipped": f"the tracks don't hold the reference frame {a + J.s0} (body_snap.ref_frame)"}
+
+    def placed(t):
+        H, _ = _axial(C, J, t, C["res"]["smooth"][t])
+        return _limb(C, J, t, H)[0], H
+
+    def measure(t, top, bottom, ref=None):
+        # the gaps where the label's ends are rendered (snapped onto the limbs); the roll of its print (the mapping
+        # under the limb snap, which shifts rows sideways but never turns the text lines)
+        H, Hp = placed(t)
+        return vf.body_measure(H, fr[t].astype(float).mean(-1), J.key(t, H).astype(float), vr, uc, top, bottom,
+                               bc["reach"], bc["across"], bc["inside"], H_print=Hp, ref=ref, window=bc["window"])
+    kinds = {"top": bc["top"], "bottom": bc["bottom"]}
+    if "auto" in kinds.values():                           # decided once, on the reference frame
+        Hk = placed(a)[0]
+        auto = vf.body_edges(Hk, fr[a].astype(float).mean(-1), J.key(a, Hk).astype(float), vr, uc, bc["reach"])
+        kinds = {k: auto[k] if v == "auto" else v for k, v in kinds.items()}
+    ref = measure(a, kinds["top"], kinds["bottom"])
+    if ref is None:
+        return {}, {"skipped": f"no body measure on the reference frame {a + J.s0} (body_snap.top / bottom, reach)",
+                    "edges": kinds}
+    # every other frame round the gaps the reference's proportion predicts for it (None: its neighbours' correction)
+    meas = {t: (ref if t == a else measure(t, kinds["top"], kinds["bottom"], ref)) for t in sorted(frames)}
+    corr = vf.body_corrections(meas, ref, vr, bc["median"], bc["outlier_k"], bc["stretch"], bc["roll_max"],
+                               bc["shift_max"])
+    corr[a] = (1.0, 0.0, 0.0)                              # the keyframe's frame is the truth
+    only = frame_set(bc["frames"]) if bc.get("frames") else None
+
+    def pivot(t):
+        return meas[t]["pivot"] if meas[t] is not None else \
+            geo.apply_H(placed(t)[0], np.array([[uc, 0.5 * (vr[0] + vr[1])]]))[0].tolist()
+    body = {t: (f, p, r, pivot(t)) for t, (f, p, r) in corr.items()
+            if (f, p, r) != (1.0, 0.0, 0.0) and (only is None or t + J.s0 in only)}
+    off = {t: vf.body_offsets(m, ref) for t, m in meas.items() if m is not None}
+    meas_n = sum(m is not None for m in meas.values())
+
+    def rng(k):
+        x = [v[k] for v in off.values() if np.isfinite(v[k])]
+        return [round(float(min(x)), 2), round(float(max(x)), 2)] if x else None
+    rep = {"reference_frame": a + J.s0, "edges": kinds, "measured": meas_n, "moved": len(body),
+           "reference": {"top_gap_px": round(ref["top"], 2), "bottom_gap_px": round(ref["bot"], 2),
+                         "label_px": round(ref["L"], 2), "roll_deg": round(ref["roll"], 3)},
+           "before": {"top_px": rng("top_px"), "bottom_px": rng("bottom_px"), "roll_deg": rng("roll_deg"),
+                      "stretch": rng("stretch")},
+           "stretch": [round(min(c[0] for c in corr.values()), 4), round(max(c[0] for c in corr.values()), 4)],
+           "roll_deg": [round(min(c[2] for c in corr.values()), 3), round(max(c[2] for c in corr.values()), 3)]}
+    print(f"body snap  {len(body)} of {len(frames)} frames placed by the body (reference frame {a + J.s0}, edges "
+          f"{kinds['top']} above / {kinds['bottom']} below): before, the label's top {rep['before']['top_px']} px and "
+          f"bottom {rep['before']['bottom_px']} px off the keyframe's proportion, roll {rep['before']['roll_deg']} deg; "
+          f"stretch {rep['stretch']}, roll {rep['roll_deg']} deg")
+    return body, rep
+
+
+def _glue(J, C, fr, res):
+    """render.glue (V42): the placement on every frame (_place on the frames the tracks hold, the fit's own mapping on
+    the rest, as the job script read them), glued to the product's motion (imgvideo.glue). -> ({shot frame: glued
+    mapping}, the report, {shot frame: the glued grid points}, which grid points are on the label)"""
+    rc = C["rc"]
+    gc = dict(gl.GLUE, **(rc["glue"] if isinstance(rc["glue"], dict) else {}))
+    V = set(res["valid"])
+    maps = {t: (_place(C, J, t)[0] if t in V else H) for t, H in enumerate(res["smooth"])}
+    a = J.anchor - J.s0
+    S, G, inl, P, rep, steps = gl.glue(maps, lambda t: fr[t], lambda t: J.key(t, maps[t]), J.outline(), a, gc)
+    glued = {t: H for t, H in gl.glued_mappings(maps, P, S, a).items() if t in V}
+    summ = gl.summary(rep, steps, sorted(maps), J.s0, J.anchor, gc["sigma"])
+    summ["per_frame"] = {t + J.s0: v for t, v in rep.items()}
+    e0, e1 = gl.edges(gc["edge"])
+    print(f"glue       {len(glued)} frames moved with the product's own motion (sigma {gc['sigma']} frames, edge "
+          f"{e0 if e0 == e1 else e0 + ' at the start, ' + e1 + ' at the end'}): correction median {summ['correction_px_median']} px, max {summ['correction_px_max']}; "
+          f"placement jitter median {summ['placement_jitter_px_median']} px; motion fits fell back on "
+          f"{summ['motion_fallbacks'] or 'no frames'}")
+    return glued, summ, S, inl
+
+
+def _level(J, C, fr, res):
+    """render.level (V45): the label's lines level with the product's base, over the mapping the render places (glued,
+    or as placed) on the frames the tracks hold (the fit's own mapping on the rest, as the job script read them).
+    -> ({shot frame: levelled mapping}, the report)"""
+    rc = C["rc"]
+    V = set(res["valid"])
+    maps = {t: (_place(C, J, t)[0] if t in V else H) for t, H in enumerate(res["smooth"])}
+    anc = J.v["anchor"]
+    kf = J.kf if anc.get("keyframe") and not anc.get("texture_job") else None
+    lev, rep = lvl.level(maps, lambda t: J.key(t, maps[t]), J.outline(), J.anchor - J.s0, rc["level"], kf_img=kf,
+                         polarity=rc.get("polarity", "light"))
+    lev = {t: H for t, H in lev.items() if t in V}
+    rep = dict(rep, keyframe=J.anchor, moved=len(lev))
+    if "per_frame" in rep:
+        rep["per_frame"] = {t + J.s0: v for t, v in rep["per_frame"].items()}
+    if rep.get("skipped"):
+        print(f"level      not levelled: {rep['skipped']}")
+    else:
+        kb = rep.get("keyframe_vs_base") or {}
+        print(f"level      the label's lines levelled on {len(lev)} frames (target: the keyframe frame's level "
+              f"{rep['keyframe_level_deg']:+.2f} deg, offset {rep['offset_deg']:+.2f}" +
+              (f", the keyframe's own lines {kb['level_deg']:+.2f} deg against its base" if "level_deg" in kb else "") +
+              (f"; {kb['skipped']}" if "skipped" in kb else "") +
+              f"): correction median {rep['correction_deg_median']} deg, max {rep['correction_deg_max']}; the base "
+              f"scatters {rep['base_scatter_deg']} deg frame to frame")
+    return lev, rep
+
+
+def _print_frames(J, C, fr, res, todo, pc, glue_pts):
+    """render.alpha "print": the per-frame inputs of the presence gain and the motion blur. The label's motion is the
+    centred difference of its grid points (glued, or as placed); the source's print sharpness is edge_strength
+    against the keyframe frame's. -> ({clip frame: [vx, vy]}, {clip frame: sharpness} or None, report)"""
+    rep = {}
+    mot, ssharp = {}, None
+    if float(pc["shutter"]) > 0:
+        if glue_pts is not None:
+            Sg, inl = glue_pts
+            mot = {t + J.s0: v for t, v in pa.label_motion(Sg, inl).items()}
+        else:
+            G, inl = gl.grid(J.outline())
+            V = set(res["valid"])
+            P = {t: geo.apply_H(_place(C, J, t)[0] if t in V else H, G) for t, H in enumerate(res["smooth"])}
+            mot = {t + J.s0: v for t, v in pa.label_motion(P, inl).items()}
+        if pc["sharp_gate"]:
+            a = J.anchor - J.s0
+            k = pa.edge_strength(fr[a], J.key(a, res["smooth"][a])) if a in set(res["valid"]) else None
+            if k is None:
+                rep["blur_off"] = "the keyframe frame's print sharpness can't be measured: no motion blur"
+                mot = {}
+            else:
+                ssharp = {}
+                for t in todo:
+                    m = J.key(t, res["smooth"][t])
+                    e = pa.edge_strength(fr[t], m) if m.any() else None
+                    if e is not None:
+                        ssharp[t + J.s0] = round(e / k, 3)
+    return mot, ssharp, rep
 
 
 _RW = {}
@@ -653,10 +1100,10 @@ def _render_worker_init(path, rc, optics, shutter, ax_ref):
 
 
 def _render_worker(task):
-    t, frame, matte = task
+    t, frame, matte, *extras = task
     J = _RW["J"]
     J._masks = {t: matte}                  # J.key(t, ...) reads the frame's matte from here
-    return _render_one(_RW["C"], J, t, frame)
+    return _render_one(_RW["C"], J, t, frame, extras[0] if extras else None)
 
 
 def render_workers(n=None):
@@ -673,7 +1120,10 @@ def stage_render(J, rng=None, workers=None):
     own = set(J.owned(res))
     art, _ = J.artwork()
     rc = dict(J.v.get("render", {}))
+    if rc.get("_defaults"):
+        print(f"defaults   on by default, not in the job's settings: {defaults_text(rc['_defaults'])}")
     optics = json.loads((J.work / "optics.json").read_text()) if (J.work / "optics.json").exists() else {}
+    optics = render_optics(optics, rc)                         # render.soft_cap, render.smear (V40)
     if rc.get("blur", "auto") == "auto":
         rc["blur"] = optics.get("blur", 0.6)
     shutter = rc.get("shutter", "auto")
@@ -746,9 +1196,43 @@ def stage_render(J, rng=None, workers=None):
             ax_ref = np.median(E, 0)
 
     C = _render_context(J, rc, optics, shutter, ax_ref, res=res, art=art)
+    body_rep = None
+    if rc.get("body_snap"):
+        # measured over every frame the tracks hold (not only a test range or a patch job's frames), so a range renders
+        # as the full shot does
+        body, body_rep = _body_snap(J, C, fr, V)
+        rc["_body"] = C["body"] = body                         # (the workers rebuild their context from rc)
+    glue_rep = glue_pts = None
+    if rc.get("glue"):
+        # the label glued to the product's own motion (V42), over the placement the body snap and limb snap made
+        glued, glue_rep, Sg, inl = _glue(J, C, fr, res)
+        rc["_glue"] = C["glue"] = glued
+        glue_pts = (Sg, inl)
+    level_rep = None
+    if rc.get("level"):
+        # the label's lines level with the product's base (V45), on top of the glue (or the placement)
+        lev, level_rep = _level(J, C, fr, res)
+        if lev:
+            rc["_level"] = C["level"] = lev
+            glue_pts = None                                    # the label's motion: through the levelled mappings
+    print_rep = None
+    if rc.get("alpha", "label") == "print":
+        # print-only compositing (V40): the keyframe's ink read once, here, after the body snap placed the keyframe frame
+        pc, pts, print_rep = _print_setup(J, C, fr, V)
+        rc["_print"] = C["print"] = {"c": pc, "pts": pts}
+        if rc.get("_sparkles_asked") is not None:
+            print(f"print      the sparkle re-add asked for (render.sparkles {rc['_sparkles_asked']}) stays off with "
+                  f"render.alpha \"print\": it ghosts the garbled print (V37); the source's glitter stays off the letters")
+    elif rc.get("alpha", "label") != "label":
+        raise ValueError(f"render.alpha {rc['alpha']!r}: \"label\" (the whole label band) or \"print\" (only the print)")
     todo = [t for t in range(lo, hi) if t in own]
+    mot, ssharp, gains = {}, None, {}
+    if print_rep is not None:
+        # the presence gain and the motion blur's inputs (V43, V44)
+        mot, ssharp, more = _print_frames(J, C, fr, res, todo, pc, glue_pts)
+        print_rep.update(more)
     nw = render_workers(workers)
-    pool, pending = None, {}
+    pool = None
     if nw > 1 and len(todo) >= 3 and J.has_masks:
         # frames render in parallel processes, in order on the way out
         import multiprocessing as mp
@@ -756,20 +1240,45 @@ def stage_render(J, rng=None, workers=None):
         pool = ProcessPoolExecutor(max_workers=min(nw, len(todo)), mp_context=mp.get_context("spawn"),
                                    initializer=_render_worker_init, initargs=(J.spec(), rc, optics, shutter, ax_ref))
         mk_all = J.masks()
-        queue = iter(todo)
+
+    def frames_out(ts, extras_for):
+        """(t, _render_one's result) for ts, in order: in the render processes (2 queued per process) or here."""
+        if pool is None:
+            for t in ts:
+                yield t, _render_one(C, J, t, fr[t], extras_for(t))
+            return
+        pending, queue = {}, iter(ts)
 
         def submit():
             t = next(queue, None)
             if t is not None:
-                pending[t] = pool.submit(_render_worker, (t, fr[t], mk_all[t]))
+                pending[t] = pool.submit(_render_worker, (t, fr[t], mk_all[t], extras_for(t)))
         for _ in range(2 * nw):
             submit()
+        for t in ts:
+            r = pending.pop(t).result()
+            submit()
+            yield t, r
+
+    if print_rep is not None and pc["presence"] == "match":
+        # the print's presence, source over render, on every frame first (a render pass of its own), then smoothed
+        raw = {t + J.s0: v for t, v in frames_out(todo, lambda t: {"measure": True}) if v is not None}
+        gains = pa.presence_gains(raw, [t + J.s0 for t in todo], pc)
+        print_rep["presence_measured"] = len(raw)
+
+    def extras_for(t):
+        if print_rep is None:
+            return None
+        T_ = t + J.s0
+        bl = None
+        if float(pc["shutter"]) > 0 and T_ in mot:
+            bl = pa.motion_blur(mot[T_], ssharp.get(T_) if ssharp is not None else False, pc)
+        return {"gain": gains.get(T_, 1.0), "blur": bl}
+    rendered = frames_out(todo, extras_for)
 
     def one(t):
-        if pool is None:
-            return _render_one(C, J, t, fr[t])
-        r = pending.pop(t).result()
-        submit()
+        t_, r = next(rendered)
+        assert t_ == t
         return r
 
     for t in range(lo, hi):
@@ -807,9 +1316,36 @@ def stage_render(J, rng=None, workers=None):
         # a patch job doesn't deliver the anchor frame, but QA measures the keyframe's own edge strip on it
         _, ai, _, _, _ = _render_one(C, J, a, fr[a])
         anchor_info = {k: ai[k] for k in ("unseen_px", "label_px") if k in ai}
+    if print_rep is not None:
+        pf = {t: i["print_alpha"] for t, i in infos.items() if "print_alpha" in i}
+        print_rep["frames"] = len(pf)
+        print_rep.update(presence=pc["presence"], presence_target=pc["presence_target"], shutter=pc["shutter"])
+        gs = [v["presence_gain"] for v in pf.values()]
+        if gs:
+            print_rep["presence_gain"] = [round(min(gs), 3), round(float(np.median(gs)), 3), round(max(gs), 3)]
+        bl = {t: v["blur_px"] for t, v in pf.items() if v.get("blur_px")}
+        print_rep["blur_frames"] = sorted(bl)
+        if bl:
+            print_rep["blur_px_max"] = max(bl.values())
+        if pf:
+            print_rep["alpha_share_median"] = round(float(np.median([v["alpha_px"] / max(v["render_px"], 1)
+                                                                     for v in pf.values()])), 3)
+            lp = {t: v["lost_print_px"] for t, v in pf.items() if "lost_print_px" in v}
+            if lp:
+                # print the render has and the output lacks (keyframe ink only): over 30 px on a frame is worth a look.
+                # Bright print near white reads lower in contrast on every frame (a frosted bottle's white print: about
+                # half of the ink px, all letters there): read a frame against the shot's median share
+                print_rep["lost_print_px_max"] = max(lp.values())
+                print_rep["lost_print_frames"] = [t for t, v in lp.items() if v > 30]
+                print_rep["lost_print_share_median"] = round(float(np.median(
+                    [pf[t]["lost_print_px"] / max(pf[t]["ink_px"], 1) for t in lp])), 4)
+    tune = {k: rc[k] for k in ("soft_cap", "smear") if k in rc}
     (J.work / ("render_test.json" if test else "render.json")).write_text(json.dumps(
         {"blur": rc["blur"], "shutter": shutter, "white_chroma": rc.get("white_chroma"), "ink_gain": rc.get("ink_gain"),
-         "frames": infos, **({"anchor": anchor_info} if anchor_info else {})}, indent=0))
+         **tune, "frames": infos, **({"anchor": anchor_info} if anchor_info else {}),
+         **({"body_snap": body_rep} if body_rep else {}), **({"glue": glue_rep} if glue_rep else {}),
+         **({"level": level_rep} if level_rep else {}), **({"print_alpha": print_rep} if print_rep else {}),
+         **({"defaults": rc["_defaults"]} if rc.get("_defaults") else {})}, indent=0))
     n = len(infos)
     print(f"render     {n} frames refined, {hi - lo - n} left as they are, in {time.time() - t0:.0f} s on {nw if pool else 1} "
           f"process{'es' if pool and nw > 1 else ''} (blur {rc['blur']} px); "
@@ -819,6 +1355,18 @@ def stage_render(J, rng=None, workers=None):
           (f"; label the keyframe never saw: median {100 * np.median(list(unseen.values())):.2f} %, max "
            f"{100 * max(unseen.values()):.2f} % (frame {max(unseen, key=unseen.get)}), above 1 % on "
            f"{sum(v > 0.01 for v in unseen.values())} frames" if unseen else ""))
+    if print_rep is not None:
+        print(f"print      only the print changed on {print_rep['frames']} frames (ink: {print_rep['ink']}" +
+              (f", {print_rep['ink_px']} keyframe ink px" if "ink_px" in print_rep else "") +
+              (f"; {print_rep['ink_fallback']}" if "ink_fallback" in print_rep else "") + ")" +
+              (f", {100 * print_rep['alpha_share_median']:.0f} % of the render's change (median)"
+               if "alpha_share_median" in print_rep else "") +
+              (f"; print lost against the render over 30 px on {_ranges(print_rep['lost_print_frames']) or 'no frames'} "
+               f"(max {print_rep['lost_print_px_max']} px; median share of the ink "
+               f"{100 * print_rep['lost_print_share_median']:.1f} %)" if "lost_print_px_max" in print_rep else "") +
+              (f"; presence gain {print_rep['presence_gain']} (min, median, max)" if "presence_gain" in print_rep else "") +
+              f"; motion blur on {_ranges(print_rep['blur_frames']) or 'no frames'}" +
+              (f" (at most {print_rep['blur_px_max']} px)" if "blur_px_max" in print_rep else ""))
     if J.sink is None:
         print(f"saved      {out_p}" + (f"\n           {ll_p}" if ll_p else "") + f"\n           {sbs_p}")
 
@@ -873,7 +1421,8 @@ def stage_qa(J):
             Image.fromarray(im.to_u8(im.lin_to_srgb(np.nan_to_num(rgb)))).save(J.qa / "unwarp_anchor.png")
     ncc_min, rms_max, lock_min = qc.get("ncc_min", 0.6), qc.get("rms_max", 1.5), qc.get("lock_min", 0.3)
     unseen_max = qc.get("unseen_max", 0.02)
-    soft = json.loads((J.work / "optics.json").read_text()).get("soft", {}) if (J.work / "optics.json").exists() else {}
+    soft = render_optics(json.loads((J.work / "optics.json").read_text()), J.v.get("render", {})).get("soft", {}) \
+        if (J.work / "optics.json").exists() else {}
     nv = [r["ncc_out"] for r in rows if r["ncc_out"] is not None]
     ncc_floor = max(ncc_min, float(np.median(nv)) - qc.get("ncc_drop", 0.08)) if nv else ncc_min
     for r in rows:
@@ -1024,6 +1573,9 @@ def _review(J, parts, ll_path, arrays=None):
         for t in P.owned(_fit(P)):
             owner.setdefault(t + P.s0, P)
     ctx = {}
+    cf = dict(rv.DEFAULTS, **(J.v.get("review") or {}))
+    looks_cfg = cf.get("looks", {})                  # the look checks (lookchecks): false switches them off
+    LF = {}
 
     def context(P):
         if id(P) not in ctx:
@@ -1035,8 +1587,16 @@ def _review(J, parts, ll_path, arrays=None):
             gh = rv.Ghost(art, ref_u8, None if st is None else st["med"].astype(float), 4.0 if st is None else float(st["step"]),
                           P.v.get("render", {}).get("feather"), Ru)
             Pv = P.outline()[:, 1]
+            (u0, _), (u1, _) = P.outline().min(0), P.outline().max(0)
             ctx[id(P)] = dict(res=res, maps=maps, art=art, ghost=gh, G=rv.label_grid(P.outline()), v=(Pv.min(), Pv.max()),
-                              shot=(P.s0, P.s1, P.anchor), outline=P.outline())
+                              shot=(P.s0, P.s1, P.anchor), outline=P.outline(), uc=0.5 * (u0 + u1),
+                              glitter=rv.Glitter(art, print_px=int(cf["glitter_print_px"]), tophat=int(cf["glitter_tophat"]),
+                                                 levels=float(cf["glitter_levels"]), max_px=int(cf["glitter_px"]),
+                                                 excess=float(cf["glitter_excess"])))
+            ctx[id(P)]["body"] = _body_reference(P, ctx[id(P)], lambda T: src[T - lo] if lo <= T < hi else
+                                                 P.media.frames(T, T + 1)[0])
+            rj = json.loads((P.work / "render.json").read_text()) if (P.work / "render.json").exists() else {}
+            ctx[id(P)]["rinfo"], ctx[id(P)]["rlevel"] = rj.get("frames", {}), rj.get("level")
         return ctx[id(P)]
     F, prev = {}, None
     for i in range(hi - lo):
@@ -1052,10 +1612,28 @@ def _review(J, parts, ll_path, arrays=None):
         r = rv.frame_measures(src[i], out[i], m, prev)
         if P is not None and r["changed_px"] > 300:
             Ho = c["maps"].get(T, H)
-            cf = dict(rv.DEFAULTS, **(J.v.get("review") or {}))
             r.update(shot=c["shot"], gap=rv.limb_gap(Ho, m, c["v"]), shear=rv.shear_of(H), pts=rv.shape_points(H, c["G"]),
                      ghost=c["ghost"](out[i], src[i], m, Ho, c["res"].get("morph_source", {}).get(t, H)),
                      occl=rv.occluder_edge(Ho, H, m, c["v"], cf["bend_slope"], cf["bend_ends"], cf["bend_moved"]))
+            c["glitter"].add(T, c["shot"], src[i], out[i], m, c["res"].get("morph_source", {}).get(t, H))
+            b = c["body"]
+            if b is not None:
+                mb = vf.body_measure(Ho, src[i].astype(float).mean(-1), m.astype(float), c["v"], c["uc"], b["edges"]["top"],
+                                     b["edges"]["bottom"], b["reach"], b["across"], b["inside"],
+                                     ref=None if T == b["frame"] else b["ref"], window=b["window"])
+                if mb is not None:
+                    r["body"] = _body_row(mb, b["ref"])
+            if looks_cfg is not False:
+                # the look checks' per-frame measures (the user's notes from the first real run, V42-V45)
+                pol = (P.v.get("render") or {}).get("polarity", "light")
+                chg = np.any(out[i] != src[i], axis=-1)
+                LF[T] = {"looks": lk.frame_looks(src[i], out[i], m, chg, pol),
+                         "ghost_px": c["rinfo"].get(str(T), {}).get("ghost_px")}
+                if i > 0 and owner.get(T - 1) is P and (T - 1) in LF:
+                    lc = dict(lk.LOOKS, **(looks_cfg or {}))
+                    LF[T - 1]["swim"] = lk.swim_pair(src[i - 1], src[i], out[i - 1], out[i], prev[1], m,
+                                                     np.any(out[i - 1] != src[i - 1], axis=-1), lc["still_px"],
+                                                     int(lc["swim_search"]))
             Q = owner.get(T - 1)
             if i > 0 and Q is not None and Q is not P and context(Q)["shot"] != c["shot"] and \
                     np.allclose(context(Q)["outline"], c["outline"]):
@@ -1067,9 +1645,77 @@ def _review(J, parts, ll_path, arrays=None):
                     r["jump_px"] = j[1]
         prev = (src[i], m)
         F[T] = r
+    for c in ctx.values():                            # glitter: each frame against the frames around it
+        for T, g in c["glitter"].finish().items():
+            F[T]["glitter"] = g
     if os.environ.get("PLR_REVIEW_DUMP"):             # the raw measures, to re-tune the checks without re-measuring
         pickle.dump({"F": F, "fps": J.info["fps"], "cfg": J.v.get("review")}, open(os.environ["PLR_REVIEW_DUMP"], "wb"))
-    return rv.evaluate(F, J.info["fps"], J.v.get("review"))
+    flags, summary = rv.evaluate(F, J.info["fps"], J.v.get("review"))
+    if LF:
+        # the look checks over each part's frames, merged into the review's flags (with what to try next)
+        shots = {}
+        for P in parts:
+            if id(P) not in ctx:
+                continue
+            c = ctx[id(P)]
+            rl = c["rlevel"] or {}
+            on = bool(rl) and not rl.get("skipped")
+            kb = rl.get("keyframe_vs_base") or {}
+            shots[f"{c['shot'][0]}-{c['shot'][1]}"] = {
+                "frames": [T for T, Q in owner.items() if Q is P and T in LF], "keyframe": P.anchor,
+                "glue": (P.v.get("render") or {}).get("glue"), "level_on": on,
+                "level_target": "base" if on and "level_deg" in kb and not kb.get("skipped") else None}
+        lflags, lsum = lk.evaluate(LF, shots, J.info["fps"], looks_cfg or None)
+        for t, v in lflags.items():
+            flags.setdefault(t, []).extend(v)
+        by = {}
+        for t, v in flags.items():
+            for k, _ in v:
+                by.setdefault(k, []).append(t)
+        summary.update(checks={k: rv._fmt_runs(v) for k, v in sorted(by.items())}, flagged=len(flags), **lsum)
+    if all((P.v.get("render") or {}).get("alpha") == "print" for P in parts):
+        # print-only compositing keeps the source's body, its glitter included, everywhere but on the letters, and the
+        # re-add stays off there (it ghosts the garbled print, V37): render.sparkles isn't the remedy
+        for v in flags.values():
+            for i, (k, txt) in enumerate(v):
+                if k == "glitter":
+                    v[i] = (k, txt.replace("render.sparkles on this frame", "specks on the new letters (the re-add is "
+                                                                             "off under render.alpha print: look)"))
+        summary.pop("sparkles_frames", None)
+    return flags, summary
+
+
+def _body_reference(P, c, frame_at):
+    """The body check's reference (V39): the label against the body on the job's keyframe frame (render.body_snap's
+    ref_frame), through the mapping that rendered it, and the edges that bound the body there. -> {"ref", "edges",
+    "reach", "across"}, or None (not a tube, or no body end found)"""
+    res = c["res"]
+    bs = P.v.get("render", {}).get("body_snap")
+    bc = dict(vf.BODY_SNAP, **(bs if isinstance(bs, dict) else {}))
+    a = int(bc.get("ref_frame", P.anchor))
+    from .review import _base
+    if not P.s0 <= a < P.s1 or not hasattr(_base(res["smooth"][a - P.s0]), "Ru"):
+        return None
+    H = c["maps"].get(a, res["smooth"][a - P.s0])
+    lum, mt = frame_at(a).astype(float).mean(-1), P.key(a - P.s0, H).astype(float)
+    edges = {"top": bc["top"], "bottom": bc["bottom"]}
+    if "auto" in edges.values():
+        auto = vf.body_edges(H, lum, mt, c["v"], c["uc"], bc["reach"])
+        edges = {k: auto[k] if v == "auto" else v for k, v in edges.items()}
+    ref = vf.body_measure(H, lum, mt, c["v"], c["uc"], edges["top"], edges["bottom"], bc["reach"], bc["across"], bc["inside"])
+    return None if ref is None else {"ref": ref, "frame": a, "edges": edges, "reach": bc["reach"], "across": bc["across"],
+                                     "inside": bc["inside"], "window": bc["window"]}
+
+
+def _body_row(m, ref):
+    """One frame's label against the body, for the report: the gaps (px), and the offsets from the keyframe's
+    proportion (px, deg, stretch)."""
+    o = vf.body_offsets(m, ref)
+
+    def r(x, n=2):
+        return round(float(x), n) if np.isfinite(x) else None
+    return {"top_gap_px": r(m["top"]), "bottom_gap_px": r(m["bot"]), "label_px": r(m["L"]), "top_px": r(o["top_px"]),
+            "bottom_px": r(o["bottom_px"]), "roll_deg": r(o["roll_deg"], 3), "stretch": r(o["stretch"], 4)}
 
 
 def _delivered(path):
@@ -1158,7 +1804,7 @@ def plot_qa(rows, rep, path):
     if rep.get("review"):
         # the automatic review checks: one row per check, a mark on each flagged frame (refined or not)
         ax = axs[-1]
-        names = ["edges", "ghost", "shear", "bend", "vanish", "switch"]
+        names = ["edges", "ghost", "shear", "bend", "vanish", "switch", "swim", "ends", "level", "sharp", "tilt", "spots"]
         ax.set_facecolor(surf)
         for i, k in enumerate(names):
             xs = [int(t) for t, v in checks.items() if k in v]
@@ -1318,6 +1964,9 @@ def _staged(J, stamps, k_track, k_fit, still_key, f, cfg):
 
 
 SETTINGS_SECTIONS = ("track", "fit", "render", "qa", "review", "artwork", "key")
+# render settings the still label doesn't depend on
+RENDER_ONLY = ("body_snap", "sparkles", "spark_glow", "alpha", "print_alpha", "soft_cap", "smear", "_sparkles_asked",
+               "glue", "level", "_defaults")
 
 
 def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24.0, work=None, workers=None):
@@ -1431,6 +2080,13 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
                 vj["render"].pop(k, None)
             vj["fit"].pop("camera", None)
         vj = _merge(vj, {k: cfg[k] for k in SETTINGS_SECTIONS if k in cfg})
+        # what the measured job switched on that the settings don't name (logged by the render, in the report)
+        dflt = defaults_on(vj["render"], cfg.get("render"), {"*": "the measured job", **{
+            k: "the measured job, round products" for k in ("body_snap", "glue", "level")}})
+        if dflt:
+            vj["render"]["_defaults"] = dflt
+        # render.alpha "print": its defaults over the measured job's (feather.v_px 4 unless the settings give one)
+        vj["render"] = print_defaults(vj["render"], cfg.get("render") or {})
         vj["about"] = "written by imgvideo.pipeline.refine (in memory)"
         d.update(shot=[a, b], shot_from=shot_from, band=band, band_info=binfo, polarity=polarity, stroke_px=stroke,
                  edit_outside_matte=round(outside, 4))
@@ -1438,7 +2094,9 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
         J = Job({"vjob": vj, "dir": str(jd)}, media=media, keyframes={name: kf})
         k_track = _digest(frames[a:b], masks[a:b], kf, vj["anchor"], vj["track"], vj["shot"])
         k_fit = _digest(k_track, vj["fit"])
-        patched, key = _staged(J, jd / "stamps.json", k_track, k_fit, [vj["render"], vj.get("artwork"), cfg.get("key"),
+        # (the still label doesn't read the render's per-frame placement and re-add settings: changing them re-renders only)
+        r_still = {k_: v_ for k_, v_ in vj["render"].items() if k_ not in RENDER_ONLY}
+        patched, key = _staged(J, jd / "stamps.json", k_track, k_fit, [r_still, vj.get("artwork"), cfg.get("key"),
                                                                        cfg.get("matte_patch")], f, cfg)
         if patched or isinstance(key, str):
             d["matte_patch"] = {"frames": [[int(a_), int(b_)] for a_, b_ in _ranges(patched)], "key": key}
@@ -1447,6 +2105,17 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
         stage_qa(J)
         res = _fit(J)
         d.update(held=[int(min(res["valid"])) + a, int(max(res["valid"])) + a], refined=len(J.sink))
+        rj = json.loads((J.work / "render.json").read_text())
+        if rj.get("body_snap"):
+            d["body_snap"] = rj["body_snap"]
+        if rj.get("print_alpha"):
+            d["print_alpha"] = rj["print_alpha"]
+        if rj.get("glue"):
+            d["glue"] = {k: v for k, v in rj["glue"].items() if k != "per_frame"}
+        if rj.get("level"):
+            d["level"] = {k: v for k, v in rj["level"].items() if k != "per_frame"}
+        if rj.get("defaults"):
+            d["defaults"] = rj["defaults"]
         jobs.append(J)
 
     # merge: each frame from the first keyframe's shot that refined it; everything else is the input
@@ -1466,11 +2135,12 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
         impacts += q["impacts"]
         rep = rep or q
     plot = None
-    review = None
+    review = geometry = None
     if jobs:
         rows.sort(key=lambda r: r["frame"])
         rep = dict(rep, frames=rows, impacts=sorted(set(impacts)))
         flags, summary = _review(jobs[0], jobs, None, arrays=(frames, out, masks))
+        geometry = summary.pop("geometry", None)
         _apply_review(rows, rep, flags, summary)
         review = rep.get("review")
         if rows:
@@ -1511,6 +2181,11 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
         "needs_mask": [[int(a), int(b)] for a, b in _ranges([t for t, w in enumerate(why) if w == "no matte, product visible"])],
         "flagged": {str(r["frame"]): r["flag"] for r in rows if r.get("flag")},
         "review": review,
+        # per refined frame, the label against the product's body (V39): the gaps to the edge above (collar seam,
+        # cap) and to the body's end below, px; how far its top and bottom sit off the keyframe's proportion of the
+        # body (px, + = the gap is larger) and its axis off the body's centreline (deg), raw and as the body check
+        # reads them (a 5-frame median); its share of the body against the keyframe's (stretch)
+        "geometry": geometry,
         "outside_matte_px": outside,
         "matte_patched": [[int(a), int(b)] for a, b in _ranges(patched_all)],
         "work": str(root),

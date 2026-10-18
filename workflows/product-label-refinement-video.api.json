@@ -87,7 +87,10 @@
         2
       ],
       "processes": 1,
-      "model": "tube (round products)"
+      "model": "tube (round products)",
+      "compositing": "settings (render.alpha, else measured)",
+      "soft_cap": -1,
+      "glue": false
     },
     "_meta": {
       "title": "Product Label: Refine (Video)"

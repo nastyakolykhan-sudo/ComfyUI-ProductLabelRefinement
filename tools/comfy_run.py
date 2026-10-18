@@ -13,7 +13,8 @@ nodes that feed Warp Reference at them; --image NODE_ID=PATH does the same for a
 --job replaces the job text in every Load Job node. --set NODE.INPUT=VALUE sets a widget value on a node, NODE being
 its id or its class_type (every node of that class): the Auto Draft node's quad, pairs, occluders, outline.
 --mask PATH adds a Load Image (as Mask) node, red channel (white = product), feeding every Auto Draft node's
-product_mask. --stage prunes the graph like run.py --stage
+product_mask; in the ink templates it fills their own product mask loader (Fill Leftovers' old_silhouette, and Auto
+Draft's product_mask). --stage prunes the graph like run.py --stage
 (align: fit, warp, overlay; grade: + grade preview and relight map; all: everything).
 Save PSD nodes run only with --psd or "psd": true in the job, like run.py --psd.
 --out receives every output file (server folder layout: images, the PSD), report.json (from the QA node), the
@@ -117,10 +118,17 @@ def set_inputs(wf, specs):
 
 
 def add_mask(wf):
-    """--mask: a Load Image (as Mask) node, red channel, feeding every Auto Draft node's product_mask -> its id."""
+    """--mask: the product's mask -> the id of the Load Image (as Mask) node that takes it. The ink templates have
+    one already, feeding Fill Leftovers' old_silhouette (and Auto Draft's product_mask); otherwise a new one, red
+    channel, feeds every Auto Draft node's product_mask."""
+    have = sorted({n["inputs"][k][0] for n in wf.values() for k in ("product_mask", "old_silhouette")
+                   if n["class_type"] in ("ImagePostAutoDraft", "ImagePostFillLeftovers") and is_link(n["inputs"].get(k))
+                   and wf[n["inputs"][k][0]]["class_type"] == "LoadImageMask"})
+    if have:
+        return have[0]
     drafts = [n for n in wf.values() if n["class_type"] == "ImagePostAutoDraft"]
     if not drafts:
-        sys.exit("--mask: the workflow has no Auto Draft node")
+        sys.exit("--mask: the workflow has no Auto Draft node and no product mask loader")
     nid = str(max(int(k) for k in wf) + 1)
     wf[nid] = {"inputs": {"image": "", "channel": "red"}, "class_type": "LoadImageMask", "_meta": {"title": "Product mask"}}
     for n in drafts:
@@ -235,7 +243,8 @@ def main():
     ap.add_argument("--image", action="append", default=[], metavar="NODE_ID=PATH")
     ap.add_argument("--job", help="job.json to run instead of the one embedded in the workflow")
     ap.add_argument("--set", action="append", default=[], metavar="NODE.INPUT=VALUE", help="a widget value, e.g. the Auto Draft quad")
-    ap.add_argument("--mask", help="the product's mask (white = product, scene-sized) for the Auto Draft nodes")
+    ap.add_argument("--mask", help="the product's mask (white = product, scene-sized) for the Auto Draft nodes, or the ink "
+                    "templates' product mask loader")
     ap.add_argument("--stage", choices=("align", "grade", "all"), default="all")
     ap.add_argument("--psd", action="store_true", help="also run the Save PSD nodes (same as \"psd\": true in the job)")
     ap.add_argument("--out", required=True)

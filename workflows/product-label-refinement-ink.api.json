@@ -1,0 +1,323 @@
+{
+  "1": {
+    "inputs": {
+      "image": "inkdemo_frame.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Frame (generated)"
+    }
+  },
+  "2": {
+    "inputs": {
+      "image": "inkdemo_packshot.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Packshot (real product)"
+    }
+  },
+  "22": {
+    "inputs": {
+      "image": "inkdemo_mask.png",
+      "channel": "red"
+    },
+    "class_type": "LoadImageMask",
+    "_meta": {
+      "title": "Product mask (SAM 3)"
+    }
+  },
+  "3": {
+    "inputs": {
+      "job_json": "{\n  \"about\": \"Ink demo (tools/make_ink_demo.py): a made-up frosted bottle whose white print came out garbled in a generated frame, seen from slightly above. The landmarks come from the geometry that placed the bottle (the affine part; the bow lies over it); on a real image they are measured.\",\n  \"scene\": \"inkdemo_frame.png\",\n  \"reference\": \"inkdemo_packshot.png\",\n  \"output\": \"inkdemo_frame_refined.png\",\n  \"scene_size\": [\n    768,\n    1024\n  ],\n  \"reference_size\": [\n    600,\n    1100\n  ],\n  \"roi\": [\n    278,\n    291,\n    491,\n    736\n  ],\n  \"reference_outline\": {\n    \"type\": \"polygon\",\n    \"pts\": [\n      [\n        150,\n        330\n      ],\n      [\n        450,\n        330\n      ],\n      [\n        450,\n        1000\n      ],\n      [\n        150,\n        1000\n      ]\n    ]\n  },\n  \"align\": {\n    \"model\": \"affine\",\n    \"points\": [\n      {\n        \"label\": \"wordmark top\",\n        \"ref\": [\n          205,\n          414\n        ],\n        \"scene\": [\n          351.31,\n          457.75\n        ],\n        \"w\": 1\n      },\n      {\n        \"label\": \"wordmark bottom\",\n        \"ref\": [\n          205,\n          946\n        ],\n        \"scene\": [\n          340.17,\n          670.26\n        ],\n        \"w\": 1\n      },\n      {\n        \"label\": \"heading start\",\n        \"ref\": [\n          254,\n          560\n        ],\n        \"scene\": [\n          367.82,\n          517.09\n        ],\n        \"w\": 1\n      },\n      {\n        \"label\": \"heading end\",\n        \"ref\": [\n          420,\n          560\n        ],\n        \"scene\": [\n          434.13,\n          520.57\n        ],\n        \"w\": 1\n      },\n      {\n        \"label\": \"seal centre\",\n        \"ref\": [\n          367,\n          845\n        ],\n        \"scene\": [\n          407.0,\n          633.3\n        ],\n        \"w\": 1\n      }\n    ],\n    \"y_only\": [],\n    \"lines\": [],\n    \"bow\": {\n      \"b\": [\n        [\n          -140.0,\n          4.0\n        ],\n        [\n          130.0,\n          7.0\n        ]\n      ],\n      \"centre\": [\n        385.1097,\n        536.0478\n      ],\n      \"axis\": [\n        -0.05240675,\n        0.99862582\n      ],\n      \"half_widths\": [\n        [\n          -200.0,\n          24.54\n        ],\n        [\n          -190.0,\n          24.05\n        ],\n        [\n          -180.0,\n          24.54\n        ],\n        [\n          -170.0,\n          24.05\n        ],\n        [\n          -160.0,\n          24.57\n        ],\n        [\n          -150.0,\n          24.07\n        ],\n        [\n          -140.0,\n          24.54\n        ],\n        [\n          -130.0,\n          28.07\n        ],\n        [\n          -120.0,\n          28.57\n        ],\n        [\n          -110.0,\n          59.58\n        ],\n        [\n          -100.0,\n          59.6\n        ],\n        [\n          -90.0,\n          59.6\n        ],\n        [\n          -80.0,\n          59.6\n        ],\n        [\n          -70.0,\n          59.6\n        ],\n        [\n          -60.0,\n          59.6\n        ],\n        [\n          -50.0,\n          59.63\n        ],\n        [\n          -40.0,\n          59.63\n        ],\n        [\n          -30.0,\n          59.63\n        ],\n        [\n          -20.0,\n          59.63\n        ],\n        [\n          -10.0,\n          59.63\n        ],\n        [\n          0.0,\n          59.63\n        ],\n        [\n          10.0,\n          59.63\n        ],\n        [\n          20.0,\n          59.6\n        ],\n        [\n          30.0,\n          59.63\n        ],\n        [\n          40.0,\n          59.6\n        ],\n        [\n          50.0,\n          59.63\n        ],\n        [\n          60.0,\n          59.6\n        ],\n        [\n          70.0,\n          59.63\n        ],\n        [\n          80.0,\n          59.63\n        ],\n        [\n          90.0,\n          59.63\n        ],\n        [\n          100.0,\n          59.63\n        ],\n        [\n          110.0,\n          59.63\n        ],\n        [\n          120.0,\n          59.6\n        ],\n        [\n          130.0,\n          59.63\n        ],\n        [\n          140.0,\n          59.6\n        ],\n        [\n          150.0,\n          58.58\n        ]\n      ]\n    }\n  },\n  \"old_silhouette\": {\n    \"type\": \"mask\",\n    \"path\": \"inkdemo_mask.png\"\n  },\n  \"occluders\": [],\n  \"matte\": {\n    \"type\": \"ink\",\n    \"polarity\": \"light\",\n    \"print_box\": [\n      176,\n      396,\n      432,\n      924\n    ]\n  },\n  \"grade\": {},\n  \"finish\": {},\n  \"fill\": {}\n}\n",
+      "job_path": ""
+    },
+    "class_type": "ImagePostLoadJob",
+    "_meta": {
+      "title": "Load Job"
+    }
+  },
+  "4": {
+    "inputs": {
+      "job": [
+        "3",
+        0
+      ],
+      "scene": [
+        "1",
+        0
+      ],
+      "product_mask": [
+        "6",
+        1
+      ]
+    },
+    "class_type": "ImagePostJobMasks",
+    "_meta": {
+      "title": "Job Masks"
+    }
+  },
+  "5": {
+    "inputs": {
+      "job": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "ImagePostFitWarp",
+    "_meta": {
+      "title": "Fit Warp"
+    }
+  },
+  "6": {
+    "inputs": {
+      "job": [
+        "3",
+        0
+      ],
+      "homography": [
+        "5",
+        0
+      ],
+      "scene": [
+        "1",
+        0
+      ],
+      "reference": [
+        "2",
+        0
+      ],
+      "reference_mask": [
+        "2",
+        1
+      ]
+    },
+    "class_type": "ImagePostWarpReference",
+    "_meta": {
+      "title": "Warp Reference"
+    }
+  },
+  "9": {
+    "inputs": {
+      "job": [
+        "3",
+        0
+      ],
+      "scene": [
+        "1",
+        0
+      ],
+      "product_mask": [
+        "6",
+        1
+      ],
+      "old_silhouette": [
+        "22",
+        0
+      ],
+      "occluder_mask": [
+        "4",
+        1
+      ],
+      "coords": [
+        "6",
+        3
+      ]
+    },
+    "class_type": "ImagePostFillLeftovers",
+    "_meta": {
+      "title": "Fill Leftovers (garbled print)"
+    }
+  },
+  "10": {
+    "inputs": {
+      "job": [
+        "3",
+        0
+      ],
+      "scene": [
+        "1",
+        0
+      ],
+      "background": [
+        "9",
+        0
+      ],
+      "product": [
+        "6",
+        0
+      ],
+      "product_mask": [
+        "6",
+        1
+      ],
+      "occluder_mask": [
+        "4",
+        1
+      ],
+      "ink": [
+        "9",
+        3
+      ],
+      "coords": [
+        "6",
+        3
+      ]
+    },
+    "class_type": "ImagePostCompositeBehind",
+    "_meta": {
+      "title": "Composite Behind"
+    }
+  },
+  "11": {
+    "inputs": {
+      "job": [
+        "3",
+        0
+      ],
+      "before": [
+        "1",
+        0
+      ],
+      "after": [
+        "10",
+        0
+      ],
+      "reference": [
+        "2",
+        0
+      ],
+      "matte": [
+        "10",
+        1
+      ],
+      "fill_mask": [
+        "9",
+        1
+      ],
+      "reference_mask": [
+        "2",
+        1
+      ],
+      "align_report": [
+        "5",
+        1
+      ],
+      "fill_report": [
+        "9",
+        2
+      ],
+      "old_silhouette": [
+        "22",
+        0
+      ],
+      "occluder_mask": [
+        "4",
+        1
+      ],
+      "coords": [
+        "6",
+        3
+      ],
+      "ink": [
+        "9",
+        3
+      ]
+    },
+    "class_type": "ImagePostQASheet",
+    "_meta": {
+      "title": "QA Sheet"
+    }
+  },
+  "12": {
+    "inputs": {
+      "images": [
+        "10",
+        0
+      ],
+      "filename_prefix": "product-label-refinement/inkdemo_frame_keyframe"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save keyframe"
+    }
+  },
+  "13": {
+    "inputs": {
+      "images": [
+        "11",
+        0
+      ],
+      "filename_prefix": "product-label-refinement/qa/compare"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA compare"
+    }
+  },
+  "14": {
+    "inputs": {
+      "images": [
+        "11",
+        1
+      ],
+      "filename_prefix": "product-label-refinement/qa/edges"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA edges"
+    }
+  },
+  "15": {
+    "inputs": {
+      "images": [
+        "11",
+        2
+      ],
+      "filename_prefix": "product-label-refinement/qa/before_after"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA before_after"
+    }
+  },
+  "16": {
+    "inputs": {
+      "images": [
+        "6",
+        2
+      ],
+      "filename_prefix": "product-label-refinement/qa/align_overlay"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA align_overlay"
+    }
+  },
+  "17": {
+    "inputs": {
+      "images": [
+        "9",
+        0
+      ],
+      "filename_prefix": "product-label-refinement/qa/print_removed"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA garbled print removed"
+    }
+  },
+  "20": {
+    "inputs": {
+      "images": [
+        "11",
+        4
+      ],
+      "filename_prefix": "product-label-refinement/qa/audit"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save QA audit"
+    }
+  }
+}

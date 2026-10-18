@@ -12,6 +12,8 @@ Constraints (job['align']):
 Models: "homography" (default), "affine", "cylinder" (align.cylinder {"axis_x", "radius"} in reference px,
 optional align.perspective, and align.limbs [{"side": "left|right", "scene": [[x, y], ...], "rows": [v0, v1]}]: the
 scene's silhouette of the bottle on that side, which a label wrapping past it ends at).
+Over any model: align.residual (a smooth correction onto the generated edges) and align.bow (a round body seen
+from above or below: print across it bows along the body's axis, by a profile; Bow).
 """
 import numpy as np
 from scipy.optimize import least_squares
@@ -158,6 +160,57 @@ class Residual:
         return dict(out, residual={"sigma": self.sigma, "max_shift_px": round(self.max_shift, 2)})
 
 
+class Bow:
+    """A round body seen from above or below, on top of a fitted mapping (align.bow): each line of print across the
+    body sits lower at the front than at the limbs (b > 0, seen from above), by b(t) * (sqrt(1 - s^2 / w(t)^2) - pi/4)
+    scene px along the body's axis. t is px along the axis from `centre`, s px across it, w(t) the body's half-width
+    there and b(t) the bow profile, both interpolated from [[t, value], ...]. The pi/4 is the mean of the arc across
+    the body, so the fitted mapping's average placement stays. A profile, not one number: seen from above, lower parts
+    bow more, and a squeezed tube is round at its cap and flat at its crimp (no bow there)."""
+
+    def __init__(self, base, centre, axis, half_widths, b):
+        self.base = base
+        self.centre = np.asarray(centre, float).reshape(2)
+        ax = np.asarray(axis, float).reshape(2)
+        nrm = float(np.linalg.norm(ax))
+        self.axis = ax if abs(nrm - 1.0) < 1e-9 else ax / nrm
+        self.normal = np.array([self.axis[1], -self.axis[0]])
+        self.half_widths = np.asarray(half_widths, float).reshape(-1, 2)
+        self.profile = np.asarray([[0.0, float(b)]] if np.isscalar(b) else b, float).reshape(-1, 2)
+
+    def __getattr__(self, name):                        # a cylinder's axis_x, r, limb_points ... pass through
+        return getattr(self.__dict__["base"], name)
+
+    def shift(self, x, y):
+        """The bow's displacement along the axis at scene points (x, y), px."""
+        c, ax, nr = self.centre, self.axis, self.normal
+        t = (x - c[0]) * ax[0] + (y - c[1]) * ax[1]
+        s = (x - c[0]) * nr[0] + (y - c[1]) * nr[1]
+        w = np.interp(t, self.half_widths[:, 0], self.half_widths[:, 1])
+        b = np.interp(t, self.profile[:, 0], self.profile[:, 1])
+        return b * (np.sqrt(np.clip(1 - (s / w) ** 2, 0, 1)) - np.pi / 4)
+
+    def forward(self, pts):
+        q = apply_H(self.base, pts)
+        X = q.copy()
+        for _ in range(6):                               # x = q + D(x) by fixed point (D is small and smooth)
+            X = q + self.shift(X[:, 0], X[:, 1])[:, None] * self.axis[None]
+        return X
+
+    def inverse(self, x, y):
+        d = self.shift(x, y)
+        bx, by = x - d * self.axis[0], y - d * self.axis[1]
+        if hasattr(self.base, "inverse"):
+            return self.base.inverse(bx, by)
+        q = np.c_[bx.ravel(), by.ravel(), np.ones(bx.size)] @ np.linalg.inv(self.base).T
+        return (q[:, 0] / q[:, 2]).reshape(bx.shape), (q[:, 1] / q[:, 2]).reshape(bx.shape), None
+
+    def to_json(self):
+        out = self.base.to_json() if hasattr(self.base, "to_json") else {"H": np.asarray(self.base).tolist()}
+        return dict(out, bow={"centre": self.centre.tolist(), "axis": self.axis.tolist(),
+                              "half_widths": self.half_widths.tolist(), "b": self.profile.tolist()})
+
+
 def apply_H(H, pts):
     if hasattr(H, "forward"):
         return H.forward(pts)
@@ -271,7 +324,38 @@ def fit(spec):
     H, rep = _fit_base(spec)
     if spec.get("residual") not in (None, False):
         H, rep = _add_residual(H, spec, rep)
+    if spec.get("bow"):
+        H, rep = _add_bow(H, spec, rep)
     return H, rep
+
+
+def _add_bow(H, spec, rep):
+    """align.bow {"b": [[t, b], ...], "centre": [x, y], "axis": [dx, dy], "half_widths": [[t, w], ...]}: the bow of
+    a round body seen from above or below, laid over the fitted mapping (Bow). The centre, axis and half-widths
+    come from the product's matte in the scene (bow.resolve fills them, and b "auto" from the body's seams)."""
+    bw = spec["bow"]
+    miss = [k for k in ("b", "centre", "axis", "half_widths") if bw.get(k) is None or isinstance(bw.get(k), str)]
+    if miss:
+        raise ValueError("align.bow needs " + ", ".join(miss) + " as numbers: measure them from the product's matte "
+                         "(run.py fills them from align.bow.mask; measure.py bow)")
+    B = Bow(H, bw["centre"], bw["axis"], bw["half_widths"], bw["b"])
+    pts = [], []
+    for q in spec.get("points", []):
+        d = apply_H(B, [q["ref"]])[0] - np.asarray(q["scene"], float)
+        pts[0].append({"label": q.get("label", ""), "dx": round(float(d[0]), 2), "dy": round(float(d[1]), 2)})
+    for i, l in enumerate(spec.get("lines", [])):
+        # the measured edge points against the line as the bow draws it (a seam measured on a bowed body bows too:
+        # a straight line through its points would read the bow itself as a residual). A straight line runs on past
+        # its reference segment (the points may reach further), so it is extended by its own length both ways
+        seg = np.asarray(l["ref"], float)
+        if not l.get("curve") and len(seg) == 2:
+            seg = np.array([seg[0] - (seg[1] - seg[0]), seg[1] + (seg[1] - seg[0])])
+        d = Curve(l["scene"]).dist(apply_H(B, segment(seg.tolist(), 3 * max(int(l.get("n", 12)), 60))))
+        pts[1].append({"label": l.get("label", f"line {i}"), "max_px": round(float(np.abs(d).max()), 2)})
+    rep["bow"] = {"b": B.profile.tolist(), "front_px": round(float(B.profile[:, 1].max() * (1 - np.pi / 4)), 2),
+                  "limb_px": round(float(-B.profile[:, 1].max() * np.pi / 4), 2),
+                  "points_after": pts[0], "lines_after": pts[1]}
+    return B, rep
 
 
 def _add_residual(H, spec, rep):

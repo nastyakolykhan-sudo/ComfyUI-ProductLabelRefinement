@@ -51,20 +51,43 @@ def label_band(ref, src, mask, pad=24, q=(1, 99)):
                                               "matte_extent": [int(tm.min()), int(tm.max())]}
 
 
-def body_band(ref, mask, step=8, gap=2, span=5, lum_step=20.0, width_step=0.06, print_min=0.15, trim=4):
+def body_band(ref, mask, step=8, gap=2, span=5, lum_step=20.0, width_step=0.06, print_min=0.15, trim=4,
+              ref_len=1200.0, changed=None):
     """The label's stretch along the matte's axis from the product's own profile, the way it is measured by hand
     (workflow.md, Keyframe mode): per strip of t, the matte's width, brightness and print energy. A cap, pump, collar
     or crimp is a step in width or body colour that persists: the mean over `span` strips before it against the mean
     over `span` strips after (a smooth gradient along a lit body isn't one, nor is a line of print: caps, collars
     and crimps step 25-65 levels, text lines under 15). The band is the segment between steps that carries the most
     print, trimmed `trim` px at both ends.
+    The strips were calibrated on products about 1,400-1,700 px long. A shorter product (its matte under `ref_len`)
+    takes _short_band: strips, trim and print filter scaled by length / ref_len (V36: on a 370 px serum the 40 px
+    windows read its frosted gradient as a step, and on a tapered tube every window pair as a width step).
+    changed (optional, bool like mask): the keyframe's changed pixels; info["changed_in_band"] is the share of them
+    inside the band. A print-only keyframe (the stills route) under 0.9 has a band that misses print.
     -> ([t0, t1], profile summary)"""
     c, ax, n = product_axis(mask)
     ys, xs = np.nonzero(mask)
     P = np.c_[xs, ys].astype(float)
     t, q = (P - c) @ ax, (P - c) @ n
+    k = float(min(1.0, (t.max() - t.min()) / ref_len))
+    if k < 1.0:
+        out = _short_band(ref, mask, t, q, ys, xs, k, step, gap, span, lum_step, width_step, print_min, trim)
+    else:
+        out = _long_band(ref, t, q, ys, xs, step, gap, span, lum_step, width_step, print_min, trim)
+    if out[0] is None:
+        return out
+    band, info = out
+    info["scale"] = round(k, 3)
+    if changed is not None and changed.any():
+        cy, cx = np.nonzero(changed)
+        tc = (np.c_[cx, cy] - c) @ ax
+        info["changed_in_band"] = round(float(((tc >= band[0]) & (tc <= band[1])).mean()), 3)
+    return band, info
+
+
+def _strips(ref, t, q, ys, xs, step, k):
     g = ref.astype(np.float32).mean(-1)
-    pb = np.abs(ndi.gaussian_filter(g, 1.0) - ndi.gaussian_filter(g, 4.0))
+    pb = np.abs(ndi.gaussian_filter(g, max(0.5, k)) - ndi.gaussian_filter(g, max(1.0, 4.0 * k)))
     gv, pv = g[ys, xs], pb[ys, xs]
     rows = []
     for t0 in np.arange(t.min(), t.max(), step):
@@ -74,7 +97,11 @@ def body_band(ref, mask, step=8, gap=2, span=5, lum_step=20.0, width_step=0.06, 
         lo, hi = np.percentile(q[sel], [3, 97])
         mid = sel & (np.abs(q - 0.5 * (lo + hi)) < 0.35 * (hi - lo))
         rows.append((t0, hi - lo, float(np.median(gv[sel])), float(pv[mid].mean()) if mid.any() else 0.0))
-    R = np.array(rows)
+    return np.array(rows)
+
+
+def _long_band(ref, t, q, ys, xs, step, gap, span, lum_step, width_step, print_min, trim):
+    R = _strips(ref, t, q, ys, xs, step, 1.0)
     w, lum = R[:, 1], R[:, 2]
     has_print = R[:, 3] >= print_min * np.percentile(R[:, 3], 95)
     brk = np.zeros(len(R), bool)
@@ -99,6 +126,47 @@ def body_band(ref, mask, step=8, gap=2, span=5, lum_step=20.0, width_step=0.06, 
     return [int(round(t0)), int(round(t1))], {"matte_extent": [int(t.min()), int(t.max())],
                                               "body_width_px": round(float(np.median(w[a:b])), 1),
                                               "segments": [[int(R[x, 0]), int(R[y - 1, 0] + step)] for x, y in segs]}
+
+
+def _short_band(ref, mask, t, q, ys, xs, k, step, gap, span, lum_step, width_step, print_min, trim):
+    """body_band on a product shorter than the calibration (k = length / ref_len < 1): strips of max(2, step k) px,
+    so a frosted gradient or a tube's taper stays under the thresholds inside a window pair. A luminance step must
+    persist into the next window on both sides (clipped at the matte's ends: a crimp or cap there has little room),
+    so a bold line of print, gone again a window later, isn't one. A segment is a run of strips between transitions,
+    the transitions' own strips left out (the band starts where the shoulder ends). On the first real job's serum
+    and tube (370-410 px) the bands came within 1-24 px of the hand's and held 97-100 % of the keyframes' changed
+    pixels (the unscaled strips: 73 % and 38 %); the video demo's bold-text label 62 % (67 %)."""
+    step, trim = max(2.0, step * k), max(1.0, trim * k)
+    R = _strips(ref, t, q, ys, xs, step, k)
+    w, lum = R[:, 1], R[:, 2]
+    N = len(R)
+    brk = np.zeros(N, bool)
+    for i in range(1, N - gap):
+        b0, a1 = max(0, i - span), min(N, i + gap + span)
+        if i - b0 < 2 or a1 - (i + gap) < 2:
+            continue
+        wb, wa = w[b0:i].mean(), w[i + gap:a1].mean()
+        lb, la = lum[b0:i].mean(), lum[i + gap:a1].mean()
+        step_l = abs(la - lb) > lum_step
+        if step_l:
+            b00, a2 = max(0, b0 - span), min(N, a1 + span)
+            if a2 - a1 >= 2:
+                step_l &= abs(lum[a1:a2].mean() - lb) > lum_step
+            if b0 - b00 >= 2:
+                step_l &= abs(la - lum[b00:b0].mean()) > lum_step
+        brk[i] = step_l or abs(wa - wb) > width_step * wb
+    lab, nl = ndi.label(~brk)
+    has_print = R[:, 3] >= print_min * np.percentile(R[:, 3], 95)
+    segs = [np.nonzero(lab == j)[0] for j in range(1, nl + 1)]
+    segs = [s for s in segs if len(s) >= 2]
+    if not segs:
+        return None, {}
+    best = max(segs, key=lambda s: (int(has_print[s].sum()), len(s)))
+    t0 = float(R[best[0], 0]) + trim
+    t1 = float(R[best[-1], 0] + step) - trim
+    return [int(round(t0)), int(round(t1))], {"matte_extent": [int(t.min()), int(t.max())],
+                                              "body_width_px": round(float(np.median(w[best])), 1),
+                                              "segments": [[int(R[s[0], 0]), int(R[s[-1], 0] + step)] for s in segs]}
 
 
 def print_polarity(ref, mask, changed):

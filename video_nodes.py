@@ -118,6 +118,7 @@ def _parse_frames(text, n):
 
 
 MODELS = ["tube (round products)", "flat (experimental: one face of a box, a flat label)"]
+COMPOSITING = ["settings (render.alpha, else measured)", "print (only the print changes)", "label (the whole label band)"]
 
 
 class ProductLabelVideoRefine:
@@ -154,6 +155,27 @@ class ProductLabelVideoRefine:
                                               "flat (experimental, not yet tested on a real clip): one face of a box or a "
                                               "flat label; run one node per visible face, each with that face's mask and "
                                               "keyframe, frames chained."}),
+                "compositing": (COMPOSITING, {"default": COMPOSITING[0],
+                                              "tooltip": "print: only the print changes, carried onto the source's own "
+                                                         "body (no patch outline can show; light print on a body); then, "
+                                                         "unless settings say otherwise, soft_cap 0.3 px, no smear, end "
+                                                         "fade 4 px, no sparkle re-add. label: the whole relit label band "
+                                                         "over the source. print and label override render.alpha in "
+                                                         "the settings JSON; settings: its render.alpha, else the "
+                                                         "measured default (print for light print, label for dark)."}),
+                "soft_cap": ("FLOAT", {"default": -1.0, "min": -1.0, "max": 3.0, "step": 0.05,
+                                       "tooltip": "The most extra blur (px) the label gets to match a soft source frame "
+                                                  "(render.soft_cap): a restored label stays sharp. -1: the engine's "
+                                                  "default (0.3 with print compositing, uncapped with label) or the "
+                                                  "settings JSON's; 0 or more overrides render.soft_cap there."}),
+                "glue": ("BOOLEAN", {"default": False,
+                                     "tooltip": "Glue the label to the product's own motion (render.glue): it moves "
+                                                "frame to frame with the product's pixels and lands where the fit "
+                                                "places it over a few frames, so it doesn't swim on near-still frames. "
+                                                "Off: the settings JSON's render.glue, else the default (on for round "
+                                                "products since engine 0.5.0; {\"render\": {\"glue\": false}} turns "
+                                                "it off). The report's review says when an end of the run wants "
+                                                "glue.edge \"mean\"."}),
             },
         }
 
@@ -166,7 +188,8 @@ class ProductLabelVideoRefine:
                    "and grain. Pixels outside the changed area come back exactly as they went in.")
 
     def refine(self, frames, mask, keyframes, tracker, keyframe_index=-1, keyframe_frames="auto", keyframe_bbox=None,
-               product=None, settings="", fps=24.0, processes=1, model=None):
+               product=None, settings="", fps=24.0, processes=1, model=None, compositing=None, soft_cap=-1.0,
+               glue=False):
         pl = _engine()
         if mask.dim() == 2:
             mask = mask[None]
@@ -190,6 +213,15 @@ class ProductLabelVideoRefine:
         cfg["track"] = dict(tr, backend="alltracker")
         if model and model.startswith("flat") and not (isinstance(cfg.get("anchor"), dict) and cfg["anchor"].get("model")):
             cfg["anchor"] = dict(cfg.get("anchor") or {}, model="homography")
+        rnd = dict(cfg.get("render") or {})
+        if compositing and not compositing.startswith("settings"):     # the widget over render.alpha
+            rnd["alpha"] = compositing.split()[0]
+        if soft_cap is not None and soft_cap >= 0:                     # the widget over render.soft_cap
+            rnd["soft_cap"] = float(soft_cap)
+        if glue:                                                       # the widget turns render.glue on
+            rnd["glue"] = rnd.get("glue") or True
+        if rnd:
+            cfg["render"] = rnd
         weights = folder_paths.get_full_path("trackers", tracker)
         if not weights or not os.path.exists(weights):
             raise FileNotFoundError(f"tracker weights not found: put alltracker.pth (MIT, huggingface.co/aharley/"

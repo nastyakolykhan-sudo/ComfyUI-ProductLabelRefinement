@@ -18,6 +18,7 @@ from .imgpost import finish as fn
 from .imgpost import geometry as geo
 from .imgpost import grade as gr
 from .imgpost import images as im
+from .imgpost import ink as ik
 from .imgpost import masks as mk
 from .imgpost import outline as ol
 from .imgpost import psd
@@ -45,14 +46,19 @@ def work_box(job, Hs, Ws):
 # 0. a first job from rough input (run.py draft)
 
 def draft(scene_u8, ref_u8, ref_a, quad=None, pairs=(), occluders=(), mask=None, mask_skip=None, model="homography",
-          outline=None, cylinder=False, relight=True, suggest=False, label=None):
+          outline=None, cylinder=False, relight=True, suggest=False, label=None, ink=None, print_box=None, bow=None):
     """run.py draft without its files -> (job without the scene, reference and output paths; the lines run.py prints:
     the draft's summary and the align table; review sheet PIL image or None). run.py then runs the align stage,
-    which Fit Warp and Warp Reference do here. label "cylinder" / "flat": run.py draft --label (the label only)."""
+    which Fit Warp and Warp Reference do here. label "cylinder" / "flat": run.py draft --label (the label only).
+    ink "light", print_box, bow: run.py draft --ink light --print-box --bow (print straight on a coloured body). The
+    job's old_silhouette stays the draft's: here the product mask goes into Fill Leftovers' old_silhouette instead
+    (run.py draft writes the mask's file there)."""
     try:
         d = dr.draft(scene_u8, ref_u8, ref_a, quad=quad, pairs=pairs, occluders=occluders, mask=mask,
                      mask_skip=mask_skip, model=model, outline=outline, cylinder=cylinder, relight=relight,
                      suggest=suggest, label=label)
+        if ink or bow:
+            dr.print_on_body(d, scene_u8, mask=mask, ink=ink, print_box=print_box, bow=bow)
     except dr.DraftError as e:
         raise StageError(str(e)) from e
     check_job(d["job"])
@@ -73,8 +79,13 @@ def generated_cover(job, roi):
 # 1. geometry: warp the reference into the work box
 
 def fit_warp(job):
-    """-> (H, align report)"""
-    return geo.fit(job["align"])
+    """-> (H, align report). align.bow must carry its numbers (Auto Draft measures them; run.py fills a bow's
+    centre, axis, half_widths and b "auto" from a mask file, which a ComfyUI server doesn't have)."""
+    try:
+        return geo.fit(job["align"])
+    except ValueError as e:
+        raise StageError(f"{e}. Here: draft the job with Auto Draft's bow (product_mask connected), or give the "
+                         "numbers") from e
 
 
 def align_table(rep):
@@ -92,6 +103,11 @@ def align_table(rep):
         lines.append(f"residual  sigma {r['sigma']} px, max shift {r['max_shift_px']} px, {r['controls']} edge points"
                      + (f", {r['dropped_n']} stray left out ({', '.join(r['dropped'])})" if r["dropped_n"] else ""))
         lines.append("  after   " + ", ".join(f"{l['label'][:24]} {l['max_px']}" for l in r["lines_after"]))
+    b = rep.get("bow")
+    if b:
+        lines.append(f"bow       {b['b']}: the front {b['front_px']:+} px, the limbs {b['limb_px']:+} px along the axis" +
+                     ("; lines after: " + ", ".join(f"{l['label'][:24]} {l['max_px']}" for l in b["lines_after"])
+                      if b["lines_after"] else ""))
     return "\n".join(lines)
 
 
@@ -106,7 +122,8 @@ def warp(job, H, refmask, scene_u8, ref_u8, roi):
     "bleed" (the bled real outline's coverage), "cut" (real print outside the generated shape) and "shape" (the
     report entry); with reference_outline.body "body_raw" (where the real product shows its body) and "body" (that,
     ending where the label's visible shape ends: what the fill and the composite use)}."""
-    info = {"warnings": [], "squeeze": None, "bleed": None, "cut": None, "shape": None, "body": None, "body_raw": None}
+    info = {"warnings": [], "squeeze": None, "bleed": None, "cut": None, "shape": None, "body": None, "body_raw": None,
+            "ink": None}
     x0, y0, x1, y1 = roi
     crop = im.to_float(scene_u8[y0:y1, x0:x1])
     ref_lin = im.srgb_to_lin(im.to_float(ref_u8))
@@ -130,6 +147,16 @@ def warp(job, H, refmask, scene_u8, ref_u8, roi):
         P = np.asarray(refmask.polygon, float) if refmask.polygon else np.array(refmask.bbox(ref_u8.shape)).reshape(2, 2)
         pre = 0.6 if af.local_scale(H, P.mean(0)) < 1.0 else 0.0
     W_lin, a_new, (U, V) = wp.warp(ref_lin, H, roi, refmask, ss=job.get("supersample", 4), prefilter=pre)
+    if ik.light(job.get("matte")):
+        # light print on the body (run.py's _run_light, step 1): the packshot's print as coverage, warped
+        cfg = ik.config(job["matte"])
+        try:
+            cov_r, band, crep = ik.ref_cover(ref_u8, refmask, cfg)
+        except ik.InkError as e:
+            raise StageError(str(e)) from e
+        cov, in_band = ik.warp_cover(cov_r, band, H, roi, ss=job.get("supersample", 4), prefilter=pre,
+                                     blur=float(cfg["blur"]))
+        info["ink"] = {"cover": cov, "band": in_band, "report": crep}
     a_body = None
     if job["reference_outline"].get("body"):
         # parts of the outline where the real product shows its own body (a tube's grey between two labels): not
@@ -201,6 +228,10 @@ def scene_masks(job, roi, a_new=None):
     osil = job["old_silhouette"]
     if job.get("shape") == "generated":
         return generated_cover(job, roi) > 0.5, vis
+    if isinstance(osil, dict) and osil.get("type") == "mask":
+        # a mask file (run.py): the server doesn't have it. Empty here; connect the mask itself (Load Image (as
+        # Mask), SAM 3) to the nodes' old_silhouette inputs
+        return np.zeros((roi[3] - roi[1], roi[2] - roi[0]), bool), vis
     if osil == "auto" or isinstance(osil, dict):
         # the generated product's outline taken from the fit (it follows the generated edges, with the residual
         # correction): stray snapped points can't bulge it, and a label replaced edge to edge needs no fill ring.
@@ -241,11 +272,19 @@ def ink_mode(matte):
     return matte == "ink" or (isinstance(matte, dict) and matte.get("type") == "ink")
 
 
+def light_matte_only(node):
+    raise StageError(f"the job's matte is ink with polarity light: {node} isn't used. The light-ink graph is Fit Warp -> "
+                     "Warp Reference -> Fill Leftovers (old_silhouette: the product's mask) -> Composite Behind (ink: "
+                     "Fill Leftovers' ink); workflows/product-label-refinement-ink*.json")
+
+
 def grade(gs, scene_u8, ref_u8, roi, W_lin, a_new, old, vis, U=None, matte=None, body=None):
     """-> (graded linear rgb, grade report, grade preview PIL image, relight map PIL image or None, ink or None).
     ref_u8 is only read for grade.ref_white_box, U (reference x per work-box pixel) only for grade.shading.
     grade.relight's `debug` (run.py saves the relight inputs to work/) is ignored here. With the job's matte 'ink',
     `ink` carries what run.py's composite reads: the white field (linear) and the ink's colour (linear)."""
+    if ik.light(matte):
+        light_matte_only("Grade To Scene")
     x0, y0, x1, y1 = roi
     crop = im.to_float(scene_u8[y0:y1, x0:x1])
     S_lin = im.srgb_to_lin(crop)
@@ -460,6 +499,39 @@ def fill(fls, scene_u8, roi, a_new, old, vis, matte=None, shape=None, body=None)
         rep["body"] = {"px": int((a_body > 0.5).sum()), "sigma": sig,
                        "colour_srgb": [int(v) for v in np.round(np.median(B[a_body > 0.5], 0) * 255)]}
     return base, F, rep
+
+
+def light_fill(job, scene_u8, roi, old, vis, ink_cover):
+    """run.py's _run_light, the garbled print: the frame's own print removed from its body -> (filled linear rgb,
+    fill mask, report (run.py's report.json "matte"), ink for light_composite). old: the product's matte (bool, work
+    box); ink_cover: Warp Reference's coords["ink"]."""
+    if ink_cover is None:
+        raise StageError("the job's matte is ink with polarity light: connect Warp Reference's coords to Fill Leftovers")
+    if not old.any():
+        raise StageError("matte ink (light): old_silhouette is empty: connect the product's mask (SAM 3, Load Image "
+                         "(as Mask)) to Fill Leftovers' old_silhouette")
+    x0, y0, x1, y1 = roi
+    try:
+        filled, info, frep = ik.garbled(scene_u8[y0:y1, x0:x1], old, ink_cover["cover"], ink_cover["band"],
+                                        ik.config(job["matte"]), vis)
+    except ik.InkError as e:
+        raise StageError(str(e)) from e
+    info["cover"] = ink_cover["cover"]
+    return filled, info["fill"], dict({"type": "ink", "polarity": "light"}, **ink_cover["report"], **frep), info
+
+
+def light_composite(scene_u8, roi, filled, ink):
+    """run.py's _run_light, the composite -> (work box uint8, alpha)"""
+    if not (isinstance(ink, dict) and ink.get("polarity") == "light"):
+        raise StageError("the job's matte is ink with polarity light: connect Fill Leftovers' ink to Composite Behind")
+    x0, y0, x1, y1 = roi
+    return ik.composite(filled, scene_u8[y0:y1, x0:x1], ink)
+
+
+def light_check(job, res, scene_u8, ink, roi):
+    """run.py's _run_light checks beyond the audit: where the keyframe changed pixels away from print"""
+    x0, y0, x1, y1 = roi
+    return ik.check(scene_u8[y0:y1, x0:x1], res[y0:y1, x0:x1], ink, ink["cover"], ik.config(job["matte"]), (x0, y0))
 
 
 # 5. composite behind the occluders

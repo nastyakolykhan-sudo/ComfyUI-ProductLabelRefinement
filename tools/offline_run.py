@@ -274,7 +274,8 @@ def main():
     ap.add_argument("--image", action="append", default=[], metavar="NODE_ID=PATH")
     ap.add_argument("--job")
     ap.add_argument("--set", action="append", default=[], metavar="NODE.INPUT=VALUE")
-    ap.add_argument("--mask", help="the product's mask (white = product) for the Auto Draft nodes")
+    ap.add_argument("--mask", help="the product's mask (white = product) for the Auto Draft nodes, or the ink templates' "
+                    "product mask loader")
     ap.add_argument("--stage", choices=("align", "grade", "all"), default="all")
     ap.add_argument("--psd", action="store_true", help="also run the Save PSD nodes (same as \"psd\": true in the job)")
     ap.add_argument("--out", required=True)

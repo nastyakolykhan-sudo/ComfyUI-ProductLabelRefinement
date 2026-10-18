@@ -96,6 +96,28 @@ def label_quad(mask, band, full=0.95, step=4.0, limb_inset=0.0):
     return [(c + tt * ax + qq * n).round(1).tolist() for tt, qq in ((t0, lo), (t0, hi), (t1, hi), (t1, lo))]
 
 
+PAPER_MIN = 0.10   # a paper label's largest white area: 0.17-0.58 of the label (7 hand label jobs); print on a body 0.003-0.008
+
+
+def paper_gate(rgb, label_mask, min_share=PAPER_MIN, min_l=0.9, max_sat=0.08):
+    """Is the packshot's label paper (label mode fits it) or print straight on the body? The largest connected area
+    of near-white, unsaturated pixels must cover min_share of the label: a white letter or two (a lip tube's
+    white print: a 14 px letter passed the old test, imgpost's white_box alone) isn't paper. -> (white box for the grade or
+    None, info)"""
+    from imgpost import autofit
+    f = rgb.astype(float) / 255.0
+    L = f @ np.array([0.2126, 0.7152, 0.0722])
+    ok = label_mask & (L >= min_l) & ((f.max(2) - f.min(2)) <= max_sat)
+    lab, n = ndi.label(ok)
+    largest = int(np.bincount(lab.ravel())[1:].max()) if n else 0
+    share = largest / max(int(label_mask.sum()), 1)
+    info = {"paper_share": round(share, 4), "white_share": round(float(ok.sum()) / max(int(label_mask.sum()), 1), 4),
+            "min_share": min_share}
+    if share < min_share:
+        return None, info
+    return autofit.white_box(rgb, label_mask), info
+
+
 def coverage(geom, mask):
     """Share of the matte inside the crop's rectangle (1.0 for a crop_geometry of that matte)."""
     ys, xs = np.nonzero(mask)

@@ -333,3 +333,97 @@ def roll_from_print(H, frame_u8, mask_f, tex_u8, box, rolls=np.arange(-4.0, 4.01
     if best is None:
         return H, {"roll_deg": 0.0, "note": "the box isn't seen on this frame"}
     return best[2], {"roll_deg": best[0], "line_angle_error_deg": round(best[1], 2), "keyframe_line_angle_deg": target}
+
+
+def text_rows(tex_u8, polygon, frac=0.35):
+    """The label rows with the most lines of print (label v [v0, v1]): the window, frac of the band long, where the
+    band-passed luminance varies most across rows (lines of text give peaks and troughs)."""
+    from scipy.ndimage import gaussian_filter, gaussian_filter1d
+    from imgpost import images as im
+    P = np.asarray(polygon, float)
+    u0, u1, v0, v1 = int(P[:, 0].min()), int(P[:, 0].max()), int(P[:, 1].min()), int(P[:, 1].max())
+    L = im.lum(im.srgb_to_lin(im.to_float(tex_u8)))[v0:v1, u0:u1]
+    B = gaussian_filter(L, 1.0) - gaussian_filter(L, 8.0)
+    e = gaussian_filter1d(np.abs(np.diff(B, axis=0)).mean(1), 3)
+    n = max(int(frac * (v1 - v0)), 20)
+    c = np.convolve(e, np.ones(n) / n, mode="valid")
+    j = int(np.argmax(c))
+    return float(v0 + j), float(v0 + j + n)
+
+
+def line_bow(sample, H, matte, rows, n_strips=9, reach=0.6):
+    """How far the print's lines bow toward the base mid-label, in px, measured strip by strip (V28): along the
+    product's axis, in n_strips strips across the width (to reach x the half-width), each strip's band-passed
+    profile against the centre strip's; offset(x) = c + b x + s sqrt(1 - x^2/R^2) gives the bow s (+ = a smile) and
+    the linear term b (roll). sample(xy) -> luminance at image points. rows: label v range with lines of print.
+    -> (s, b in px per px, offsets)"""
+    from scipy.ndimage import map_coordinates, gaussian_filter1d
+    Hb = H
+    while hasattr(Hb, "base"):
+        Hb = Hb.base
+    A = Hb.A
+    ax = A[:, 1] / np.linalg.norm(A[:, 1])
+    n = np.array([ax[1], -ax[0]])
+    d = np.cross(A[0], A[1])
+    uc = Hb.u0 + Hb.Ru * np.arctan2(d[0], d[2])
+    p0, p1 = H.forward([[uc, rows[0]], [uc, rows[1]]])
+    c = 0.5 * (p0 + p1)
+    s_ = np.arange(-600, 601, 0.5)
+    q = c[None] + s_[:, None] * n[None]
+    m = map_coordinates(matte.astype(float), [q[:, 1], q[:, 0]], order=1) > 0.5
+    ii = np.nonzero(m)[0]
+    if not len(ii):
+        return None, None, None
+    R = 0.5 * (s_[ii.max()] - s_[ii.min()])
+    cen = 0.5 * (s_[ii.max()] + s_[ii.min()])
+    L = float(np.linalg.norm(p1 - p0))
+    w = np.arange(-40, L + 40, 0.5)
+    xs = np.linspace(-reach, reach, n_strips) * R
+    prof = []
+    for x in xs:
+        acc = 0.0
+        for dx in np.linspace(-0.05, 0.05, 7) * R:
+            pts = p0[None] + (cen + x + dx) * n[None] + w[:, None] * ax[None]
+            acc = acc + sample(pts)
+        pr = acc - gaussian_filter1d(acc, 12)
+        prof.append(gaussian_filter1d(pr, 1.0))
+    ref = prof[len(xs) // 2]
+    offs = []
+    for pr in prof:
+        lags = np.arange(-40, 41)
+        cc = [float(np.dot(np.roll(pr, -k)[80:-80], ref[80:-80])) for k in lags]
+        j = int(np.argmax(cc))
+        sub = 0.0
+        if 0 < j < len(lags) - 1:
+            y0, y1, y2 = cc[j - 1], cc[j], cc[j + 1]
+            den = y0 - 2 * y1 + y2
+            sub = 0.5 * (y0 - y2) / den if den != 0 else 0.0
+        offs.append((lags[j] + sub) * 0.5)
+    offs = np.array(offs)
+    X = np.c_[np.ones(len(xs)), xs, np.sqrt(1 - (xs / R) ** 2)]
+    coef, *_ = np.linalg.lstsq(X, offs, rcond=None)
+    return float(coef[2]), float(coef[1]), offs
+
+
+def texture_sampler(tex_u8, H):
+    """sample(xy) for line_bow: the texture's luminance where each image point meets the label through H (a render
+    of the label's print alone, without light): rays off the label read the texture's mean."""
+    from scipy.ndimage import map_coordinates
+    from imgpost import images as im
+    L = im.lum(im.srgb_to_lin(im.to_float(tex_u8)))
+    mean = float(L.mean())
+
+    def f(pts):
+        u, v, ok = H.inverse(pts[:, 0], pts[:, 1])
+        out = map_coordinates(L, [v, u], order=1, mode="constant", cval=mean)
+        if ok is not None:
+            out = np.where(ok, out, mean)
+        return out
+    return f
+
+
+def image_sampler(frame_u8):
+    from scipy.ndimage import map_coordinates
+    from imgpost import images as im
+    L = im.lum(im.srgb_to_lin(im.to_float(frame_u8)))
+    return lambda pts: map_coordinates(L, [pts[:, 1], pts[:, 0]], order=1, mode="nearest")
