@@ -80,8 +80,10 @@ def outputs(root):
             continue
         rel = p.relative_to(root)
         stem = re.sub(r"_\d{5}_?$", "", p.stem)
-        if rel.parts[0] != "product-label-refinement" and p.suffix != ".json" or "triage" in p.stem or "triage" in rel.parts:
+        if rel.parts[0] != "product-label-refinement" and p.suffix != ".json" or "triage" in p.stem or "triage" in rel.parts \
+                or p.name == "shot.json":
             continue                                  # inputs echoed back by the loaders' previews; the one workflow's triage
+                                                      # and shot (the templates have neither)
         if p.suffix == ".json" and rel.parts[0] != "product-label-refinement":
             out[p.name] = p                           # report.json, video_report.json
         elif "qa" in rel.parts[:-1]:

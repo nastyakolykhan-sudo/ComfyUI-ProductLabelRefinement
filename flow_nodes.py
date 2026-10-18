@@ -7,7 +7,9 @@ image or a clip, optional files, and the switches that run only the branch a job
 - Switch passes one of two lazy inputs on, so the other branch never runs. Run If passes its input on or blocks
   everything downstream of it, output nodes included (a still never reaches the video nodes).
 - Print Type reads the job: light ink (print on the body) or paper / dark ink, the two stills graphs.
-- Pick Frame takes the keyframe's frame (and mask) out of the clip; Paste-Back Mask is where a run changed pixels, so
+- Pick Frame takes the keyframe's frame (and mask) out of the clip; Shot takes the keyframe frame's shot out of an
+  edit (between the hard cuts round it), so SAM 3 and Refine work on that shot only, and Splice puts the refined shot
+  back, so the output is the whole clip with only that shot changed; Paste-Back Mask is where a run changed pixels, so
   a straightened crop goes back into its frame only there (and not at all when nothing was straightened).
 - Video Settings adds the product's copy to Refine (Video)'s settings JSON as `words`.
 - Label Triage shows the product's print next to the packshot's, straightened and at the same size, for the agent's
@@ -43,7 +45,9 @@ def _input_files(kinds):
 
 
 def _is_video(name):
-    return bool(folder_paths.filter_files_content_types([name], ["video"]))
+    """By its extension; an annotated name ("refined_00001.mov [output]": a run's output, the next product's source)
+    is read without its annotation."""
+    return bool(folder_paths.filter_files_content_types([folder_paths.annotated_filepath(name)[0]], ["video"]))
 
 
 def _load(name):
@@ -237,6 +241,199 @@ class ProductLabelPickFrame:
         return (None if images is None else images[k:k + 1], None if masks is None else masks[k:k + 1], k)
 
 
+
+def find_cuts(frames, chunk=16):
+    """-> the frames (from 1) that start a new shot: hard cuts, where the whole picture changes at once. Each frame is
+    shrunk to 64x64; a cut is a frame whose thumbnail differs from the previous one by 0.06 or more on average (0-1),
+    8x the clip's median frame-to-frame change, and whose colour histogram changes too (L1 0.3 or more of 2). On edits
+    with hard cuts the cuts measured 0.15-0.25 and everything else under 0.03, fades and push-ins included."""
+    T = frames.shape[0]
+    if T < 3:
+        return []
+    th = []
+    for i in range(0, T, chunk):
+        x = frames[i:i + chunk, ..., :3].float().movedim(-1, 1)
+        th.append(torch.nn.functional.interpolate(x, size=(64, 64), mode="area").clamp(0, 1).cpu())
+    t = torch.cat(th)
+    q = (t * 7.999).long()
+    idx = q[:, 0] * 64 + q[:, 1] * 8 + q[:, 2]
+    h = torch.stack([torch.bincount(i.flatten(), minlength=512).float() for i in idx]) / (64 * 64)
+    dh = (h[1:] - h[:-1]).abs().sum(1)
+    dp = (t[1:] - t[:-1]).abs().mean((1, 2, 3))
+    floor = max(0.06, 8 * float(dp.median()))
+    return [int(i) + 1 for i in range(T - 1) if float(dp[i]) >= floor and float(dh[i]) >= 0.3]
+
+
+class ProductLabelShot:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+                    "frames": ("IMAGE", {"tooltip": "The whole clip (an edit with several shots is fine)"}),
+                    "keyframe_index": ("INT", {"default": 0, "min": -1, "max": 1_000_000, "tooltip": (
+                        "The keyframe frame in the whole clip (from 0). -1 (a given keyframe whose frame Refine finds): "
+                        "the whole clip, unless start and end are set.")}),
+                    "start": ("INT", {"default": -1, "min": -1, "max": 1_000_000, "tooltip": (
+                        "The shot's first frame in the clip; -1: found, the cut before the keyframe frame (or 0)")}),
+                    "end": ("INT", {"default": -1, "min": -1, "max": 1_000_000, "tooltip": (
+                        "The shot's last frame in the clip; -1: found, the frame before the next cut (or the last)")})},
+                "optional": {"masks": ("MASK", {"tooltip": "A given mask video, one per frame of the clip: cut to the "
+                                                           "same shot"})}}
+
+    RETURN_TYPES = ("IMAGE", "MASK", "INT", "INT", "STRING")
+    RETURN_NAMES = ("frames", "masks", "start", "keyframe_index", "shot")
+    FUNCTION = "cut"
+    CATEGORY = CATEGORY
+    DESCRIPTION = ("The keyframe frame's shot out of a clip, so SAM 3 and Refine (Video) work on that shot only: between "
+                   "the hard cuts around the keyframe frame (found from the frames), or from start to end. "
+                   "keyframe_index: the keyframe frame counted from the shot's start; start: where the shot goes back "
+                   "(Splice); shot: JSON with start, end, the cuts found and the clip's length. Refine's report counts "
+                   "frames from the shot's start: add start for the clip's frame. An image is its own shot.")
+
+    def cut(self, frames, keyframe_index, start=-1, end=-1, masks=None):
+        T, k = int(frames.shape[0]), int(keyframe_index)
+        auto = (start < 0 or end < 0) and k >= 0
+        cuts = find_cuts(frames) if auto else []
+        if k >= T:
+            raise ValueError(f"the keyframe frame {k} is past the clip's last frame ({T - 1})")
+        s = start if start >= 0 else max([c for c in cuts if c <= k], default=0) if k >= 0 else 0
+        e = end if end >= 0 else min([c - 1 for c in cuts if c > k], default=T - 1) if k >= 0 else T - 1
+        s, e = min(s, T - 1), min(e, T - 1)
+        if e < s:
+            raise ValueError(f"the shot runs from frame {s} to {e}: end before start")
+        if k >= 0 and not s <= k <= e:
+            raise ValueError(f"the keyframe frame {k} is outside the shot ({s}-{e})")
+        if masks is not None:
+            masks = masks[None] if masks.dim() == 2 else masks
+            if masks.shape[0] == T:
+                masks = masks[s:e + 1]
+        shot = {"start": s, "end": e, "frames": e - s + 1, "keyframe_in_shot": k - s if k >= 0 else -1,
+                "clip_frames": T, "cuts": cuts, "found": {"start": start < 0, "end": end < 0} if auto else False}
+        return (frames[s:e + 1], masks, s, k - s if k >= 0 else -1, json.dumps(shot))
+
+
+class ProductLabelSplice:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"frames": ("IMAGE", {"tooltip": "The whole clip"}),
+                             "shot_frames": ("IMAGE", {"tooltip": "The shot, refined (Refine (Video)'s frames)"}),
+                             "start": ("INT", {"default": 0, "min": 0, "max": 1_000_000, "tooltip": "Shot's start"})},
+                "optional": {"shot": ("STRING", {"forceInput": True, "tooltip": "Shot's JSON, passed on"})}}
+
+    RETURN_TYPES = ("IMAGE", "STRING")
+    RETURN_NAMES = ("frames", "shot")
+    FUNCTION = "splice"
+    OUTPUT_NODE = True
+    CATEGORY = CATEGORY
+    DESCRIPTION = ("The refined shot back into the whole clip at start: the clip with only that shot changed, to save "
+                   "and to run the next product on. shot: the Shot's JSON, shown, once the shot is refined.")
+
+    def splice(self, frames, shot_frames, start, shot=""):
+        n, T = int(shot_frames.shape[0]), int(frames.shape[0])
+        if start + n > T or shot_frames.shape[1:3] != frames.shape[1:3]:
+            raise ValueError(f"a {n}-frame shot at {start} doesn't fit the {T}-frame clip "
+                             f"({tuple(shot_frames.shape[1:3])} vs {tuple(frames.shape[1:3])})")
+        if start == 0 and n == T:
+            out = shot_frames                        # the whole clip was the shot: nothing to splice
+        else:
+            out = torch.cat([frames[:start], shot_frames.to(frames.dtype), frames[start + n:]])
+        return {"ui": {"text": [shot]} if shot else {}, "result": (out, shot)}
+
+
+class ProductLabelMaskOverlay:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"images": ("IMAGE",), "masks": ("MASK",),
+                             "opacity": ("FLOAT", {"default": 0.4, "min": 0.0, "max": 1.0, "step": 0.05})}}
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("overlay",)
+    FUNCTION = "draw"
+    CATEGORY = CATEGORY
+    DESCRIPTION = ("The mask on its frames, to check it fits the product: tinted green inside, its edge in red (2 px). "
+                   "One mask for every frame, or one per frame.")
+
+    def draw(self, images, masks, opacity):
+        masks = masks[None] if masks.dim() == 2 else masks
+        if masks.shape[1:3] != images.shape[1:3]:
+            raise ValueError(f"the mask is {tuple(masks.shape[1:3])}, the frames {tuple(images.shape[1:3])}")
+        out = []
+        for t in range(images.shape[0]):
+            m = (masks[min(t, masks.shape[0] - 1)].float() > 0.5).float()[None, None]
+            edge = (torch.nn.functional.max_pool2d(m, 5, stride=1, padding=2) - m)[0, 0, ..., None]
+            m = m[0, 0, ..., None]
+            im = images[t, ..., :3].float()
+            tint = torch.tensor([0.1, 0.9, 0.3], dtype=im.dtype)
+            im = im * (1 - opacity * m) + tint * (opacity * m)
+            out.append(im * (1 - edge) + torch.tensor([1.0, 0.1, 0.1], dtype=im.dtype) * edge)
+        return (torch.stack(out),)
+
+
+class ProductLabelPackshotMatte:
+    USES = ["alpha, else SAM 3", "alpha only (else the engine traces the packshot's background)"]
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"reference": ("IMAGE",),
+                             "mask": ("MASK", {"tooltip": "The packshot Load Image's MASK (1 = transparent)"}),
+                             "use": (cls.USES, {"tooltip": (
+                                 "A packshot without alpha (a product on a white or black backdrop): its outline from "
+                                 "SAM 3 (needs on white-on-white), or left to the engine's own tracing of the backdrop")})},
+                "optional": {"sam_mask": ("MASK", {"lazy": True, "tooltip": "SAM 3 on the packshot (1 = product)"})}}
+
+    RETURN_TYPES = ("MASK", "STRING")
+    RETURN_NAMES = ("mask", "source")
+    FUNCTION = "matte"
+    CATEGORY = CATEGORY
+    DESCRIPTION = ("The packshot's outline as Load Image's MASK (1 = transparent): its alpha when it has one; else, with "
+                   "'alpha, else SAM 3', SAM 3's mask of it (computed only then); else Load Image's mask as it is, so "
+                   "the engine traces the backdrop. source: alpha, sam3 or none.")
+
+    @staticmethod
+    def _alpha(reference, mask):
+        m = mask[None] if mask.dim() == 2 else mask
+        return m.shape[1:3] == reference.shape[1:3] and bool((m > 0.5).any())
+
+    def check_lazy_status(self, reference, mask, use, sam_mask=_UNSET):
+        need = not self._alpha(reference, mask) and use == self.USES[0]
+        return ["sam_mask"] if need and sam_mask is None else []
+
+    def matte(self, reference, mask, use, sam_mask=None):
+        if self._alpha(reference, mask):
+            return (mask, "alpha")
+        if use == self.USES[0] and sam_mask is not None:
+            s = sam_mask[None] if sam_mask.dim() == 2 else sam_mask
+            if bool((s[:1] > 0.5).any()):
+                return (1.0 - (s[:1] > 0.5).float(), "sam3")
+        return (mask, "none")
+
+
+class ProductLabelSAM3Points:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"points": ("STRING", {"default": "", "tooltip": (
+            "Clicks on the keyframe frame, in its px: x,y on the product (several allowed), -x,y on something that "
+            "isn't it. Empty: SAM 3 finds the product from the text prompt. Given: SAM 3 segments what was clicked and "
+            "the text prompt is left out (SAM 3 would add its own detections to the clicked object), e.g. to pick one "
+            "product of several alike in a group shot. One click on the product's body works best: on real frames, "
+            "two clicks or a -x,y next to one shrank the mask to part of the label or emptied it. Check the mask "
+            "image (triage/mask) after every change.")})}}
+
+    RETURN_TYPES = ("STRING", "STRING", "BOOLEAN")
+    RETURN_NAMES = ("positive_coords", "negative_coords", "given")
+    FUNCTION = "parse"
+    CATEGORY = CATEGORY
+    DESCRIPTION = ("Clicks for SAM3 Detect: 'x,y x,y -x,y' -> its positive_coords and negative_coords (JSON), and "
+                   "whether any were given (then the text prompt is switched off).")
+
+    def parse(self, points):
+        import re
+        pos, neg = [], []
+        for sign, x, y in re.findall(r"([+-]?)\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)", points):
+            (neg if sign == "-" else pos).append({"x": float(x), "y": float(y)})
+        if neg and not pos:
+            raise ValueError("SAM 3 points: give at least one x,y on the product (only -x,y given)")
+        return (json.dumps(pos) if pos else "", json.dumps(neg) if neg else "", bool(pos))
+
 class ProductLabelPasteBackMask:
     @classmethod
     def INPUT_TYPES(cls):
@@ -372,6 +569,11 @@ NODE_CLASS_MAPPINGS = {
     "ProductLabelRunIf": ProductLabelRunIf,
     "ProductLabelPrintType": ProductLabelPrintType,
     "ProductLabelPickFrame": ProductLabelPickFrame,
+    "ProductLabelShot": ProductLabelShot,
+    "ProductLabelSplice": ProductLabelSplice,
+    "ProductLabelMaskOverlay": ProductLabelMaskOverlay,
+    "ProductLabelPackshotMatte": ProductLabelPackshotMatte,
+    "ProductLabelSAM3Points": ProductLabelSAM3Points,
     "ProductLabelPasteBackMask": ProductLabelPasteBackMask,
     "ProductLabelVideoSettings": ProductLabelVideoSettings,
     "ProductLabelTriage": ProductLabelTriage,
@@ -383,6 +585,11 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ProductLabelRunIf": "Product Label: Run If",
     "ProductLabelPrintType": "Product Label: Print Type",
     "ProductLabelPickFrame": "Product Label: Pick Frame",
+    "ProductLabelShot": "Product Label: Shot (between cuts)",
+    "ProductLabelSplice": "Product Label: Splice Shot Back",
+    "ProductLabelMaskOverlay": "Product Label: Mask Overlay",
+    "ProductLabelPackshotMatte": "Product Label: Packshot Matte",
+    "ProductLabelSAM3Points": "Product Label: SAM 3 Points",
     "ProductLabelPasteBackMask": "Product Label: Paste-Back Mask",
     "ProductLabelVideoSettings": "Product Label: Video Settings",
     "ProductLabelTriage": "Product Label: Label Triage",

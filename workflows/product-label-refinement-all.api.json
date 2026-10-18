@@ -81,6 +81,37 @@
       "title": "Fix this product (false: it looks fine on the triage sheet; only the sheet runs)"
     }
   },
+  "84": {
+    "inputs": {
+      "value": true
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "Render the clip (false: only the keyframe, to check it before the clip)"
+    }
+  },
+  "19": {
+    "inputs": {
+      "frames": [
+        "85",
+        0
+      ],
+      "keyframe_index": [
+        "6",
+        0
+      ],
+      "start": -1,
+      "end": -1,
+      "masks": [
+        "3",
+        1
+      ]
+    },
+    "class_type": "ProductLabelShot",
+    "_meta": {
+      "title": "Shot: the keyframe frame's, between cuts (start/end -1 = found)"
+    }
+  },
   "10": {
     "inputs": {
       "ckpt_name": "sam3.1_multiplex_fp16.safetensors"
@@ -119,6 +150,31 @@
       "title": "Keyframe frame"
     }
   },
+  "86": {
+    "inputs": {
+      "points": ""
+    },
+    "class_type": "ProductLabelSAM3Points",
+    "_meta": {
+      "title": "SAM 3 points on the keyframe frame (optional: x,y on the product, -x,y off it)"
+    }
+  },
+  "87": {
+    "inputs": {
+      "when": [
+        "86",
+        2
+      ],
+      "if_false": [
+        "11",
+        0
+      ]
+    },
+    "class_type": "ProductLabelSwitch",
+    "_meta": {
+      "title": "SAM 3 text prompt: left out when points are given"
+    }
+  },
   "13": {
     "inputs": {
       "model": [
@@ -133,8 +189,16 @@
       "refine_iterations": 2,
       "individual_masks": false,
       "conditioning": [
-        "11",
+        "87",
         0
+      ],
+      "positive_coords": [
+        "86",
+        0
+      ],
+      "negative_coords": [
+        "86",
+        1
       ]
     },
     "class_type": "SAM3_Detect",
@@ -145,7 +209,7 @@
   "14": {
     "inputs": {
       "images": [
-        "1",
+        "19",
         0
       ],
       "model": [
@@ -157,11 +221,11 @@
         0
       ],
       "keyframe_index": [
-        "12",
-        2
+        "19",
+        3
       ],
       "conditioning": [
-        "11",
+        "87",
         0
       ],
       "detection_threshold": 0.33,
@@ -170,7 +234,7 @@
     },
     "class_type": "ProductLabelVideoSAM3BothWays",
     "_meta": {
-      "title": "SAM 3 through the clip, both ways from the keyframe"
+      "title": "SAM 3 through the shot, both ways from the keyframe"
     }
   },
   "15": {
@@ -200,7 +264,7 @@
         2
       ],
       "if_true": [
-        "3",
+        "19",
         1
       ],
       "if_false": [
@@ -249,6 +313,71 @@
       "title": "Keyframe frame's mask"
     }
   },
+  "81": {
+    "inputs": {
+      "model": [
+        "10",
+        0
+      ],
+      "image": [
+        "2",
+        0
+      ],
+      "threshold": 0.33,
+      "refine_iterations": 2,
+      "individual_masks": false,
+      "conditioning": [
+        "11",
+        0
+      ]
+    },
+    "class_type": "SAM3_Detect",
+    "_meta": {
+      "title": "SAM 3 on the packshot (only when it has no alpha)"
+    }
+  },
+  "82": {
+    "inputs": {
+      "reference": [
+        "2",
+        0
+      ],
+      "mask": [
+        "2",
+        1
+      ],
+      "use": "alpha, else SAM 3",
+      "sam_mask": [
+        "81",
+        0
+      ]
+    },
+    "class_type": "ProductLabelPackshotMatte",
+    "_meta": {
+      "title": "Packshot outline for triage: alpha, else SAM 3"
+    }
+  },
+  "83": {
+    "inputs": {
+      "reference": [
+        "2",
+        0
+      ],
+      "mask": [
+        "2",
+        1
+      ],
+      "use": "alpha only (else the engine traces the packshot's background)",
+      "sam_mask": [
+        "81",
+        0
+      ]
+    },
+    "class_type": "ProductLabelPackshotMatte",
+    "_meta": {
+      "title": "Packshot outline for the fix (alpha only: the engine traces the backdrop)"
+    }
+  },
   "70": {
     "inputs": {
       "frame": [
@@ -264,8 +393,8 @@
         0
       ],
       "reference_mask": [
-        "2",
-        1
+        "82",
+        0
       ],
       "product_copy": [
         "7",
@@ -290,6 +419,36 @@
     "class_type": "SaveImage",
     "_meta": {
       "title": "Save the triage sheet"
+    }
+  },
+  "76": {
+    "inputs": {
+      "images": [
+        "12",
+        0
+      ],
+      "masks": [
+        "17",
+        1
+      ],
+      "opacity": 0.4
+    },
+    "class_type": "ProductLabelMaskOverlay",
+    "_meta": {
+      "title": "SAM 3's mask on the keyframe frame (check it fits)"
+    }
+  },
+  "77": {
+    "inputs": {
+      "images": [
+        "76",
+        0
+      ],
+      "filename_prefix": "product-label-refinement/triage/mask"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save the mask check"
     }
   },
   "72": {
@@ -326,6 +485,23 @@
       "title": "Video: only when the product needs fixing"
     }
   },
+  "85": {
+    "inputs": {
+      "value": [
+        "73",
+        0
+      ],
+      "when": [
+        "84",
+        0
+      ],
+      "run_when": "true"
+    },
+    "class_type": "ProductLabelRunIf",
+    "_meta": {
+      "title": "Clip: only when Render the clip is on"
+    }
+  },
   "74": {
     "inputs": {
       "value": [
@@ -333,7 +509,7 @@
         0
       ],
       "when": [
-        "9",
+        "85",
         0
       ],
       "run_when": "true"
@@ -435,8 +611,8 @@
         0
       ],
       "reference_mask": [
-        "2",
-        1
+        "83",
+        0
       ],
       "pairs": "",
       "occluders": "",
@@ -548,8 +724,8 @@
         0
       ],
       "reference_mask": [
-        "2",
-        1
+        "83",
+        0
       ]
     },
     "class_type": "ImagePostWarpReference",
@@ -827,8 +1003,8 @@
         1
       ],
       "reference_mask": [
-        "2",
-        1
+        "83",
+        0
       ],
       "align_report": [
         "29",
@@ -1172,7 +1348,7 @@
   "60": {
     "inputs": {
       "value": [
-        "73",
+        "19",
         0
       ],
       "when": [
@@ -1222,8 +1398,8 @@
       ],
       "tracker": "alltracker.pth",
       "keyframe_index": [
-        "6",
-        0
+        "19",
+        3
       ],
       "keyframe_frames": "auto",
       "settings": [
@@ -1245,10 +1421,34 @@
       "title": "Product Label: Refine (Video)"
     }
   },
+  "75": {
+    "inputs": {
+      "frames": [
+        "1",
+        0
+      ],
+      "shot_frames": [
+        "62",
+        0
+      ],
+      "start": [
+        "19",
+        2
+      ],
+      "shot": [
+        "19",
+        4
+      ]
+    },
+    "class_type": "ProductLabelSplice",
+    "_meta": {
+      "title": "The refined shot back into the clip (its text: shot.json)"
+    }
+  },
   "63": {
     "inputs": {
       "images": [
-        "62",
+        "75",
         0
       ],
       "fps": [
@@ -1270,7 +1470,7 @@
   "64": {
     "inputs": {
       "images": [
-        "62",
+        "75",
         0
       ],
       "fps": [
@@ -1329,6 +1529,58 @@
     "class_type": "PreviewAny",
     "_meta": {
       "title": "Refine report (JSON)"
+    }
+  },
+  "78": {
+    "inputs": {
+      "images": [
+        "60",
+        0
+      ],
+      "masks": [
+        "74",
+        0
+      ],
+      "opacity": 0.4
+    },
+    "class_type": "ProductLabelMaskOverlay",
+    "_meta": {
+      "title": "The shot's masks on its frames (check SAM 3's track)"
+    }
+  },
+  "79": {
+    "inputs": {
+      "images": [
+        "78",
+        0
+      ],
+      "fps": [
+        "1",
+        1
+      ],
+      "bit_depth": "auto",
+      "color_space": "sRGB",
+      "codec": "none"
+    },
+    "class_type": "CreateVideo",
+    "_meta": {
+      "title": "Mask check video"
+    }
+  },
+  "80": {
+    "inputs": {
+      "video": [
+        "79",
+        0
+      ],
+      "filename_prefix": "product-label-refinement/video/masks",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto"
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "Save the mask check (mp4)"
     }
   }
 }

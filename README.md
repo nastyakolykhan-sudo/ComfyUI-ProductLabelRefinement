@@ -324,7 +324,8 @@ Typical overrides after a first look at the report: `{"render": {"spark_glow": [
 | An image, paper or dark ink (`ink` off) | Auto Draft (or the given job), then the graph of `product-label-refinement-draft` (Grade To Scene, Match Finish) |
 | An image, light print on the body (`ink` light) | Auto Draft (or the given job), then the graph of `product-label-refinement-ink-draft` (no grade; the product mask is the matte the print stays inside) |
 | A measured job | Load Job instead of Auto Draft (Auto Draft doesn't run) |
-| A clip | SAM 3 on the keyframe frame, then through the clip both ways; the stills branch above on the keyframe frame; then Refine (Video) with that keyframe |
+| A clip | SAM 3 on the keyframe frame, then through its shot both ways; the stills branch above on the keyframe frame; then Refine (Video) on that shot with that keyframe, spliced back into the clip |
+| An edit (several shots, several products) | the Shot node finds the hard cuts round the keyframe frame, so SAM 3 and Refine work on that shot only, and the output is the whole edit with that shot refined. One run per product shot: the next product runs on the last run's output (`refined_#####.mov [output]`, no download) |
 | A clip and a corrected keyframe made elsewhere | SAM 3 and Refine (Video); the stills branch doesn't run |
 | A product mask given (image or clip) | SAM 3 doesn't run |
 | `Fix this product` false (the product looks fine on the triage sheet) | only SAM 3 on the keyframe frame and Label Triage's sheet: seconds |
@@ -356,15 +357,19 @@ The ids are the API file's (`workflows/product-label-refinement-all.api.json`), 
 | 3 Product mask (Load Optional File) | `file` | `(none)`: SAM 3 finds it. Or a mask file, white = product, the source's size; a mask video for a clip, one frame per frame |
 | 4 Corrected keyframe (Load Optional File) | `file` | clips: `(none)`: the stills branch makes it from the keyframe frame. Or a frame of the clip fixed elsewhere (by hand, an image model), the clip's size |
 | 5 Job JSON (String, multiline) | `value` | empty: Auto Draft drafts the job. Or a measured job.json's text: Load Job runs it, and Auto Draft doesn't run |
-| 6 Keyframe frame (Int) | `value` | clips: the frame the stills branch fixes (from 0), which is also Refine's `keyframe_index`. `-1` with a given keyframe: Refine finds its frame. An image ignores it |
+| 6 Keyframe frame (Int) | `value` | clips: the frame the stills branch fixes (from 0, in the whole clip); its shot is the one refined. `-1` with a given keyframe: Refine finds its frame, in the whole clip (or between the Shot's `start` and `end`). An image ignores it |
+| 83 Packshot outline for the fix | `use` | `alpha only` (default): a packshot without alpha is traced on its backdrop by the engine. `alpha, else SAM 3`: SAM 3's mask of the packshot (the prompt of node 11), for a product the backdrop hides (a white jar on white). Triage (82) always uses SAM 3 for a packshot without alpha |
+| 19 Shot | `start`, `end` | `-1` (default): found, the hard cuts round the keyframe frame (a one-shot clip is all one shot). Or the shot's first and last frame in the clip |
 | 7 Video Settings | `settings` | Refine (Video)'s settings JSON (below); empty: everything measured |
 | 7 Video Settings | `product_copy` | the label's copy, as printed: it becomes the settings' `words` (OCR in the QA, text boxes) unless the settings give words, and Label Triage's OCR hint |
 | 70 Label Triage | `ocr`, `glyph` | off: optional hints (tesseract; a letter-scale match), reported only |
 | 9 Fix this product (Boolean) | `value` | `true` (default): fix it. `false`: the triage sheet says it looks fine; only SAM 3 on the keyframe frame and the sheet run |
+| 84 Render the clip (Boolean) | `value` | clips: `true` (default): the keyframe, then SAM 3's track and Refine through the shot. `false`: the keyframe only (seconds), to check it before the clip; queue again with `true` and ComfyUI reuses the keyframe |
 | 8 Auto Draft fits to the product mask (Boolean) | `value` | `true`: Auto Draft fits the outline to the mask (light ink needs it). `false`: a paper draft from `quad` and `pairs` only, as the draft template |
+| 86 SAM 3 points | `points` | empty: the text prompt finds the product. `x,y` (keyframe frame px): SAM 3 segments the product clicked and the text prompt is left out (it would add its own detections). For a group shot where the prompt picks the wrong product (3 of 9 on the test edits). One click on the body: two clicks or a `-x,y` shrank or emptied the mask on real frames. Check `triage/mask` |
 | 11 SAM 3 prompt (CLIP Text Encode) | `text` | what the product is, e.g. `pump bottle`. Comma-separated prompts are joined into one mask; `name:N` takes N objects of a kind (1 by default) |
 | 13 SAM 3 on the keyframe frame | `threshold`, `refine_iterations` | 0.33 and 2, as the label-fix workflow |
-| 14 SAM 3 through the clip | `detection_threshold`, `max_objects`, `detect_interval` | 0.33, 1, 1 |
+| 14 SAM 3 through the shot | `detection_threshold`, `max_objects`, `detect_interval` | 0.33, 1, 1 |
 | 21 Straighten (Crop & Rotate) | `center_x`, `center_y`, `crop_width`, `crop_height`, `rotation` | a frame round the product and the turn that puts its label upright (degrees, + turns the image clockwise behind the frame). All 0: off, the whole frame, and nothing is resampled. When on, the stills branch works on the crop (Auto Draft's `quad`, `pairs`, `occluders` and the job are in the crop's px) and only the pixels it changed go back into the frame |
 | 24 Auto Draft | `ink` | the print type: `off` for paper or dark ink, `light` for light print straight on the body |
 | 24 Auto Draft | `quad`, `model`, `light`, `label`, `outline`, `pairs`, `occluders`, `mask_skip`, `print_box`, `bow`, `suggest` | as on the node ([Starting from rough input](#starting-from-rough-input-auto-draft), [Print straight on a body](#print-straight-on-a-body-the-ink-templates)). The template holds the ink demo's |
@@ -375,6 +380,7 @@ The ids are the API file's (`workflows/product-label-refinement-all.api.json`), 
 | Node | File (in `output/`) | What |
 |---|---|---|
 | 71 | `product-label-refinement/triage/sheet_#####_.png` | the triage sheet: the print on the frame next to the packshot's |
+| 77 | `product-label-refinement/triage/mask_#####_.png` | SAM 3's mask (or the given one) on the keyframe frame, tinted green with a red edge: check it fits the product before a fix |
 | 70 Label Triage | (its text) | `triage.json`: the triage's measures (the call is the agent's), or why it couldn't measure |
 | 44 | `product-label-refinement/refined_#####_.png` | the refined image (lossless PNG); for a clip, the refined keyframe |
 | 40 QA Sheet | (its text) | `report.json`: the stills run's report and audit |
@@ -383,10 +389,12 @@ The ids are the API file's (`workflows/product-label-refinement-all.api.json`), 
 | 56 | `qa/print_removed` | light ink only: the body without its garbled print |
 | 58 Save PSD | `product-label-refinement/refined_#####_.psd` | paper and dark ink only; `tools/comfy_run.py` runs it with `--psd` |
 | 24 Auto Draft | `product-label-refinement/draft_#####_.json` (and its text) | the drafted job: edit it and give it back as the Job JSON |
-| 63 | `product-label-refinement/video/refined_#####.mov` | clips: the lossless master (QuickTime PNG, exact RGB; its ui lists it under `files`) |
+| 63 | `product-label-refinement/video/refined_#####.mov` | clips: the lossless master of the whole clip with the refined shot spliced in (QuickTime PNG, exact RGB; its ui lists it under `files`); the next product's source |
 | 65 | `product-label-refinement/video/review_#####_.mp4` | clips: the refined clip, to review |
 | 66 | `product-label-refinement/video/qa_plot_#####_.png` | clips: Refine's QA plot |
-| 67 Refine report | (its text) | clips: Refine's report JSON (`not_covered`, `partly_covered`, `flagged`, `review`, `geometry`) |
+| 80 | `product-label-refinement/video/masks_#####_.mp4` | clips: the shot's masks on its frames (SAM 3's track, or the given masks): check them through the shot |
+| 67 Refine report | (its text) | clips: Refine's report JSON (`not_covered`, `partly_covered`, `flagged`, `review`, `geometry`). Its frames count from the shot's start |
+| 75 Splice | (its text) | clips: `shot.json`, the refined shot (`start`, `end`, `keyframe_in_shot`, the `cuts` found, `clip_frames`): add `start` to a frame of Refine's report for the clip's frame |
 
 ### The flow nodes (image › product-label-refinement › flow)
 
@@ -398,6 +406,10 @@ The ids are the API file's (`workflows/product-label-refinement-all.api.json`), 
 | **Run If** | `value` (lazy), `when`, `run_when` | `value`, or a block: every node after it, output nodes included, is skipped without an error |
 | **Print Type** | `job` | `light`: the job lays light print on the body (`matte` ink, polarity light) |
 | **Pick Frame** | `index`; `images`?, `masks`? | that frame (clamped), and its index |
+| **Shot (between cuts)** | `frames`, `keyframe_index`, `start`, `end`; `masks`? | the keyframe frame's shot: between the hard cuts round it (each frame shrunk to 64x64; a cut changes it by 0.06 or more on average and 8x the clip's median, and changes its colours), or `start` to `end`; its masks (a given mask video cut the same), `start`, the keyframe frame in the shot, and `shot` (JSON) |
+| **Mask Overlay** | `images`, `masks`, `opacity` | the masks on their frames, tinted green with a red edge |
+| **Packshot Matte** | `reference`, `mask`, `use`; `sam_mask`? (lazy) | the packshot's outline as Load Image's MASK: its alpha; else SAM 3's mask of it (computed only then) with `alpha, else SAM 3`; else Load Image's mask as it is (the engine traces the backdrop); and its `source` |
+| **Splice Shot Back** | `frames`, `shot_frames`, `start`; `shot`? | the clip with the shot replaced at `start` (the shot itself when it is the whole clip); shows `shot` |
 | **Paste-Back Mask** | `before`, `after`, `crop_rotate`, `grow` | where a straightened crop changed (8 bit), grown by `grow` px, for Crop & Rotate Composite; `straightened` false when the crop is the whole frame unturned |
 | **Video Settings** | `settings`, `product_copy` | the settings JSON with the copy as `words`, and the copy |
 | **Label Triage** | `frame`, `mask`, `reference`; `reference_mask`?, `product_copy`?, `ocr`, `glyph` | `sheet` (the print on the frame next to the packshot's, straightened, same size), `measures` (JSON; an error there never stops the run) |
@@ -486,9 +498,10 @@ A failed run has `status.status_str: "error"`, with the node and `exception_mess
 - `--mask PATH`: the product mask (3); without it SAM 3 runs;
 - `--keyframe PATH`: a corrected keyframe (4);
 - `--job PATH`: the job's text into the Job JSON (5); Auto Draft doesn't run;
-- `--set ID.INPUT=VALUE` for everything else (the tables above), `--image ID=PATH` for any loader.
+- `--set ID.INPUT=VALUE` for everything else (the tables above), `--image ID=PATH` for any loader;
+- the next product of an edit, on the last run's output without downloading it: `--set "1.source=product-label-refinement/video/refined_00001.mov [output]"` (the master's name from `history.json`).
 
-`--out` then holds `triage.json` and the triage sheet, `report.json` (the stills report), `video_report.json` (Refine's), every image, the draft job, the lossless `.mov` and the review mp4.
+`--out` then holds `triage.json` and the triage sheet, `report.json` (the stills report), `video_report.json` (Refine's), `shot.json` (the shot refined), every image, the draft job, the lossless `.mov` and the review mp4.
 
 ```bash
 # triage: is the bottle's print wrong at all? (only SAM 3 and the sheet run)
@@ -514,7 +527,11 @@ python3 tools/comfy_run.py --server $URL --workflow workflows/product-label-refi
 
 Without the tool: upload each file with `POST /upload/image` (any file type, videos too), set the same inputs by node id in the API file (`.["1"].inputs.source`, `.["3"].inputs.file`, `.["5"].inputs.value`, ...), `POST /prompt`, then read `/history/<prompt_id>`. Each Save Image lists `images`, Save Lossless lists `files`, SaveVideo lists its mp4, and the QA Sheet (40) and the Refine report (67) list `text`. Fetch files with `/view?filename=...&subfolder=...&type=output`.
 
-The loop for an agent: triage each product first (`9.value=false`, one run per product, the SAM 3 prompt naming it) and fix only those whose sheet shows a wrong print; then run with Auto Draft; read `report.json` (`audit_verdict`, `align`) and the audit sheet; fix the draft job (`draft_#####_.json`) and run it again as the Job JSON. For a clip, check the refined keyframe the same way before reading `video_report.json`: `not_covered` and `partly_covered` say which frame to fix next (run again with that keyframe frame), and `review.actions` give settings to try.
+An edit with three products in three shots and a group shot is six fix runs at most (the group shot: one run per product, back to front, its SAM 3 prompt naming that product), each on the last one's output; triage first and skip the fine ones.
+
+Packshots on a backdrop: a drop shadow on a black or white backdrop gets traced with the product (the audit says the outline runs past the generated product, and the shadow lands in the frame). Set 83 to `alpha, else SAM 3`. Comparing a master with its source, decode the source as the workflow does (ComfyUI's VideoFromFile, as Load Source): PyAV's default rgb24 decode of an H.264 source differs by up to 29 levels, so it reports changes that aren't there.
+
+The loop for an agent: triage each product first (`9.value=false`, one run per product, the SAM 3 prompt naming it) and fix only those whose sheet shows a wrong print; then run with Auto Draft; read `report.json` (`audit_verdict`, `align`) and the audit sheet; fix the draft job (`draft_#####_.json`) and run it again as the Job JSON. For a clip, iterate on the keyframe with Render the clip off (84 `false`: seconds a run), check the mask check (`triage/mask`) and the refined keyframe, then queue the same inputs with 84 `true` (the keyframe is reused; SAM 3's track and Refine run), check `video/masks` and the review mp4, then read `video_report.json`: `not_covered` and `partly_covered` say which frame to fix next (run again with that keyframe frame), and `review.actions` give settings to try.
 
 ## Writing a job
 

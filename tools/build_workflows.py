@@ -174,36 +174,59 @@ def definition_all():
         8: ("PrimitiveBoolean", "Auto Draft fits to the product mask", {"value": True}, (0, 2400)),
         9: ("PrimitiveBoolean", "Fix this product (false: it looks fine on the triage sheet; only the sheet runs)",
             {"value": True}, (0, 2560)),
-        # SAM 3: the product's mask on the keyframe frame (an image: the image), then through the clip both ways
+        84: ("PrimitiveBoolean", "Render the clip (false: only the keyframe, to check it before the clip)",
+             {"value": True}, (0, 0)),
+        # the keyframe frame's shot (an edit: between the cuts round it), for SAM 3's track and Refine
+        19: ("ProductLabelShot", "Shot: the keyframe frame's, between cuts (start/end -1 = found)", {
+            "frames": L(85, 0), "keyframe_index": L(6, 0), "start": -1, "end": -1, "masks": L(3, 1)}, (0, 0)),
+        # SAM 3: the product's mask on the keyframe frame (an image: the image), then through the shot both ways
         10: ("CheckpointLoaderSimple", "SAM 3.1 checkpoint", {"ckpt_name": "sam3.1_multiplex_fp16.safetensors"}, (480, 0)),
         11: ("CLIPTextEncode", "SAM 3 prompt: the product (comma-separated; name:N for N objects)",
              {"text": "bottle", "clip": L(10, 1)}, (480, 160)),
         12: ("ProductLabelPickFrame", "Keyframe frame", {"index": L(6, 0), "images": L(1, 0)}, (480, 420)),
+        86: ("ProductLabelSAM3Points", "SAM 3 points on the keyframe frame (optional: x,y on the product, -x,y off it)",
+             {"points": ""}, (0, 0)),
+        87: (SW, "SAM 3 text prompt: left out when points are given", {"when": L(86, 2), "if_false": L(11, 0)}, (0, 0)),
         13: ("SAM3_Detect", "SAM 3 on the keyframe frame", {
             "model": L(10, 0), "image": L(12, 0), "threshold": 0.33, "refine_iterations": 2, "individual_masks": False,
-            "conditioning": L(11, 0)}, (480, 600)),
-        14: ("ProductLabelVideoSAM3BothWays", "SAM 3 through the clip, both ways from the keyframe", {
-            "images": L(1, 0), "model": L(10, 0), "keyframe_mask": L(13, 0), "keyframe_index": L(12, 2),
-            "conditioning": L(11, 0), "detection_threshold": 0.33, "max_objects": 1, "detect_interval": 1}, (480, 880)),
+            "conditioning": L(87, 0), "positive_coords": L(86, 0), "negative_coords": L(86, 1)}, (480, 600)),
+        14: ("ProductLabelVideoSAM3BothWays", "SAM 3 through the shot, both ways from the keyframe", {
+            "images": L(19, 0), "model": L(10, 0), "keyframe_mask": L(13, 0), "keyframe_index": L(19, 3),
+            "conditioning": L(87, 0), "detection_threshold": 0.33, "max_objects": 1, "detect_interval": 1}, (480, 880)),
         15: (SW, "SAM 3 masks: the clip's, else the image's", {"when": L(1, 3), "if_true": L(14, 0),
                                                               "if_false": L(13, 0)}, (480, 1200)),
-        16: (SW, "Product mask: the given one, else SAM 3", {"when": L(3, 2), "if_true": L(3, 1), "if_false": L(15, 0)},
+        16: (SW, "Product mask: the given one, else SAM 3", {"when": L(3, 2), "if_true": L(19, 1), "if_false": L(15, 0)},
              (480, 1340)),
         18: (SW, "Keyframe frame's mask: the given one, else SAM 3 on that frame", {
             "when": L(3, 2), "if_true": L(3, 1), "if_false": L(13, 0)}, (480, 1620)),
         17: ("ProductLabelPickFrame", "Keyframe frame's mask", {"index": L(6, 0), "masks": L(18, 0)}, (480, 1480)),
+        # the packshot's outline when it has no alpha: SAM 3 (always for triage; for the fix when 83 says so)
+        81: ("SAM3_Detect", "SAM 3 on the packshot (only when it has no alpha)", {
+            "model": L(10, 0), "image": L(2, 0), "threshold": 0.33, "refine_iterations": 2, "individual_masks": False,
+            "conditioning": L(11, 0)}, (0, 0)),
+        82: ("ProductLabelPackshotMatte", "Packshot outline for triage: alpha, else SAM 3", {
+            "reference": L(2, 0), "mask": L(2, 1), "use": "alpha, else SAM 3", "sam_mask": L(81, 0)}, (0, 0)),
+        83: ("ProductLabelPackshotMatte", "Packshot outline for the fix (alpha only: the engine traces the backdrop)", {
+            "reference": L(2, 0), "mask": L(2, 1), "use": "alpha only (else the engine traces the packshot's background)",
+            "sam_mask": L(81, 0)}, (0, 0)),
         # triage: does the product need fixing at all? (the agent looks at the sheet and sets node 9)
         70: ("ProductLabelTriage", "Label Triage: the print on the frame | the packshot's", {
-            "frame": L(12, 0), "mask": L(17, 1), "reference": L(2, 0), "reference_mask": L(2, 1),
+            "frame": L(12, 0), "mask": L(17, 1), "reference": L(2, 0), "reference_mask": L(82, 0),
             "product_copy": L(7, 1), "ocr": False, "glyph": False}, (0, 0)),
         71: ("SaveImage", "Save the triage sheet", {"images": L(70, 0),
                                                     "filename_prefix": "product-label-refinement/triage/sheet"}, (0, 0)),
+        76: ("ProductLabelMaskOverlay", "SAM 3's mask on the keyframe frame (check it fits)", {
+            "images": L(12, 0), "masks": L(17, 1), "opacity": 0.4}, (0, 0)),
+        77: ("SaveImage", "Save the mask check", {"images": L(76, 0),
+                                                  "filename_prefix": "product-label-refinement/triage/mask"}, (0, 0)),
         72: (RUN, "Fix: only when the product needs it", {"value": L(12, 0), "when": L(9, 0), "run_when": "true"},
              (0, 0)),
         73: (RUN, "Video: only when the product needs fixing", {"value": L(1, 0), "when": L(9, 0), "run_when": "true"},
              (0, 0)),
+        85: (RUN, "Clip: only when Render the clip is on", {"value": L(73, 0), "when": L(84, 0), "run_when": "true"},
+             (0, 0)),
         74: (RUN, "Refine's mask: only when the product needs fixing (triage never tracks the clip)", {
-            "value": L(16, 0), "when": L(9, 0), "run_when": "true"}, (0, 0)),
+            "value": L(16, 0), "when": L(85, 0), "run_when": "true"}, (0, 0)),
         # stills: the image, or the clip's keyframe frame; Auto Draft, or the given job
         20: (RUN, "Stills branch: only without a given keyframe", {"value": L(72, 0), "when": L(4, 2),
                                                                   "run_when": "false"}, (960, 0)),
@@ -215,7 +238,7 @@ def definition_all():
         23: (SW, "Auto Draft's product mask (on, off)", {"when": L(8, 0), "if_true": L(21, 1)}, (960, 840)),
         24: ("ImagePostAutoDraft", "Auto Draft", {
             "scene": L(22, 0), "reference": L(2, 0), "quad": "", "model": "affine", "light": "off", "suggest": False,
-            "filename_prefix": "product-label-refinement/draft", "product_mask": L(23, 0), "reference_mask": L(2, 1),
+            "filename_prefix": "product-label-refinement/draft", "product_mask": L(23, 0), "reference_mask": L(83, 0),
             "pairs": "", "occluders": "", "outline": "", "mask_skip": "", "label": "off", "ink": "light",
             "print_box": INK_DRAFT_INPUT["print_box"], "bow": INK_DRAFT_INPUT["bow"]}, (960, 980)),
         25: ("ImagePostLoadJob", "Load Job (the given job)", {"job_json": L(5, 0), "job_path": ""}, (960, 1800)),
@@ -225,7 +248,7 @@ def definition_all():
         28: ("ImagePostJobMasks", "Job Masks", {"job": job, "scene": L(21, 0), "product_mask": L(30, 1)}, (1500, 180)),
         29: ("ImagePostFitWarp", "Fit Warp", {"job": job}, (1500, 0)),
         30: ("ImagePostWarpReference", "Warp Reference", {"job": job, "homography": L(29, 0), "scene": L(21, 0),
-                                                          "reference": L(2, 0), "reference_mask": L(2, 1)}, (1500, 400)),
+                                                          "reference": L(2, 0), "reference_mask": L(83, 0)}, (1500, 400)),
         31: ("ImagePostGradeToScene", "Grade To Scene (paper, dark ink)", {
             "job": job, "scene": L(21, 0), "warped": L(30, 0), "product_mask": L(30, 1), "old_silhouette": L(28, 0),
             "occluder_mask": L(28, 1), "colour": "job", "shading": "job", "reference": L(2, 0), "coords": L(30, 3),
@@ -249,7 +272,7 @@ def definition_all():
         39: (SW, "Finish report (paper, dark ink)", {"when": light, "if_false": L(32, 1)}, (1980, 1140)),
         40: ("ImagePostQASheet", "QA Sheet (its text: report.json)", {
             "job": job, "before": L(21, 0), "after": L(37, 0), "reference": L(2, 0), "matte": L(37, 1),
-            "fill_mask": L(34, 1), "reference_mask": L(2, 1), "align_report": L(29, 1), "grade_report": L(38, 0),
+            "fill_mask": L(34, 1), "reference_mask": L(83, 0), "align_report": L(29, 1), "grade_report": L(38, 0),
             "finish_report": L(39, 0), "fill_report": L(34, 2), "old_silhouette": L(33, 0), "occluder_mask": L(28, 1),
             "coords": L(30, 3), "ink": L(34, 3)}, (2460, 0)),
         41: ("ProductLabelPasteBackMask", "Paste-back mask (straightened crops)", {
@@ -281,18 +304,20 @@ def definition_all():
             "job": job, "scene": L(21, 0), "image": L(37, 0), "background": L(34, 0), "fill_mask": L(34, 1),
             "product": L(57, 0), "matte": L(37, 1), "filename_prefix": "product-label-refinement/refined"}, (3900, 640)),
         # video: Refine (Video) through the clip from the keyframe (the stills branch's, or the given one)
-        60: (RUN, "Video branch: only for a clip", {"value": L(73, 0), "when": L(1, 3), "run_when": "true"}, (960, 2300)),
+        60: (RUN, "Video branch: only for a clip", {"value": L(19, 0), "when": L(1, 3), "run_when": "true"}, (960, 2300)),
         61: (SW, "Keyframe: the given one, else the stills branch's", {"when": L(4, 2), "if_true": L(4, 0),
                                                                        "if_false": L(43, 0)}, (960, 2440)),
         62: ("ProductLabelVideoRefine", "Product Label: Refine (Video)", {
             "frames": L(60, 0), "mask": L(74, 0), "keyframes": L(61, 0), "tracker": "alltracker.pth",
-            "keyframe_index": L(6, 0), "keyframe_frames": "auto", "settings": L(7, 0), "fps": L(1, 1), "processes": 1,
+            "keyframe_index": L(19, 3), "keyframe_frames": "auto", "settings": L(7, 0), "fps": L(1, 1), "processes": 1,
             "model": "tube (round products)", "compositing": "settings (render.alpha, else measured)", "soft_cap": -1.0,
             "glue": False}, (1500, 2300)),
+        75: ("ProductLabelSplice", "The refined shot back into the clip (its text: shot.json)", {
+            "frames": L(1, 0), "shot_frames": L(62, 0), "start": L(19, 2), "shot": L(19, 4)}, (0, 0)),
         63: ("ProductLabelVideoSaveLossless", "Save the lossless master (QuickTime PNG)", {
-            "images": L(62, 0), "fps": L(1, 1), "filename_prefix": "product-label-refinement/video/refined",
+            "images": L(75, 0), "fps": L(1, 1), "filename_prefix": "product-label-refinement/video/refined",
             "format": "mov (PNG, exact RGB)", "audio": L(1, 2)}, (1980, 2300)),
-        64: ("CreateVideo", "Review copy", {"images": L(62, 0), "fps": L(1, 1), "audio": L(1, 2), "bit_depth": "auto",
+        64: ("CreateVideo", "Review copy", {"images": L(75, 0), "fps": L(1, 1), "audio": L(1, 2), "bit_depth": "auto",
                                             "color_space": "sRGB", "codec": "none"}, (1980, 2560)),
         65: ("SaveVideo", "Save the refined clip (mp4, to review)", {
             "video": L(64, 0), "filename_prefix": "product-label-refinement/video/review", "format": "auto",
@@ -301,16 +326,23 @@ def definition_all():
                                                       "filename_prefix": "product-label-refinement/video/qa_plot"},
              (2460, 2620)),
         67: ("PreviewAny", "Refine report (JSON)", {"source": L(62, 3)}, (2940, 2300)),
+        78: ("ProductLabelMaskOverlay", "The shot's masks on its frames (check SAM 3's track)", {
+            "images": L(60, 0), "masks": L(74, 0), "opacity": 0.4}, (0, 0)),
+        79: ("CreateVideo", "Mask check video", {"images": L(78, 0), "fps": L(1, 1), "bit_depth": "auto",
+                                                 "color_space": "sRGB", "codec": "none"}, (0, 0)),
+        80: ("SaveVideo", "Save the mask check (mp4)", {
+            "video": L(79, 0), "filename_prefix": "product-label-refinement/video/masks", "format": "auto",
+            "format.codec": "auto", "codec": "auto"}, (0, 0)),
     }
     pos = column_layout(ALL_COLUMNS, {k: v[0] for k, v in nodes.items()})
     return {k: (ct, title, inp, pos[k]) for k, (ct, title, inp, _) in nodes.items()}
 
 
 # the one workflow's layout: columns left to right, nodes top to bottom (heights as the frontend draws them)
-ALL_COLUMNS = [[1, 2, 3, 4, 5, 6, 7, 8, 9], [10, 11, 12, 13, 18, 17, 14, 15, 16], [70, 71, 72, 73, 74],
+ALL_COLUMNS = [[1, 2, 3, 4, 5, 6, 7, 8, 9, 84], [19, 10, 11, 86, 87, 12, 13, 18, 17, 14, 15, 16], [81, 82, 83, 70, 71, 76, 77, 72, 73, 85, 74],
                [20, 21, 22, 23, 24], [25, 26, 27, 29, 28, 30],
                [31, 32, 33, 34, 35, 36], [37, 38, 39, 40], [41, 42, 43, 44], [45, 46, 47, 48], [49, 50, 51, 52, 53, 54],
-               [55, 56, 57, 58], [60, 61, 62], [63, 64, 65], [66, 67]]
+               [55, 56, 57, 58], [60, 61, 62], [75, 63, 64, 65], [66, 67, 78, 79, 80]]
 ALL_HEIGHTS = {1: 374, 21: 520, 24: 852, 31: 246, 70: 300}
 ALL_WIDTHS = {4: 510, 6: 439, 11: 504, 33: 416, 35: 397, 43: 400}
 
@@ -335,7 +367,9 @@ ALL_NOTES = {
     90: ("What to set", (-600, 0), (480, 980), (
         "ONE WORKFLOW FOR EVERY CASE\n\n"
         "Source: an image or a clip (Load Source). An image runs the stills branch only; a clip runs SAM 3 through "
-        "the clip, the stills branch on the keyframe frame, then Refine (Video).\n\n"
+        "the keyframe frame's shot, the stills branch on the keyframe frame, then Refine (Video) on that shot, spliced "
+        "back into the clip. An edit with several shots: the Shot node finds the cuts round the keyframe frame (or "
+        "set its start and end); run each product's shot, then the next product on the output.\n\n"
         "Packshot: the real product photo.\n"
         "Product mask: (none) = SAM 3 with the prompt; or a mask file (white = product; a clip: one per frame).\n"
         "Corrected keyframe (clips): (none) = the stills branch makes it; or a frame fixed elsewhere.\n"
@@ -353,14 +387,17 @@ ALL_NOTES = {
 }
 
 ALL_GROUPS = [
-    ("Inputs: set these", [1, 2, 3, 4, 5, 6, 7, 8, 9], "#3f789e"),
-    ("SAM 3: the product's mask (skipped when a mask is given)", [10, 11, 12, 13, 14, 15, 16, 17, 18], "#8A8"),
-    ("Triage: does the product need fixing? (the agent sets Fix this product)", [70, 71, 72, 73, 74], "#2a7"),
+    ("Inputs: set these", [1, 2, 3, 4, 5, 6, 7, 8, 9, 84], "#3f789e"),
+    ("SAM 3: the product's mask (skipped when a mask is given); the keyframe frame's shot",
+     [19, 10, 11, 86, 87, 12, 13, 14, 15, 16, 17, 18], "#8A8"),
+    ("Triage: does the product need fixing? (the agent sets Fix this product); the mask check; the packshot's outline",
+     [81, 82, 83, 70, 71, 76, 77, 72, 73, 85, 74], "#2a7"),
     ("Stills: the image, or the clip's keyframe frame (Auto Draft, or the given job)",
      [20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32], "#b58b2a"),
     ("Paper or light ink, composite and QA", [33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43], "#a1309b"),
     ("Stills outputs", [44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58], "#444"),
-    ("Video: Refine (Video) through the clip (clips only)", [60, 61, 62, 63, 64, 65, 66, 67], "#335"),
+    ("Video: Refine (Video) through the shot, spliced back into the clip (clips only)",
+     [60, 61, 62, 75, 63, 64, 65, 66, 67, 78, 79, 80], "#335"),
 ]
 
 
@@ -368,6 +405,8 @@ SIZE = {"LoadImage": (400, 360), "LoadImageMask": (400, 360), "SaveImage": (400,
         "ImagePostQASheet": (420, 520), "ImagePostFitWarp": (380, 140), "ImagePostSavePSD": (420, 300),
         "ProductLabelLoadSource": (400, 360), "ProductLabelLoadOptional": (400, 360), "ProductLabelSwitch": (380, 100),
         "ProductLabelRunIf": (380, 100), "ProductLabelPrintType": (380, 80), "ProductLabelPickFrame": (380, 120),
+        "ProductLabelShot": (400, 200), "ProductLabelSplice": (400, 240), "ProductLabelMaskOverlay": (380, 120),
+        "ProductLabelPackshotMatte": (400, 140), "ProductLabelSAM3Points": (400, 100),
         "PrimitiveStringMultiline": (400, 240), "PrimitiveInt": (400, 100), "PrimitiveBoolean": (400, 80),
         "ProductLabelVideoSettings": (400, 320), "CLIPTextEncode": (400, 200), "CheckpointLoaderSimple": (400, 120),
         "SAM3_Detect": (400, 240), "ProductLabelVideoSAM3BothWays": (400, 260), "CropRotate": (440, 520),

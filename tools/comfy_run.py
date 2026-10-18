@@ -23,7 +23,7 @@ Draft's product_mask). --stage prunes the graph like run.py --stage
 Save PSD nodes run only with --psd or "psd": true in the job, like run.py --psd.
 --out receives every output file (server folder layout: images, the PSD, a lossless .mov), report.json (from the QA
 node), video_report.json (Refine (Video)'s report, from the node showing it), triage.json (Label Triage's
-measures), the other nodes' ui text as
+measures), shot.json (the refined shot of a clip: start, end, the cuts found), the other nodes' ui text as
 CLASS-ID.txt, and history.json. Exit codes: 0 done, 2 prompt rejected, 3 execution
 error, 4 timeout. Stdlib only. Servers behind an auth proxy: --header "Name: value" (repeatable).
 """
@@ -265,7 +265,8 @@ def save_outputs(entry, wf, fetch, out):
             src = wf.get(nid, {}).get("inputs", {}).get("source")
             refine = cls == "PreviewAny" and is_link(src) and wf[src[0]]["class_type"] == "ProductLabelVideoRefine"
             dest = out / ("report.json" if cls == "ImagePostQASheet" else "video_report.json" if refine
-                          else "triage.json" if cls == "ProductLabelTriage" else f"{cls}-{nid}.txt")
+                          else "triage.json" if cls == "ProductLabelTriage"
+                          else "shot.json" if cls == "ProductLabelSplice" else f"{cls}-{nid}.txt")
             dest.write_text(text)
             written.append(dest)
     (out / "history.json").write_text(json.dumps(entry, indent=1))
