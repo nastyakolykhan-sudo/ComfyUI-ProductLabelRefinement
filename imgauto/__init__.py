@@ -33,4 +33,4 @@ vjobs.reacquire_anchor(pitch="auto"); additions only.
 0.4.1: vjobs' tube jobs also switch on imgvideo 0.5.0's render.glue and render.level (a refine() render changes; the
 signatures don't).
 """
-__version__ = "0.4.1"
+__version__ = "0.4.2"
