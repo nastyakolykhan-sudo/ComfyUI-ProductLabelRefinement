@@ -202,6 +202,8 @@ def definition_all():
              (0, 0)),
         73: (RUN, "Video: only when the product needs fixing", {"value": L(1, 0), "when": L(9, 0), "run_when": "true"},
              (0, 0)),
+        74: (RUN, "Refine's mask: only when the product needs fixing (triage never tracks the clip)", {
+            "value": L(16, 0), "when": L(9, 0), "run_when": "true"}, (0, 0)),
         # stills: the image, or the clip's keyframe frame; Auto Draft, or the given job
         20: (RUN, "Stills branch: only without a given keyframe", {"value": L(72, 0), "when": L(4, 2),
                                                                   "run_when": "false"}, (960, 0)),
@@ -283,7 +285,7 @@ def definition_all():
         61: (SW, "Keyframe: the given one, else the stills branch's", {"when": L(4, 2), "if_true": L(4, 0),
                                                                        "if_false": L(43, 0)}, (960, 2440)),
         62: ("ProductLabelVideoRefine", "Product Label: Refine (Video)", {
-            "frames": L(60, 0), "mask": L(16, 0), "keyframes": L(61, 0), "tracker": "alltracker.pth",
+            "frames": L(60, 0), "mask": L(74, 0), "keyframes": L(61, 0), "tracker": "alltracker.pth",
             "keyframe_index": L(6, 0), "keyframe_frames": "auto", "settings": L(7, 0), "fps": L(1, 1), "processes": 1,
             "model": "tube (round products)", "compositing": "settings (render.alpha, else measured)", "soft_cap": -1.0,
             "glue": False}, (1500, 2300)),
@@ -305,7 +307,7 @@ def definition_all():
 
 
 # the one workflow's layout: columns left to right, nodes top to bottom (heights as the frontend draws them)
-ALL_COLUMNS = [[1, 2, 3, 4, 5, 6, 7, 8, 9], [10, 11, 12, 13, 18, 17, 14, 15, 16], [70, 71, 72, 73],
+ALL_COLUMNS = [[1, 2, 3, 4, 5, 6, 7, 8, 9], [10, 11, 12, 13, 18, 17, 14, 15, 16], [70, 71, 72, 73, 74],
                [20, 21, 22, 23, 24], [25, 26, 27, 29, 28, 30],
                [31, 32, 33, 34, 35, 36], [37, 38, 39, 40], [41, 42, 43, 44], [45, 46, 47, 48], [49, 50, 51, 52, 53, 54],
                [55, 56, 57, 58], [60, 61, 62], [63, 64, 65], [66, 67]]
@@ -353,7 +355,7 @@ ALL_NOTES = {
 ALL_GROUPS = [
     ("Inputs: set these", [1, 2, 3, 4, 5, 6, 7, 8, 9], "#3f789e"),
     ("SAM 3: the product's mask (skipped when a mask is given)", [10, 11, 12, 13, 14, 15, 16, 17, 18], "#8A8"),
-    ("Triage: does the product need fixing? (the agent sets Fix this product)", [70, 71, 72, 73], "#2a7"),
+    ("Triage: does the product need fixing? (the agent sets Fix this product)", [70, 71, 72, 73, 74], "#2a7"),
     ("Stills: the image, or the clip's keyframe frame (Auto Draft, or the given job)",
      [20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32], "#b58b2a"),
     ("Paper or light ink, composite and QA", [33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43], "#a1309b"),

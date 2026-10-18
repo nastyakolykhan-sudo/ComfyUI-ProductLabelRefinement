@@ -2,7 +2,7 @@
  "id": "0dc5c267-8982-5325-ba1f-da25c82e8753",
  "revision": 0,
  "last_node_id": 90,
- "last_link_id": 170,
+ "last_link_id": 172,
  "nodes": [
   {
    "id": 1,
@@ -389,7 +389,8 @@
      "type": "BOOLEAN",
      "links": [
       168,
-      170
+      170,
+      172
      ],
      "slot_index": 0
     }
@@ -780,7 +781,7 @@
      "name": "value",
      "type": "*",
      "links": [
-      147
+      171
      ],
      "slot_index": 0
     }
@@ -3078,7 +3079,7 @@
     440
    ],
    "flags": {},
-   "order": 61,
+   "order": 62,
    "mode": 0,
    "inputs": [
     {
@@ -3199,7 +3200,7 @@
     220
    ],
    "flags": {},
-   "order": 62,
+   "order": 63,
    "mode": 0,
    "inputs": [
     {
@@ -3244,7 +3245,7 @@
     180
    ],
    "flags": {},
-   "order": 63,
+   "order": 64,
    "mode": 0,
    "inputs": [
     {
@@ -3299,7 +3300,7 @@
     300
    ],
    "flags": {},
-   "order": 64,
+   "order": 65,
    "mode": 0,
    "inputs": [
     {
@@ -3339,7 +3340,7 @@
     330
    ],
    "flags": {},
-   "order": 65,
+   "order": 66,
    "mode": 0,
    "inputs": [
     {
@@ -3369,7 +3370,7 @@
     300
    ],
    "flags": {},
-   "order": 66,
+   "order": 67,
    "mode": 0,
    "inputs": [
     {
@@ -3404,7 +3405,7 @@
     220
    ],
    "flags": {},
-   "order": 67,
+   "order": 68,
    "mode": 0,
    "inputs": [
     {
@@ -3474,7 +3475,7 @@
     330
    ],
    "flags": {},
-   "order": 68,
+   "order": 69,
    "mode": 0,
    "inputs": [
     {
@@ -3581,6 +3582,50 @@
    ]
   },
   {
+   "id": 74,
+   "type": "ProductLabelRunIf",
+   "pos": [
+    1234,
+    1110
+   ],
+   "size": [
+    380,
+    100
+   ],
+   "flags": {},
+   "order": 61,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "value",
+     "type": "*",
+     "link": 171
+    },
+    {
+     "name": "when",
+     "type": "*",
+     "link": 172
+    }
+   ],
+   "outputs": [
+    {
+     "name": "value",
+     "type": "*",
+     "links": [
+      147
+     ],
+     "slot_index": 0
+    }
+   ],
+   "title": "Refine's mask: only when the product needs fixing (triage never tracks the clip)",
+   "properties": {
+    "Node name for S&R": "ProductLabelRunIf"
+   },
+   "widgets_values": [
+    "true"
+   ]
+  },
+  {
    "id": 90,
    "type": "Note",
    "pos": [
@@ -3592,7 +3637,7 @@
     980
    ],
    "flags": {},
-   "order": 69,
+   "order": 70,
    "mode": 0,
    "inputs": [],
    "outputs": [],
@@ -4776,7 +4821,7 @@
   ],
   [
    147,
-   16,
+   74,
    0,
    62,
    1,
@@ -4965,6 +5010,22 @@
    73,
    1,
    "*"
+  ],
+  [
+   171,
+   16,
+   0,
+   74,
+   0,
+   "*"
+  ],
+  [
+   172,
+   9,
+   0,
+   74,
+   1,
+   "*"
   ]
  ],
  "groups": [
@@ -5001,7 +5062,7 @@
     1214,
     -80,
     440,
-    1140
+    1310
    ],
    "color": "#2a7",
    "font_size": 24,

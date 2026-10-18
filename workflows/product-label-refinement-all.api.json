@@ -326,6 +326,23 @@
       "title": "Video: only when the product needs fixing"
     }
   },
+  "74": {
+    "inputs": {
+      "value": [
+        "16",
+        0
+      ],
+      "when": [
+        "9",
+        0
+      ],
+      "run_when": "true"
+    },
+    "class_type": "ProductLabelRunIf",
+    "_meta": {
+      "title": "Refine's mask: only when the product needs fixing (triage never tracks the clip)"
+    }
+  },
   "20": {
     "inputs": {
       "value": [
@@ -1196,7 +1213,7 @@
         0
       ],
       "mask": [
-        "16",
+        "74",
         0
       ],
       "keyframes": [
