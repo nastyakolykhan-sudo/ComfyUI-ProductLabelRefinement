@@ -564,6 +564,8 @@ Measure landmarks and edges by colour change, not by the strongest gradient, and
 
 ## Regression
 
+Every pull request runs these checks on GitHub (`.github/workflows/checks.yml`, see [Maintaining](#maintaining)). Run them by hand for what a pull request can't cover, such as production jobs.
+
 **Video.** `tools/regress_video.py` calls Product Label: Refine (Video) the way ComfyUI does (tensors in), on the same decoded frames as the skill's `video.py --refine`, and compares frames, matte, changed mask and report.
 
 | Run (2026-10-16, imgvideo 0.3.0) | Result |
@@ -638,34 +640,70 @@ The pack runs `workflows/product-label-refinement-draft.api.json` on that input,
 
 ## Maintaining
 
-Video: `imgvideo/` and `imgauto/` are the skill's too, pinned under `video_engine` in `imgpost.lock.json`:
+### The routine: a branch, a pull request, the checks, one click
+
+Each engine sync or pack change is made on its own branch, in its own worktree, and reaches `main` through a pull request. Nobody commits to `main` directly and no two sessions share a working tree, so a push never has to sort out whose files are whose.
+
+1. **Branch.** One worktree per change, cut from `origin/main`:
+   ```bash
+   cd ~/Documents/Swordfish/ComfyUI-ProductLabelRefinement
+   git fetch origin
+   git worktree add ../plr-worktrees/TOPIC -b TOPIC origin/main
+   ```
+   Work and commit there. An engine sync is a change like any other: in its worktree, run `tools/sync_imgpost.py --update` (and `--mark-ported` once `run.py` is ported into `stages.py`) or `tools/sync_video_engine.py --update`, and commit everything they change: the vendored packages, `tools/skill_cli/` and `imgpost.lock.json`.
+2. **Pull request.** Push the branch (`git push -u origin TOPIC`) and open a pull request against `main`. Without the gh CLI, the REST API opens it: `POST /repos/nastyakolykhan-sudo/ComfyUI-ProductLabelRefinement/pulls` with `head`, `base`, `title` and `body`.
+3. **Checks.** GitHub Actions runs `.github/workflows/checks.yml` on the pull request, on CPU, in parallel jobs (CI_MINUTES):
+
+   | Job | Runs |
+   |---|---|
+   | checks | `tools/brand_check.py` on the change; the pins (`tools/sync_imgpost.py`, `tools/sync_video_engine.py`); `tools/regress.py --psd` on the demo |
+   | one workflow, CASE (5 jobs) | `tools/regress_all.py --only CASE` on a ComfyUI 0.41.0 started in the job: ink-draft, ink-job, paper-draft, paper-job, video |
+   | video node | `tools/regress_video.py` on the video demo |
+
+   A red job names the step that failed; its runs are kept as an artifact for 7 days. The same checks run on `main` after each merge.
+4. **Merge.** The user merges the pull request with one click once the checks are green.
+5. **Swordfish pulls `main`.** Save the machine again so it takes the new version, then start an instance (the swordfish skill, "Update a machine"). A running instance doesn't pick the update up.
+6. **Clean up.** `git worktree remove ../plr-worktrees/TOPIC`, then `git branch -d TOPIC`.
+
+If `main` moves while a pull request is open and both touch the same lines, GitHub shows a conflict: merge `origin/main` into the branch in its worktree, resolve, push, and the checks run again. A conflict in `imgpost.lock.json` is resolved by re-running the sync on the merged tree.
+
+**What the checks compare against.** GitHub has no skill folder, so each job rebuilds the skill's layout from what the pins cover: `imgpost/`, `imgvideo/`, `imgauto/`, and the skill's two command lines in `tools/skill_cli/` (the `run.py` that `stages.py` ports, and `video.py`). `regress.py` and `regress_video.py` then run unchanged: the nodes against the pinned engine. The sync checks compare the vendored copies with `imgpost.lock.json`. Two things stay local, because they need the skill folder or client files: whether the pack has fallen behind the skill (the same sync commands with the skill present), and regressions on production jobs.
+
+**Brand names.** `tools/brand_check.py` scans the lines a branch adds, the names of the files it adds and its commit messages against a private list of terms (regular expressions, one per line, case-insensitive). The list is the repository secret `BRAND_TERMS` (Settings › Secrets and variables › Actions), never a file here: the check prints where a term matched and its number in the list, not the term, since the logs of a public repository are public. Locally: `python3 -P tools/brand_check.py --terms FILE` (`--all`: every tracked file). A pull request from a fork doesn't get the secret, so its check fails.
+
+**Models in the checks.** AllTracker (MIT, huggingface.co/aharley/alltracker) and SAM 3.1 (SAM License, huggingface.co/Comfy-Org/sam3.1) are fetched at pinned revisions, checked against their sha256 and cached between runs. The one workflow's triage runs SAM 3 on the packshot in every case (the demo packshots have no alpha); the given product masks keep it off the frames. Changing the ComfyUI version, torch or a model is a change to the env block at the top of `checks.yml`, made on a branch like any other.
+
+### Tools
+
+Video: `imgvideo/` and `imgauto/` are the skill's too, pinned under `video_engine` in `imgpost.lock.json` with the skill's `video.py` (`tools/skill_cli/video.py`):
 
 ```bash
-python3 -P tools/sync_video_engine.py              # check; --update copies the skill's imgvideo/ and imgauto/ here
+python3 -P tools/sync_video_engine.py              # check; --update copies the skill's imgvideo/, imgauto/ and video.py here
 python -P tools/regress_video.py --comfy PATH/TO/ComfyUI   # Refine (Video) against the skill's video.py --refine, bit for bit
 python3 -P tools/make_video_demo.py examples/video_demo    # redraw the video demo (byte-identical)
 ```
 
 Stills:
 
-`imgpost/` is a byte-identical copy of the product-label-refinement engine's library. The pack vendors it rather than importing it so the math stays identical and the pack stays self-contained on any server. `imgpost.lock.json` records the sha256 of every vendored file and of the runner version that `stages.py` ports.
+`imgpost/` is a byte-identical copy of the product-label-refinement engine's library. The pack vendors it rather than importing it so the math stays identical and the pack stays self-contained on any server. `imgpost.lock.json` records the sha256 of every vendored file and of the runner version that `stages.py` ports; `tools/skill_cli/run.py` is that runner.
 
 ```bash
 python3 tools/sync_imgpost.py                    # check: local edits, engine changes, runner changes
 python3 tools/sync_imgpost.py --update           # copy the engine's imgpost/ here and re-pin
-python3 tools/sync_imgpost.py --mark-ported      # after porting a runner change into stages.py
+python3 tools/sync_imgpost.py --mark-ported      # after porting a runner change into stages.py (copies the runner too)
 python -I tools/build_workflows.py               # rebuild workflows/ (the one workflow too) after changing a node's inputs or outputs
 python -P tools/regress_all.py --server URL --video   # the one workflow against each template, on a live server
+python3 -P tools/brand_check.py --terms FILE     # brand names in the branch's changes (--all: every tracked file)
 python3 tools/make_demo.py                       # redraw examples/demo/ (byte-identical with the same libraries)
 python3 -P tools/make_ink_demo.py                # redraw examples/ink_demo/ (the light-ink demo; uses imgpost/)
 ```
 
 Never edit `imgpost/` here. To pick up an engine change:
 1. Change the engine.
-2. Run `--update`.
-3. Port any runner diff into `stages.py`.
-4. Run `tools/regress.py`.
-5. Commit.
+2. In the change's worktree, run `--update`.
+3. Port any runner diff into `stages.py`, then `--mark-ported`.
+4. Run `tools/regress.py` (the pull request runs it too).
+5. Commit, push the branch and open a pull request (above).
 
 ## Extending
 
