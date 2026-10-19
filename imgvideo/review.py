@@ -396,6 +396,91 @@ class Ghost:
         return {"blocks": int(len(pc)), "pc": round(float(np.median(pc)), 3), "cluster": cl}
 
 
+def doubled(art, out_u8, src_u8, matte, H, polarity="light", clear=2, edge=4, tophat=15, thresh=0.03, piece=3, ends=32,
+            reach=10, tile=48, match=0.4, keep=False):
+    """The source's own print beside the label's (V54): the generator's lines drift against the tracked label, so
+    wherever the label lets the source through over print (its end fade, a band that ends on a line) the frame's own
+    line shows a few px off the label's: the one workflow's jar, its second-last line doubled at its band's
+    lower end away from the keyframe. The ghost check reads only the label's inner part and misses it there.
+    Measured inside the label's area (where its texture goes, the matte eroded `edge` px): print in the output (a
+    top-hat of the job's polarity, `tophat` px at `thresh` linear) that the source shows there too, more than `clear`
+    px off the label's own strokes (the keyframe's, through the mapping that rendered the frame), and explained by
+    the label's own print moved: per `tile` px tile round it, the shift within `reach` px that best lays the label's
+    print onto the source's print (Dice), kept when the two cover each other to `match` (the dark reflections
+    of a chrome lid or a glass base showing through a fade are thin marks too, but nothing of the label moved).
+    Pieces of `piece` px or more. -> {"px", "at": [y, x] of the largest piece, "v": [label rows it spans], "by_end":
+    px within `ends` rows of the label's top, its bottom, or inside, "band_v": [the label's rows]} or None (keep: plus
+    "mask": (roi, the px), for a look)"""
+    from scipy.signal import correlate
+
+    from imgpost import warp as wp
+    from .render import work_box
+    if not matte.any():
+        return None
+    Hl = art.local(H)
+    x0, y0, x1, y1 = roi = work_box(Hl, art, out_u8.shape[:2], pad=4)
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return None
+    W, a_lab, (_, V) = wp.warp(art.pack, Hl, roi, art.refmask, ss=2, prefilter=0)
+    lab = (W[..., 2] > 0.5) & (a_lab > 0.5) & binary_erosion(matte[y0:y1, x0:x1], iterations=edge)
+    if lab.sum() < 200:
+        return None
+
+    def prt(L):
+        th = []
+        if polarity in ("light", "both"):
+            th.append(L - ndi.grey_opening(L, size=(tophat, tophat)))
+        if polarity in ("dark", "both"):
+            th.append(ndi.grey_closing(L, size=(tophat, tophat)) - L)
+        return np.max(th, 0) > thresh
+    lp = W[..., 0] > 0.2                                     # the label's print
+    own = lp.copy()
+    if getattr(art, "texture", None) is not None:
+        # the label's own strokes as the keyframe shows them, its body's grain, frost and highlights too
+        own |= prt(im.lum(wp.warp(art.texture, Hl, roi, art.refmask, ss=2, prefilter=0)[0]))
+    sp = prt(lin_lum(src_u8[y0:y1, x0:x1]))
+    cand = prt(lin_lum(out_u8[y0:y1, x0:x1])) & sp & lab & ~binary_dilation(own, iterations=clear)
+    # the source's print as the label's own print moved, tile by tile round the candidates
+    h, w = cand.shape
+    Lpad = np.pad(lp, reach)
+    pred = np.zeros_like(cand)
+    for ty in range(0, h, tile):
+        for tx in range(0, w, tile):
+            r0, r1, c0, c1 = ty, min(ty + tile, h), tx, min(tx + tile, w)
+            if not cand[r0:r1, c0:c1].any():
+                continue
+            S = sp[r0:r1, c0:c1].astype(np.float32)
+            Lw = Lpad[r0:r1 + 2 * reach, c0:c1 + 2 * reach].astype(np.float32)
+            # every shift at once: how well the moved print and the source's print cover each other (Dice; a few
+            # moved px that all land on print don't make a match)
+            num = correlate(Lw, S, mode="valid", method="direct")
+            den = correlate(Lw, np.ones_like(S), mode="valid", method="direct")
+            sc = np.where(den >= 30, 2.0 * num / np.maximum(den + S.sum(), 1), 0.0)
+            i, j = np.unravel_index(int(np.argmax(sc)), sc.shape)
+            if sc[i, j] >= match:
+                pred[r0:r1, c0:c1] |= Lpad[r0 + i:r1 + i, c0 + j:c1 + j]
+    g = cand & binary_dilation(pred, iterations=1)
+    lb, n = ndi.label(g, np.ones((3, 3)))
+    if n:
+        sz = ndi.sum(g, lb, range(1, n + 1))
+        g = np.isin(lb, 1 + np.nonzero(sz >= piece)[0])
+    P = art.polygon
+    v0, v1 = float(P[:, 1].min()), float(P[:, 1].max())
+    r = {"px": int(g.sum()), "band_v": [round(v0, 1), round(v1, 1)]}
+    if r["px"]:
+        lb, n = ndi.label(g, np.ones((3, 3)))
+        sz = ndi.sum(g, lb, range(1, n + 1))
+        cy, cx = ndi.center_of_mass(g, lb, int(np.argmax(sz)) + 1)
+        vg = V[g]
+        r.update(at=[int(round(cy)) + y0, int(round(cx)) + x0],
+                 v=[round(float(np.percentile(vg, 5)), 1), round(float(np.percentile(vg, 95)), 1)],
+                 by_end={"top": int((vg <= v0 + ends).sum()), "bottom": int((vg >= v1 - ends).sum()),
+                         "inside": int(((vg > v0 + ends) & (vg < v1 - ends)).sum())})
+    if keep:
+        r["mask"] = (roi, g)
+    return r
+
+
 class Glitter:
     """Small bright specks in front of the label (glitter, sparkles) in the source that the output lost (V37), in label
     space: the source and the output both read through the source's own (tracked) mapping, every label px, so they're
@@ -736,7 +821,8 @@ def notes_block(flags, summary, title="Automatic checks"):
              "level": "The label's lines off the product's base (straightened)",
              "sharp": "The print softer than the source's own print",
              "tilt": "The print's side edge turned or shifted against the product's limb",
-             "spots": "Dark spots on the label's body"}
+             "spots": "Dark spots on the label's body",
+             "double": "The source's own print beside the label's (doubled lines)"}
     out = [f"## {title}", "",
            f"Run on the delivered lossless file ({summary['refined']} refined frames). Each check is calibrated on the "
            "frames marked in earlier review rounds; a flag means: look at that frame at 3-4x before sending."]
@@ -746,7 +832,7 @@ def notes_block(flags, summary, title="Automatic checks"):
     else:
         out.append("")
         for k in ("edges", "ghost", "shear", "bend", "body", "glitter", "vanish", "switch", "swim", "ends", "level", "sharp",
-                  "tilt", "spots"):
+                  "tilt", "spots", "double"):
             if k in summary["checks"]:
                 ex = next(why for t in sorted(flags) for kk, why in flags[t] if kk == k)
                 out.append(f"- **{names[k]}:** frames {summary['checks'][k]} (e.g. {ex}).")
