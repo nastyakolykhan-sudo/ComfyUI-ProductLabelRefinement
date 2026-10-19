@@ -54,9 +54,9 @@
         }
       },
       "imgauto": {
-        "version": "0.4.2",
+        "version": "0.4.3",
         "files": {
-          "__init__.py": "d93d9875cd4f61be61ad88d865b7d7e6224ffbb47c2715240cac11080c333d9e",
+          "__init__.py": "bcadde0e5399d08dfd80fe3c4adb6edd9477e0ef927551150b864296d9242014",
           "composite.py": "b4af068edb01efbbf7868962618ee38f7b11d204d5248491ed56463f6c08ab84",
           "coverage.py": "ca21a60cff9575896afb173ac4661279c278d1293fbc70a692c1c9331f5fb60f",
           "cropbox.py": "ce284dc13d5583808d3514e177c37f8ab1d1232a7a1019ab2e960e7754594b5a",
@@ -67,7 +67,7 @@
           "refangle.py": "266926cbd095e85d2378ce6e5f3633049363fe8d373c1c10aa0737db679c51a1",
           "shadow.py": "85aea70344a609f2b492779079b620c4bbc00c608fa6768f3e1df6383b4edcbc",
           "shots.py": "1c62136c2dd0c64f735085817413043cb77c7b17bde1446bfafa18468ebcba99",
-          "triage.py": "818c2a7381b96a4b3ae8ce4deb3acc9c0d9aad1e4c50020741c7b101ebf11b08",
+          "triage.py": "2a10846a04506358d20f59fb72a8dad15e6a04af30d5bee0c39cff413af977d9",
           "verify.py": "8a05dbef0ed7af34d2606a7664cc38f5261bfc137b622ca6eff12bc5cd38f829",
           "vjobs.py": "540ce4cd81ef565714338de69a5b9a6ec28b8d3b870bb93f0395ad78c01db40b"
         }

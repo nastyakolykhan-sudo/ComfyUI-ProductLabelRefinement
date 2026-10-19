@@ -32,5 +32,9 @@ are unchanged.0.4.0: imgvideo 0.4.1's R1/R2/R4 wired in: coverage.job_stops and 
 vjobs.reacquire_anchor(pitch="auto"); additions only.
 0.4.1: vjobs' tube jobs also switch on imgvideo 0.5.0's render.glue and render.level (a refine() render changes; the
 signatures don't).
+0.4.3: triage's sheet straightens squat products (a jar, a balm: the packshot under TH["squat"] or wider than tall)
+along the axis nearest the vertical, brought to the frame's width and shown whole, frame and packshot at one scale;
+the axis's second pass keeps the first's (V53). measure/sheet/combine keep their signatures; axis and straighten take
+an optional prior. Tall products' sheets are unchanged, byte for byte.
 """
-__version__ = "0.4.2"
+__version__ = "0.4.3"

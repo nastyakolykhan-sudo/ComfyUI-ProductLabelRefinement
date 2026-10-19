@@ -29,23 +29,48 @@ from scipy import ndimage as ndi
 
 from . import verify
 
-TH = {"min_ceiling": 0.3}
+TH = {"min_ceiling": 0.3, "round": 1.3, "squat": 3.0, "outside": 0.01}
+UP = (0.0, 1.0)                                  # the image vertical: a packshot is upright
 
 
-def axis(M):
+def _principal(Q, near=None):
+    """Q's principal axis: the largest (near None), else the one nearest `near`; a near-round Q (eigenvalue ratio
+    under TH["round"]) keeps `near` itself."""
+    w, V = np.linalg.eigh(np.cov(Q.T))
+    if near is None:
+        return V[:, np.argmax(w)]
+    near = np.asarray(near, float) / np.linalg.norm(near)
+    if w.max() < TH["round"] * max(w.min(), 1e-9):
+        return near
+    return V[:, np.argmax(np.abs(V.T @ near))]
+
+
+def body_prior(ref_mask):
+    """The frame's axis prior from the packshot (upright): a tall product's body runs down its long principal axis at
+    any tilt (None); a squat or wide one's (eigenvalue ratio under TH["squat"], about 1.7 times as tall as wide, or
+    wider than tall: a jar, a balm, a compact; its long axis may run across the body, or a near-round mask has none)
+    is nearest the image vertical (UP). On the first real edits: bottles and tubes 6-10, the balm 2.1, jars 1.2."""
+    ys, xs = np.nonzero(ref_mask)
+    w, V = np.linalg.eigh(np.cov(np.stack([xs, ys]).astype(float)))
+    major = V[:, np.argmax(w)]
+    return None if (w.max() >= TH["squat"] * w.min() and abs(major[1]) >= abs(major[0])) else UP
+
+
+def axis(M, up=None):
     """Centre, unit axis direction (down the body), half-width: two passes (principal axis of the lower 60 %, then the
-    limbs' midpoints across the body's middle in that frame), so a tilted body's rounded ends don't lean it."""
+    limbs' midpoints across the body's middle in that frame), so a tilted body's rounded ends don't lean it.
+    up: None, the body's long principal axis; a direction (UP), the principal axis nearest it, or the direction itself
+    on a near-round mask (a squat product, body_prior). The second pass keeps the first's axis: a jar's or a balm's
+    lower 60 % is wider than tall, and its largest axis turned the body 90 deg or cut a side of it (2026-10-18)."""
     ys, xs = np.nonzero(M)
     P = np.stack([xs, ys], 1).astype(float)
     c = P.mean(0)
-    w, V = np.linalg.eigh(np.cov((P - c).T))
-    d = V[:, np.argmax(w)]
+    d = _principal(P - c, up)
     d = d if d[1] >= 0 else -d
     a = (P - c) @ d
     Pb = P[a > a.min() + 0.4 * np.ptp(a)]
     c = Pb.mean(0)
-    w, V = np.linalg.eigh(np.cov((Pb - c).T))
-    d = V[:, np.argmax(w)]
+    d = _principal(Pb - c, d)
     d = d if d[1] >= 0 else -d
     for _ in range(2):
         n = np.array([d[1], -d[0]])
@@ -66,13 +91,19 @@ def axis(M):
     return c, d, (float(np.median(half)) if half else 0.5 * np.ptp(x))
 
 
-def straighten(img, M, step=1.0, rgb=False):
+def straighten(img, M, step=1.0, rgb=False, up=None):
     """The product upright, at 1/step px: (gray 0..1 (or RGB 0..1 with rgb), mask, length along the axis in source
-    px)."""
-    c, d, hw = axis(M)
+    px). up: axis()'s prior; given (a squat product, body_prior), the crop also holds the whole mask across the axis
+    (a lid wider than the body's limbs)."""
+    c, d, hw = axis(M, up)
     n = np.array([d[1], -d[0]])
     ys, xs = np.nonzero(M)
-    al = (np.stack([xs, ys], 1) - c) @ d
+    Q = np.stack([xs, ys], 1) - c
+    al = Q @ d
+    if up is not None:
+        x = Q @ n
+        if (np.abs(x) > hw + 6).mean() > TH["outside"]:
+            hw = float(max(-np.quantile(x, 0.001), np.quantile(x, 0.999)))
     A = np.arange(al.min() - 4, al.max() + 4, step)
     C = np.arange(-hw - 6, hw + 6, step)
     X = c[0] + A[:, None] * d[0] + C[None, :] * n[0]
@@ -178,21 +209,31 @@ def frame_verdict(text, ceiling, gl):
 
 def measure(frame, M, ref_rgb, ref_mask, copy=(), glyph=False, ocr=False):
     """One frame of one product -> the measures and its verdict. glyph: also the letter-scale match (reported only;
-    a few seconds a frame)."""
-    F, Fm, L = straighten(frame, M)
-    Rg, Rm, Lr = straighten(ref_rgb, ref_mask, step=Lr_step(ref_mask, L))
+    a few seconds a frame).
+    A tall product (body_prior None) is straightened along its long axis and the reference brought to the frame's
+    length; a squat one (a jar, a balm: the packshot about as wide as tall, or wider) along the axis nearest the
+    vertical, brought to the frame's width (a cylinder's width doesn't change with the camera's height, its height
+    does: a jar seen from above is taller by its lid's top), and both shown whole."""
+    up = body_prior(ref_mask)
+    F, Fm, L = straighten(frame, M, up=up)
+    st = Lr_step(ref_mask, L) if up is None else axis(ref_mask, up)[2] / max(axis(M, up)[2], 1.0)
+    Rg, Rm, Lr = straighten(ref_rgb, ref_mask, step=st, up=up)
     gl = glyphs(F, Fm, Rg, Rm) if glyph else {"layout": None, "glyphs": None, "ceiling": None}
     tf = tr = None
     if ocr:                                      # hints only (about 10 s a frame): off by default
         tf, tr = text_score(copy, read_words(F, Fm)), text_score(copy, read_words(Rg, Rm))
     v, ratio, grel = frame_verdict(tf, tr, gl)
-    # the sheet: the print band of both, in colour (the rows where the reference has print, with a margin)
-    Fc = straighten(frame, M, rgb=True)[0]
-    Rc = straighten(ref_rgb, ref_mask, step=Lr_step(ref_mask, L), rgb=True)[0]
-    th = (Rg - ndi.grey_opening(Rg, size=(15, 15))) > 0.03
-    th |= (ndi.grey_closing(Rg, size=(15, 15)) - Rg) > 0.03            # dark print too
-    rows = np.nonzero((th & ndi.binary_erosion(Rm, iterations=4)).any(1))[0]
-    band = (max(int(np.percentile(rows, 1)) - 10, 0), int(np.percentile(rows, 99)) + 10) if len(rows) > 10 else (0, len(Rg))
+    # the sheet: the print band of both, in colour (the rows where the reference has print, with a margin); a squat
+    # product whole, each its own rows (the frame's is taller by the top it shows)
+    Fc = straighten(frame, M, rgb=True, up=up)[0]
+    Rc = straighten(ref_rgb, ref_mask, step=st, rgb=True, up=up)[0]
+    if up is None:
+        th = (Rg - ndi.grey_opening(Rg, size=(15, 15))) > 0.03
+        th |= (ndi.grey_closing(Rg, size=(15, 15)) - Rg) > 0.03            # dark print too
+        rows = np.nonzero((th & ndi.binary_erosion(Rm, iterations=4)).any(1))[0]
+        band = (max(int(np.percentile(rows, 1)) - 10, 0), int(np.percentile(rows, 99)) + 10) if len(rows) > 10 else (0, len(Rg))
+    else:
+        band = ((0, len(Fc)), (0, len(Rc)))
     return {"verdict": v, "text": tf, "text_ceiling": tr, "text_ratio": ratio, "glyphs_rel": grel, **gl,
             "_crops": (Fc, Fm, Rc, Rm, band)}
 
@@ -212,19 +253,22 @@ def combine(verdicts, agent=None):
 
 def sheet(rows, out, h=520):
     """Per measured frame: the frame's print band | the reference's at the frame's size, both straightened, in colour,
-    enlarged to h px tall, with the OCR hints. What the agent judges fix or fine from."""
+    enlarged by one factor (the taller to h px; the other centred), with the OCR hints. What the agent judges fix or
+    fine from."""
     tiles = []
     for lab, r in rows:
-        F, Fm, R, Rm, (b0, b1) = r["_crops"]
+        F, Fm, R, Rm, band = r["_crops"]
+        bands = band if isinstance(band[0], tuple) else (band, band)
+        crops = [g[b0:min(b1, len(g))] for g, (b0, b1) in zip((F, R), bands)]
+        H = max(max(g.shape[0] for g in crops), 1)
         pair = []
-        for g in (F, R):
-            g = g[b0:min(b1, len(g))]
+        for g in crops:
             im = Image.fromarray((np.clip(g, 0, 1) * 255).astype(np.uint8))
-            im = im.resize((max(1, im.width * h // max(im.height, 1)), h), Image.LANCZOS)
+            im = im.resize((max(1, im.width * h // H), max(1, im.height * h // H)), Image.LANCZOS)
             pair.append(im)
         t = Image.new("RGB", (pair[0].width + pair[1].width + 6, h + 20), (20, 20, 20))
-        t.paste(pair[0], (0, 20))
-        t.paste(pair[1], (pair[0].width + 6, 20))
+        t.paste(pair[0], (0, 20 + (h - pair[0].height) // 2))
+        t.paste(pair[1], (pair[0].width + 6, 20 + (h - pair[1].height) // 2))
         hint = (f"   (OCR hint: {r['text']} of the copy; the reference at this size {r['text_ceiling']})"
                 if r.get("text") is not None else "")
         ImageDraw.Draw(t).text((3, 4), f"{lab} | reference{hint}", fill=(255, 220, 0))
