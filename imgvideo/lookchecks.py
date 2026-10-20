@@ -29,7 +29,8 @@ with pass/fail flags and the setting an agent tries next (summary["actions"]). P
   double  the source's own print beside the label's (review.doubled, V54): where the label lets the source through
           over print (its end fade, a band that ends on a line), the generator's line, drifting against the tracked
           label, shows a few px off the label's own (the one workflow's jar: its second-last line doubled
-          away from the keyframe). double_px or more, as a 5-frame median.
+          away from the keyframe). double_px or more, as a 5-frame median. Ink only: a round body's soft limb
+          band passes the rest of the test next to the label's letters (V55).
 """
 import math
 

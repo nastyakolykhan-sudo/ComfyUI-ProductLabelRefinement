@@ -397,7 +397,7 @@ class Ghost:
 
 
 def doubled(art, out_u8, src_u8, matte, H, polarity="light", clear=2, edge=4, tophat=15, thresh=0.03, piece=3, ends=32,
-            reach=10, tile=48, match=0.4, keep=False):
+            reach=10, tile=48, match=0.4, ink=0.25, keep=False):
     """The source's own print beside the label's (V54): the generator's lines drift against the tracked label, so
     wherever the label lets the source through over print (its end fade, a band that ends on a line) the frame's own
     line shows a few px off the label's: the one workflow's jar, its second-last line doubled at its band's
@@ -426,20 +426,24 @@ def doubled(art, out_u8, src_u8, matte, H, polarity="light", clear=2, edge=4, to
     if lab.sum() < 200:
         return None
 
-    def prt(L):
+    def depth(L):
         th = []
         if polarity in ("light", "both"):
             th.append(L - ndi.grey_opening(L, size=(tophat, tophat)))
         if polarity in ("dark", "both"):
             th.append(ndi.grey_closing(L, size=(tophat, tophat)) - L)
-        return np.max(th, 0) > thresh
+        return np.max(th, 0)
+
+    def prt(L):
+        return depth(L) > thresh
     lp = W[..., 0] > 0.2                                     # the label's print
     own = lp.copy()
     if getattr(art, "texture", None) is not None:
         # the label's own strokes as the keyframe shows them, its body's grain, frost and highlights too
         own |= prt(im.lum(wp.warp(art.texture, Hl, roi, art.refmask, ss=2, prefilter=0)[0]))
-    sp = prt(lin_lum(src_u8[y0:y1, x0:x1]))
-    cand = prt(lin_lum(out_u8[y0:y1, x0:x1])) & sp & lab & ~binary_dilation(own, iterations=clear)
+    d_src, d_out = depth(lin_lum(src_u8[y0:y1, x0:x1])), depth(lin_lum(out_u8[y0:y1, x0:x1]))
+    sp = d_src > thresh
+    cand = (d_out > thresh) & sp & lab & ~binary_dilation(own, iterations=clear)
     # the source's print as the label's own print moved, tile by tile round the candidates
     h, w = cand.shape
     Lpad = np.pad(lp, reach)
@@ -460,6 +464,14 @@ def doubled(art, out_u8, src_u8, matte, H, polarity="light", clear=2, edge=4, to
             if sc[i, j] >= match:
                 pred[r0:r1, c0:c1] |= Lpad[r0 + i:r1 + i, c0 + j:c1 + j]
     g = cand & binary_dilation(pred, iterations=1)
+    ref = None
+    if ink and (lp & lab).sum() > 50:
+        # ink, not shading (V55): a round body's limb darkens (or a highlight brightens) over a band the top-hat takes
+        # for print, and the relight carries it into the output as it should; next to the label's letters near a limb
+        # it passes the moved-print test too. A doubled line is the generator's ink, as deep as the label's own: kept
+        # within 2 px of the source's px at least `ink` times the depth of the label's print in this frame (p75)
+        ref = float(np.percentile(d_out[lp & lab], 75))
+        g &= binary_dilation(d_src >= ink * ref, iterations=2)
     lb, n = ndi.label(g, np.ones((3, 3)))
     if n:
         sz = ndi.sum(g, lb, range(1, n + 1))
@@ -478,6 +490,7 @@ def doubled(art, out_u8, src_u8, matte, H, polarity="light", clear=2, edge=4, to
                          "inside": int(((vg > v0 + ends) & (vg < v1 - ends)).sum())})
     if keep:
         r["mask"] = (roi, g)
+        r["ink_ref"] = ref
     return r
 
 
