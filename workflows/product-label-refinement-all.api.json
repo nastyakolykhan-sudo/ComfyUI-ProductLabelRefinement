@@ -773,7 +773,7 @@
     },
     "class_type": "ImagePostGradeToScene",
     "_meta": {
-      "title": "Grade To Scene (paper, dark ink)"
+      "title": "Grade To Scene (paper graph)"
     }
   },
   "32": {
@@ -809,7 +809,7 @@
     },
     "class_type": "ImagePostMatchFinish",
     "_meta": {
-      "title": "Match Finish (paper, dark ink)"
+      "title": "Match Finish (paper graph)"
     }
   },
   "33": {
@@ -829,7 +829,7 @@
     },
     "class_type": "ProductLabelSwitch",
     "_meta": {
-      "title": "Old silhouette: the product mask (light ink), else the job's"
+      "title": "Old silhouette: the product mask (print on the body), else the job's"
     }
   },
   "34": {
@@ -881,7 +881,7 @@
     },
     "class_type": "ProductLabelSwitch",
     "_meta": {
-      "title": "Product layer: the warped print (light ink), else graded"
+      "title": "Product layer: the warped print (print on the body), else graded"
     }
   },
   "36": {
@@ -901,7 +901,7 @@
     },
     "class_type": "ProductLabelSwitch",
     "_meta": {
-      "title": "Ink: Fill Leftovers' (light), else Grade To Scene's"
+      "title": "Ink: Fill Leftovers' (print on the body), else Grade To Scene's"
     }
   },
   "37": {
@@ -957,7 +957,7 @@
     },
     "class_type": "ProductLabelSwitch",
     "_meta": {
-      "title": "Grade report (paper, dark ink)"
+      "title": "Grade report (paper graph)"
     }
   },
   "39": {
@@ -973,7 +973,7 @@
     },
     "class_type": "ProductLabelSwitch",
     "_meta": {
-      "title": "Finish report (paper, dark ink)"
+      "title": "Finish report (paper graph)"
     }
   },
   "40": {
@@ -1275,7 +1275,7 @@
     },
     "class_type": "ProductLabelRunIf",
     "_meta": {
-      "title": "Garbled print removed: light ink only"
+      "title": "Garbled print removed: print on the body only"
     }
   },
   "56": {

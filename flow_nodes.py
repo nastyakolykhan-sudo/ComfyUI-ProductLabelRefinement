@@ -6,7 +6,7 @@ image or a clip, optional files, and the switches that run only the branch a job
   stills branch makes it). `given` says whether it was set.
 - Switch passes one of two lazy inputs on, so the other branch never runs. Run If passes its input on or blocks
   everything downstream of it, output nodes included (a still never reaches the video nodes).
-- Print Type reads the job: light ink (print on the body) or paper / dark ink, the two stills graphs.
+- Print Type reads the job: print on the body (ink light or dark) or paper, the two stills graphs.
 - Pick Frame takes the keyframe's frame (and mask) out of the clip; Shot takes the keyframe frame's shot out of an
   edit (between the hard cuts round it), so SAM 3 and Refine work on that shot only, and Splice puts the refined shot
   back, so the output is the whole clip with only that shot changed; Paste-Back Mask is where a run changed pixels, so
@@ -211,13 +211,15 @@ class ProductLabelPrintType:
     RETURN_NAMES = ("light", "print")
     FUNCTION = "route"
     CATEGORY = CATEGORY
-    DESCRIPTION = ("light: the job lays light print straight on the body (matte ink, polarity light: Auto Draft's ink "
-                   "light). Its graph skips Grade To Scene and Match Finish and keeps the print inside the product's "
-                   "mask. Otherwise paper or dark ink, the graded composite.")
+    DESCRIPTION = ("light (the output's first name; true for both polarities): the job lays print straight on the "
+                   "body, lighter or darker than it (matte ink with polarity light or dark: Auto Draft's ink light or "
+                   "dark). Its graph skips Grade To Scene and Match Finish and keeps the print inside the product's "
+                   "mask. Otherwise paper (a label, or print on paper or a flat panel), the graded composite.")
 
     def route(self, job):
-        light = bool(_stages().ik.light(job.get("matte")))
-        return (light, "light ink on the body" if light else "paper or dark ink")
+        m = job.get("matte")
+        on_body = bool(_stages().ik.on_body(m))
+        return (on_body, f"{m.get('polarity', 'light')} print on the body" if on_body else "paper")
 
 
 class ProductLabelPickFrame:

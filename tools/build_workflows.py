@@ -6,8 +6,8 @@
 Writes workflows/product-label-refinement.api.json (what tools/comfy_run.py submits) and workflows/product-label-refinement.json (what the
 ComfyUI editor loads), with the job embedded in Load Job; and workflows/product-label-refinement-draft.{api.json,json}, the same
 graph started by Auto Draft from the demo's rough input instead; and workflows/product-label-refinement-ink.{api.json,json}
-and -ink-draft.{api.json,json}, the light-ink graph (print straight on a coloured body, matte ink with polarity
-light): a keyframe from a frame, its product mask and the packshot, with the ink demo's measured job in Load Job, or
+and -ink-draft.{api.json,json}, the ink graph (print straight on a coloured body, matte ink with polarity light or
+dark): a keyframe from a frame, its product mask and the packshot, with the ink demo's measured job in Load Job, or
 started by Auto Draft from the frame, the mask and the packshot alone; and workflows/product-label-refinement-all.
 {api.json,json}, the one workflow for every case (an image or a clip; flow_nodes.py switches the branches), with
 ComfyUI's core and SAM 3 nodes and Crop & Rotate (ComfyUI-MaskAspectCrop) as the frontend 1.55 stores them. Each UI
@@ -98,8 +98,8 @@ def definition_draft():
 
 
 def definition_ink(job_text):
-    """The light-ink graph (matte ink, polarity light; imgpost/ink.py): the packshot's print laid on the frame's own
-    body. The product mask (SAM 3) is the matte the print stays inside: it goes into Fill Leftovers' old_silhouette.
+    """The ink graph (matte ink on the body, polarity light or dark; imgpost/ink.py): the packshot's print laid on the
+    frame's own body. The product mask (SAM 3) is the matte the print stays inside: it goes into Fill Leftovers' old_silhouette.
     No Grade or Finish: the body stays the frame's, the ink takes the frame's own print colour (Fill Leftovers' ink)."""
     out = "product-label-refinement/inkdemo_frame_keyframe"
     return {
@@ -139,7 +139,7 @@ INK_DRAFT_INPUT = {"print_box": "176,396,432,924", "bow": "-140 130/matte"}
 
 
 def definition_ink_draft():
-    """The light-ink graph started by Auto Draft from the frame, its product mask and the packshot alone (node 3)."""
+    """The ink graph started by Auto Draft from the frame, its product mask and the packshot alone (node 3)."""
     nodes = definition_ink("")
     nodes[3] = ("ImagePostAutoDraft", "Auto Draft", {
         "scene": L(1, 0), "reference": L(2, 0), "quad": "", "model": "affine", "light": "off", "suggest": False,
@@ -154,7 +154,8 @@ def definition_ink_draft():
 def definition_all():
     """One workflow for every case (the graph above, the ink graph and Refine (Video)), started by Auto Draft or a
     given job, on an image or a clip. Switches (lazy) and Run If gates (an ExecutionBlocker) run only the branch a
-    case needs: an image never reaches the video nodes; a light-ink job never runs Grade To Scene or Match Finish; a
+    case needs: an image never reaches the video nodes; a job with print on the body (ink light or dark) never runs
+    Grade To Scene or Match Finish; a
     given keyframe skips the stills branch; a given job skips Auto Draft; a given mask skips SAM 3. It is set up as
     the ink demo (examples/ink_demo) with SAM 3 on: set the product mask to inkdemo_mask.png to run it without SAM 3."""
     SW, RUN = "ProductLabelSwitch", "ProductLabelRunIf"
@@ -249,27 +250,27 @@ def definition_all():
         29: ("ImagePostFitWarp", "Fit Warp", {"job": job}, (1500, 0)),
         30: ("ImagePostWarpReference", "Warp Reference", {"job": job, "homography": L(29, 0), "scene": L(21, 0),
                                                           "reference": L(2, 0), "reference_mask": L(83, 0)}, (1500, 400)),
-        31: ("ImagePostGradeToScene", "Grade To Scene (paper, dark ink)", {
+        31: ("ImagePostGradeToScene", "Grade To Scene (paper graph)", {
             "job": job, "scene": L(21, 0), "warped": L(30, 0), "product_mask": L(30, 1), "old_silhouette": L(28, 0),
             "occluder_mask": L(28, 1), "colour": "job", "shading": "job", "reference": L(2, 0), "coords": L(30, 3),
             "relight": "job"}, (1500, 700)),
-        32: ("ImagePostMatchFinish", "Match Finish (paper, dark ink)", {
+        32: ("ImagePostMatchFinish", "Match Finish (paper graph)", {
             "job": job, "scene": L(21, 0), "graded": L(31, 0), "product_mask": L(30, 1), "old_silhouette": L(28, 0),
             "occluder_mask": L(28, 1), "coords": L(30, 3)}, (1500, 1080)),
-        33: (SW, "Old silhouette: the product mask (light ink), else the job's", {
+        33: (SW, "Old silhouette: the product mask (print on the body), else the job's", {
             "when": light, "if_true": L(21, 1), "if_false": L(28, 0)}, (1980, 0)),
         34: ("ImagePostFillLeftovers", "Fill Leftovers", {
             "job": job, "scene": L(21, 0), "product_mask": L(30, 1), "old_silhouette": L(33, 0),
             "occluder_mask": L(28, 1), "coords": L(30, 3)}, (1980, 140)),
-        35: (SW, "Product layer: the warped print (light ink), else graded", {
+        35: (SW, "Product layer: the warped print (print on the body), else graded", {
             "when": light, "if_true": L(30, 0), "if_false": L(32, 0)}, (1980, 420)),
-        36: (SW, "Ink: Fill Leftovers' (light), else Grade To Scene's", {
+        36: (SW, "Ink: Fill Leftovers' (print on the body), else Grade To Scene's", {
             "when": light, "if_true": L(34, 3), "if_false": L(31, 4)}, (1980, 560)),
         37: ("ImagePostCompositeBehind", "Composite Behind", {
             "job": job, "scene": L(21, 0), "background": L(34, 0), "product": L(35, 0), "product_mask": L(30, 1),
             "occluder_mask": L(28, 1), "ink": L(36, 0), "coords": L(30, 3)}, (1980, 700)),
-        38: (SW, "Grade report (paper, dark ink)", {"when": light, "if_false": L(31, 2)}, (1980, 1000)),
-        39: (SW, "Finish report (paper, dark ink)", {"when": light, "if_false": L(32, 1)}, (1980, 1140)),
+        38: (SW, "Grade report (paper graph)", {"when": light, "if_false": L(31, 2)}, (1980, 1000)),
+        39: (SW, "Finish report (paper graph)", {"when": light, "if_false": L(32, 1)}, (1980, 1140)),
         40: ("ImagePostQASheet", "QA Sheet (its text: report.json)", {
             "job": job, "before": L(21, 0), "after": L(37, 0), "reference": L(2, 0), "matte": L(37, 1),
             "fill_mask": L(34, 1), "reference_mask": L(83, 0), "align_report": L(29, 1), "grade_report": L(38, 0),
@@ -294,7 +295,7 @@ def definition_all():
         52: ("SaveImage", "Save QA grade_preview", {"images": L(51, 0), "filename_prefix": qa + "grade_preview"}, (3420, 860)),
         53: (RUN, "Relight map: paper only", {"value": L(31, 3), "when": light, "run_when": "false"}, (3420, 1220)),
         54: ("SaveImage", "Save QA relight_map", {"images": L(53, 0), "filename_prefix": qa + "relight_map"}, (3420, 1360)),
-        55: (RUN, "Garbled print removed: light ink only", {"value": L(34, 0), "when": light, "run_when": "true"},
+        55: (RUN, "Garbled print removed: print on the body only", {"value": L(34, 0), "when": light, "run_when": "true"},
              (3900, 0)),
         56: ("SaveImage", "Save QA garbled print removed", {"images": L(55, 0), "filename_prefix": qa + "print_removed"},
              (3900, 140)),
@@ -380,7 +381,9 @@ ALL_NOTES = {
         "Refine settings JSON and product copy (clips).\n"
         "SAM 3 prompt: the product, e.g. 'pump bottle'.\n"
         "Straighten: Crop & Rotate's frame and rotation (all 0: off).\n"
-        "Print type: Auto Draft's ink (off: paper or dark ink; light: print on the body).\n\n"
+        "Print type: Auto Draft's ink (off: a paper label, or print on paper or a flat panel; light or dark: print "
+        "straight on a round body, lighter or darker than it, with no paper; dark also snaps the print onto the "
+        "generated print).\n\n"
         "Outputs: the refined image (a clip: the refined keyframe), QA sheets and report.json (QA Sheet's text); "
         "for a clip, the lossless master (.mov), the mp4 review copy, the QA plot and the Refine report.\n\n"
         "Only the needed branch runs: Switch and Run If nodes skip the rest.")),
@@ -394,7 +397,7 @@ ALL_GROUPS = [
      [81, 82, 83, 70, 71, 76, 77, 72, 73, 85, 74], "#2a7"),
     ("Stills: the image, or the clip's keyframe frame (Auto Draft, or the given job)",
      [20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32], "#b58b2a"),
-    ("Paper or light ink, composite and QA", [33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43], "#a1309b"),
+    ("Paper or print on the body, composite and QA", [33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43], "#a1309b"),
     ("Stills outputs", [44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58], "#444"),
     ("Video: Refine (Video) through the shot, spliced back into the clip (clips only)",
      [60, 61, 62, 75, 63, 64, 65, 66, 67, 78, 79, 80], "#335"),

@@ -1,19 +1,19 @@
 {
   "skill": "~/Documents/Claude/product-label-refinement",
-  "imgpost_version": "0.11.0",
-  "synced": "2026-10-16",
+  "imgpost_version": "0.12.0",
+  "synced": "2026-10-18",
   "files": {
-    "__init__.py": "a19b83ecf5fafa96061ab9fced1dbd76a4e883750f689b8e918ec2761c23ffc4",
+    "__init__.py": "bc6550c0f2b2517167cc5760a1276111a700fc586e414c130f1fce5ab52e5b40",
     "audit.py": "2f582ca12605addb74cb0b0d880a880764d79152a8d9efd2f9e525d5286189ff",
     "autofit.py": "92c60d7045eee4be40853a4c35777e739b814044585b7ca343b724c0fdf168e9",
-    "bow.py": "465535d85716b0b9fdff36f5a4756637963890f2865f6131bbb1dfa48ea521e5",
-    "draft.py": "bfbb71d19ef4477e19cf50b4bf1f269547648230de465c01bca1a4c9b16c1f2b",
+    "bow.py": "c0893f3639b60b0160be6d1a1c68c7d395c780c2cb615b348a44cca24e0c1c63",
+    "draft.py": "a8e7828ccad0c6462cea0567aab998872f11db78b73cc85a2a4346a4085e0306",
     "fill.py": "4267aca68ce18703a25e1bbdd32670de80bcafd5701b2cd7577f46c93722a4af",
     "finish.py": "ddf6fecf4a3246bf1d931fdcb24ae95a8067230523e72a3ac5ba6399848101f0",
     "geometry.py": "2cc8d23c3d2e140d3ec0dab72b72bd0ef1d046cc73ecbe9fc4dd65f405a273b9",
     "grade.py": "fe0c9d16dbc4c9df56f1cd8e69a88e37f5f87cd976089370a0fcd1e21f728d2b",
     "images.py": "7d2e9e6f77b4f70c555bcf35412a11caa7705afbffff83e8636dbac0604d7e3d",
-    "ink.py": "9cafc24ce38b53f00d76eeedb6b064865b4bad63f897c8d314e5c37a232e1ee1",
+    "ink.py": "4356f7746da7d876cef337edb5b85f639e31af2969c32248939c728189a15bd5",
     "masks.py": "2f46b382f3b6f0654d603557ed3b2b39f130f7dd825ccacbe0bb725e464b91a9",
     "outline.py": "134de36ca4749f6d58a5d177f2e97f90c6c84400edf6fc30cbd2992d252ad60f",
     "psd.py": "132fdcb5dd9ef88004cdb29c78a5bd67621f395c53b39e47fc8f5b1a0a13f868",
@@ -21,10 +21,10 @@
     "raster.py": "f9dc02da8f3121a741ce1ae906e1f0cea5c65b41c1b963edf032da9742816fd4",
     "warp.py": "b7a19675703d2464867e8c6b7dbd6cb5b3cbbde062aac71403418efec9d6a45e"
   },
-  "run_py": "8af3f49657b8bc3588b1abbdc746a2c8c9f9cac48af27d66a6e01f4ff991f03a",
+  "run_py": "a0c00400b57cc004329b2b0d98f360c977f9b07e9b9243b97ed02e9d0edfeb0b",
   "video_engine": {
     "synced": "2026-10-18",
-    "imgpost_version": "0.11.0",
+    "imgpost_version": "0.12.0",
     "packages": {
       "imgvideo": {
         "version": "0.5.0",

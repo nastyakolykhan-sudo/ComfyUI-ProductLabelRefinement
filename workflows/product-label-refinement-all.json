@@ -1737,7 +1737,7 @@
      "slot_index": 4
     }
    ],
-   "title": "Grade To Scene (paper, dark ink)",
+   "title": "Grade To Scene (paper graph)",
    "properties": {
     "Node name for S&R": "ImagePostGradeToScene"
    },
@@ -1817,7 +1817,7 @@
      "slot_index": 1
     }
    ],
-   "title": "Match Finish (paper, dark ink)",
+   "title": "Match Finish (paper graph)",
    "properties": {
     "Node name for S&R": "ImagePostMatchFinish"
    },
@@ -1865,7 +1865,7 @@
      "slot_index": 0
     }
    ],
-   "title": "Old silhouette: the product mask (light ink), else the job's",
+   "title": "Old silhouette: the product mask (print on the body), else the job's",
    "properties": {
     "Node name for S&R": "ProductLabelSwitch"
    },
@@ -2002,7 +2002,7 @@
      "slot_index": 0
     }
    ],
-   "title": "Product layer: the warped print (light ink), else graded",
+   "title": "Product layer: the warped print (print on the body), else graded",
    "properties": {
     "Node name for S&R": "ProductLabelSwitch"
    },
@@ -2049,7 +2049,7 @@
      "slot_index": 0
     }
    ],
-   "title": "Ink: Fill Leftovers' (light), else Grade To Scene's",
+   "title": "Ink: Fill Leftovers' (print on the body), else Grade To Scene's",
    "properties": {
     "Node name for S&R": "ProductLabelSwitch"
    },
@@ -2181,7 +2181,7 @@
      "slot_index": 0
     }
    ],
-   "title": "Grade report (paper, dark ink)",
+   "title": "Grade report (paper graph)",
    "properties": {
     "Node name for S&R": "ProductLabelSwitch"
    },
@@ -2228,7 +2228,7 @@
      "slot_index": 0
     }
    ],
-   "title": "Finish report (paper, dark ink)",
+   "title": "Finish report (paper graph)",
    "properties": {
     "Node name for S&R": "ProductLabelSwitch"
    },
@@ -2924,7 +2924,7 @@
      "slot_index": 0
     }
    ],
-   "title": "Garbled print removed: light ink only",
+   "title": "Garbled print removed: print on the body only",
    "properties": {
     "Node name for S&R": "ProductLabelRunIf"
    },
@@ -4372,7 +4372,7 @@
    "title": "What to set",
    "properties": {},
    "widgets_values": [
-    "ONE WORKFLOW FOR EVERY CASE\n\nSource: an image or a clip (Load Source). An image runs the stills branch only; a clip runs SAM 3 through the keyframe frame's shot, the stills branch on the keyframe frame, then Refine (Video) on that shot, spliced back into the clip. An edit with several shots: the Shot node finds the cuts round the keyframe frame (or set its start and end); run each product's shot, then the next product on the output.\n\nPackshot: the real product photo.\nProduct mask: (none) = SAM 3 with the prompt; or a mask file (white = product; a clip: one per frame).\nCorrected keyframe (clips): (none) = the stills branch makes it; or a frame fixed elsewhere.\nFix this product: false = the product looks fine on the triage sheet: only SAM 3 on the keyframe frame and the sheet run.\nJob JSON: empty = Auto Draft from its inputs; or a measured job.\nKeyframe frame (clips): the frame the stills branch fixes, from 0.\nRefine settings JSON and product copy (clips).\nSAM 3 prompt: the product, e.g. 'pump bottle'.\nStraighten: Crop & Rotate's frame and rotation (all 0: off).\nPrint type: Auto Draft's ink (off: paper or dark ink; light: print on the body).\n\nOutputs: the refined image (a clip: the refined keyframe), QA sheets and report.json (QA Sheet's text); for a clip, the lossless master (.mov), the mp4 review copy, the QA plot and the Refine report.\n\nOnly the needed branch runs: Switch and Run If nodes skip the rest."
+    "ONE WORKFLOW FOR EVERY CASE\n\nSource: an image or a clip (Load Source). An image runs the stills branch only; a clip runs SAM 3 through the keyframe frame's shot, the stills branch on the keyframe frame, then Refine (Video) on that shot, spliced back into the clip. An edit with several shots: the Shot node finds the cuts round the keyframe frame (or set its start and end); run each product's shot, then the next product on the output.\n\nPackshot: the real product photo.\nProduct mask: (none) = SAM 3 with the prompt; or a mask file (white = product; a clip: one per frame).\nCorrected keyframe (clips): (none) = the stills branch makes it; or a frame fixed elsewhere.\nFix this product: false = the product looks fine on the triage sheet: only SAM 3 on the keyframe frame and the sheet run.\nJob JSON: empty = Auto Draft from its inputs; or a measured job.\nKeyframe frame (clips): the frame the stills branch fixes, from 0.\nRefine settings JSON and product copy (clips).\nSAM 3 prompt: the product, e.g. 'pump bottle'.\nStraighten: Crop & Rotate's frame and rotation (all 0: off).\nPrint type: Auto Draft's ink (off: a paper label, or print on paper or a flat panel; light or dark: print straight on a round body, lighter or darker than it, with no paper; dark also snaps the print onto the generated print).\n\nOutputs: the refined image (a clip: the refined keyframe), QA sheets and report.json (QA Sheet's text); for a clip, the lossless master (.mov), the mp4 review copy, the QA plot and the Refine report.\n\nOnly the needed branch runs: Switch and Run If nodes skip the rest."
    ],
    "color": "#432",
    "bgcolor": "#653"
@@ -6051,7 +6051,7 @@
   },
   {
    "id": 5,
-   "title": "Paper or light ink, composite and QA",
+   "title": "Paper or print on the body, composite and QA",
    "bounding": [
     2824,
     -80,

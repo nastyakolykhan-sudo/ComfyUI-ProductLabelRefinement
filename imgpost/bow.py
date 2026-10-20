@@ -12,12 +12,32 @@ from . import images as im
 
 
 def body_axis(mask):
-    """Centre and unit axis (pointing down the image) of a matte, and its normal (as imgvideo's product_axis)."""
+    """Centre and unit axis (pointing down the image) of a matte, and its normal. The principal axis decides whether
+    the body stands or lies (a near-round matte, eigenvalues within 1.5x, stands); the axis is then the midline of
+    the matte's two sides: the midpoints of its extent across, row by row (column by column lying) over the middle
+    70 % of its length, fitted as a line. A body about as wide as it is tall has no clear principal axis: a jar seen
+    from above came out 1.07 deg off it, and its print ran skewed against the lid (its sides' midline: -0.1 deg)."""
     ys, xs = np.nonzero(mask)
     P = np.c_[xs, ys].astype(float)
     c = P.mean(0)
-    ax = np.linalg.svd(P - c, full_matrices=False)[2][0]
-    ax = ax * (np.sign(ax[1]) or 1.0)
+    _, sv, vt = np.linalg.svd(P - c, full_matrices=False)
+    ax = vt[0] * (np.sign(vt[0][1]) or 1.0)
+    upright = abs(ax[1]) >= abs(ax[0]) or sv[0] < 1.5 * sv[1]
+    along, across = (ys, xs) if upright else (xs, ys)
+    lo, hi = np.percentile(along, [15, 85])
+    keys = np.arange(int(np.ceil(lo)), int(hi) + 1)
+    if len(keys) >= 10:
+        order = np.argsort(along, kind="stable")
+        a_s, x_s = along[order], across[order]
+        i0, i1 = np.searchsorted(a_s, keys, "left"), np.searchsorted(a_s, keys, "right")
+        ok = i1 > i0
+        mid = np.array([(x_s[a:b].min() + x_s[a:b].max()) / 2.0 for a, b in zip(i0[ok], i1[ok])])
+        k1, k0 = np.polyfit(keys[ok].astype(float), mid, 1)
+        d = np.array([k1, 1.0]) if upright else np.array([1.0, k1])
+        ax = d / np.linalg.norm(d)
+        ax = ax * (np.sign(ax[1]) or 1.0)
+        ca = c[1] if upright else c[0]
+        c = np.array([k0 + k1 * ca, ca]) if upright else np.array([ca, k0 + k1 * ca])
     return c, ax, np.array([ax[1], -ax[0]])
 
 
@@ -109,6 +129,32 @@ def parse(text):
     return {"b": sorted(seams)} if given else {"b": "auto", "seams": seams}
 
 
+def matte_ends(mask):
+    """The bow of a round body seen from above or below, from its matte's own two ends (SAM 3's outline is cleaner
+    than any seam inside the body): the top end's outline is the far side of the top face and the base's the near
+    side of the base, both arcs of the same view, so the bow is the base's, at both ends with its sign (+: seen from
+    above). A jar's measured 49 px at its top and 53 at its base, its lid seam about 66: a print registered without
+    them bowed 108 to 120 and ran skewed. -> ([[t_top, b], [t_base, b]], report) or (None, report) when an end
+    can't be read"""
+    c, ax, n = body_axis(mask)
+    hw = np.asarray(half_widths(mask, c, ax, n), float)
+    if len(hw) < 4:
+        return None, {"why": "the matte is too small"}
+    t_top, t_base = float(hw[0, 0]), float(hw[-1, 0])
+    out, rep = [], {}
+    for name, t0 in (("top", t_top + 5.0), ("base", t_base - 5.0)):
+        w = float(np.interp(t0 + (30.0 if name == "top" else -30.0), hw[:, 0], hw[:, 1]))
+        s, t = contour(mask, t0, c, ax, n, w)
+        if len(s) < 6:
+            return None, {"why": f"the matte's {name} end has too few columns"}
+        _, b, info = fit_seam(s, t, w)
+        out.append([t0, b])
+        rep[name] = dict(info, t=round(t0, 1), b=round(b, 2), half_width=round(w, 1))
+    sgn = np.sign(out[1][1]) or 1.0
+    prof = [[out[0][0], round(sgn * abs(out[0][1]), 2)], [out[1][0], round(sgn * abs(out[1][1]), 2)]]
+    return prof, rep
+
+
 def contour(mask, t0, c, ax, n, w, reach=0.85, depth=30.0):
     """The matte's own end near t0 (a base or a top seen against the background): per column across the body, the
     matte's last pixel along the axis past t0 - depth (first pixel before t0 + depth for t0 < 0). -> (s, t)"""
@@ -135,7 +181,7 @@ def resolve(bow, img_u8=None, mask=None):
     shoulder (collar w 45) and 16 at its base against the hand's 10 and 15, and 7.7 at a tube's cap seam against 10:
     a start, checked by eye.
     -> (bow with numbers only, report)"""
-    out = {k: v for k, v in bow.items() if k not in ("mask", "seams")}
+    out = {k: v for k, v in bow.items() if k not in ("mask", "seams")}      # "from" ("matte") stays
     rep = {}
     need = [k for k in ("centre", "axis", "half_widths") if out.get(k) is None]
     if need or out.get("b") == "auto":

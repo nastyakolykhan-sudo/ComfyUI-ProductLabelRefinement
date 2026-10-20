@@ -50,7 +50,7 @@ def draft(scene_u8, ref_u8, ref_a, quad=None, pairs=(), occluders=(), mask=None,
     """run.py draft without its files -> (job without the scene, reference and output paths; the lines run.py prints:
     the draft's summary and the align table; review sheet PIL image or None). run.py then runs the align stage,
     which Fit Warp and Warp Reference do here. label "cylinder" / "flat": run.py draft --label (the label only).
-    ink "light", print_box, bow: run.py draft --ink light --print-box --bow (print straight on a coloured body). The
+    ink "light" / "dark", print_box, bow: run.py draft --ink --print-box --bow (print straight on a coloured body). The
     job's old_silhouette stays the draft's: here the product mask goes into Fill Leftovers' old_silhouette instead
     (run.py draft writes the mask's file there)."""
     try:
@@ -147,16 +147,17 @@ def warp(job, H, refmask, scene_u8, ref_u8, roi):
         P = np.asarray(refmask.polygon, float) if refmask.polygon else np.array(refmask.bbox(ref_u8.shape)).reshape(2, 2)
         pre = 0.6 if af.local_scale(H, P.mean(0)) < 1.0 else 0.0
     W_lin, a_new, (U, V) = wp.warp(ref_lin, H, roi, refmask, ss=job.get("supersample", 4), prefilter=pre)
-    if ik.light(job.get("matte")):
-        # light print on the body (run.py's _run_light, step 1): the packshot's print as coverage, warped
+    if ik.on_body(job.get("matte")):
+        # print on the body (run.py's _run_on_body, step 1): the packshot's print as coverage, warped; dark print also
+        # registered onto the frame's own print and sharpened to it (ink.prepare)
         cfg = ik.config(job["matte"])
+        bow = job["align"].get("bow") or {}
         try:
-            cov_r, band, crep = ik.ref_cover(ref_u8, refmask, cfg)
+            info["ink"] = ik.prepare(ref_u8, refmask, cfg, H, roi, scene_u8[y0:y1, x0:x1], ss=job.get("supersample", 4),
+                                     prefilter=pre, body={k: bow[k] for k in ("centre", "axis", "half_widths")}
+                                     if bow.get("half_widths") else None, bow_auto=bow.get("from") == "matte")
         except ik.InkError as e:
             raise StageError(str(e)) from e
-        cov, in_band = ik.warp_cover(cov_r, band, H, roi, ss=job.get("supersample", 4), prefilter=pre,
-                                     blur=float(cfg["blur"]))
-        info["ink"] = {"cover": cov, "band": in_band, "report": crep}
     a_body = None
     if job["reference_outline"].get("body"):
         # parts of the outline where the real product shows its own body (a tube's grey between two labels): not
@@ -273,9 +274,9 @@ def ink_mode(matte):
 
 
 def light_matte_only(node):
-    raise StageError(f"the job's matte is ink with polarity light: {node} isn't used. The light-ink graph is Fit Warp -> "
-                     "Warp Reference -> Fill Leftovers (old_silhouette: the product's mask) -> Composite Behind (ink: "
-                     "Fill Leftovers' ink); workflows/product-label-refinement-ink*.json")
+    raise StageError(f"the job's matte is ink on the body (polarity light or dark): {node} isn't used. The ink graph is "
+                     "Fit Warp -> Warp Reference -> Fill Leftovers (old_silhouette: the product's mask) -> Composite "
+                     "Behind (ink: Fill Leftovers' ink); workflows/product-label-refinement-ink*.json")
 
 
 def grade(gs, scene_u8, ref_u8, roi, W_lin, a_new, old, vis, U=None, matte=None, body=None):
@@ -283,7 +284,7 @@ def grade(gs, scene_u8, ref_u8, roi, W_lin, a_new, old, vis, U=None, matte=None,
     ref_u8 is only read for grade.ref_white_box, U (reference x per work-box pixel) only for grade.shading.
     grade.relight's `debug` (run.py saves the relight inputs to work/) is ignored here. With the job's matte 'ink',
     `ink` carries what run.py's composite reads: the white field (linear) and the ink's colour (linear)."""
-    if ik.light(matte):
+    if ik.on_body(matte):
         light_matte_only("Grade To Scene")
     x0, y0, x1, y1 = roi
     crop = im.to_float(scene_u8[y0:y1, x0:x1])
@@ -502,36 +503,44 @@ def fill(fls, scene_u8, roi, a_new, old, vis, matte=None, shape=None, body=None)
 
 
 def light_fill(job, scene_u8, roi, old, vis, ink_cover):
-    """run.py's _run_light, the garbled print: the frame's own print removed from its body -> (filled linear rgb,
+    """run.py's _run_on_body, the garbled print: the frame's own print removed from its body -> (filled linear rgb,
     fill mask, report (run.py's report.json "matte"), ink for light_composite). old: the product's matte (bool, work
-    box); ink_cover: Warp Reference's coords["ink"]."""
+    box); ink_cover: Warp Reference's coords["ink"] (ink.prepare's). Light or dark print (the names are the light
+    route's, which came first)."""
+    cfg = ik.config(job["matte"])
+    pol = cfg["polarity"]
     if ink_cover is None:
-        raise StageError("the job's matte is ink with polarity light: connect Warp Reference's coords to Fill Leftovers")
+        raise StageError(f"the job's matte is ink with polarity {pol}: connect Warp Reference's coords to Fill Leftovers")
     if not old.any():
-        raise StageError("matte ink (light): old_silhouette is empty: connect the product's mask (SAM 3, Load Image "
+        raise StageError(f"matte ink ({pol}): old_silhouette is empty: connect the product's mask (SAM 3, Load Image "
                          "(as Mask)) to Fill Leftovers' old_silhouette")
     x0, y0, x1, y1 = roi
     try:
-        filled, info, frep = ik.garbled(scene_u8[y0:y1, x0:x1], old, ink_cover["cover"], ink_cover["band"],
-                                        ik.config(job["matte"]), vis)
+        filled, info, frep = ik.garbled(scene_u8[y0:y1, x0:x1], old, ink_cover["cover"], ink_cover["band"], cfg, vis,
+                                        ink_cover.get("box"), ink_cover.get("inks"))
     except ik.InkError as e:
         raise StageError(str(e)) from e
     info["cover"] = ink_cover["cover"]
-    return filled, info["fill"], dict({"type": "ink", "polarity": "light"}, **ink_cover["report"], **frep), info
+    # run.py's last audit finding: a packshot too small for the frame (QA Sheet appends it)
+    info["soft"] = ik.soft_check(ink_cover["report"], ink_cover["cover"], ink_cover.get("ref_sum", 0.0), info["alpha"],
+                                 (x0, y0))
+    return filled, info["fill"], dict({"type": "ink", "polarity": pol}, **ink_cover["report"], **frep), info
 
 
 def light_composite(scene_u8, roi, filled, ink):
-    """run.py's _run_light, the composite -> (work box uint8, alpha)"""
-    if not (isinstance(ink, dict) and ink.get("polarity") == "light"):
-        raise StageError("the job's matte is ink with polarity light: connect Fill Leftovers' ink to Composite Behind")
+    """run.py's _run_on_body, the composite -> (work box uint8, alpha)"""
+    if not (isinstance(ink, dict) and ink.get("polarity") in ik.POLARITIES):
+        raise StageError("the job's matte is ink on the body: connect Fill Leftovers' ink to Composite Behind")
     x0, y0, x1, y1 = roi
     return ik.composite(filled, scene_u8[y0:y1, x0:x1], ink)
 
 
 def light_check(job, res, scene_u8, ink, roi):
-    """run.py's _run_light checks beyond the audit: where the keyframe changed pixels away from print"""
+    """run.py's _run_on_body checks beyond the audit: where the keyframe changed pixels away from print, a packshot
+    too small for the frame, and for dark print its top line's level and its edges (ink.dark_checks)"""
     x0, y0, x1, y1 = roi
-    return ik.check(scene_u8[y0:y1, x0:x1], res[y0:y1, x0:x1], ink, ink["cover"], ik.config(job["matte"]), (x0, y0))
+    return ik.check(scene_u8[y0:y1, x0:x1], res[y0:y1, x0:x1], ink, ink["cover"], ik.config(job["matte"]), (x0, y0)) + \
+        list(ink.get("soft") or []) + ik.dark_checks(scene_u8[y0:y1, x0:x1], res[y0:y1, x0:x1], ink, (x0, y0))
 
 
 # 5. composite behind the occluders

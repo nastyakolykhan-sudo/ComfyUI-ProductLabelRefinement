@@ -6,11 +6,11 @@ It is deterministic compositing with no models. Every measurement lives in a job
 
 A job doesn't have to be measured by hand first. **Auto Draft** makes one inside ComfyUI from rough input: the scene, the packshot, where the product roughly sits (four corners or a box), and optionally a product mask from SAM 3. On a clean scene the draft is close to final; on a cluttered shelf it is a scaffold to finish by hand. [Starting from rough input](#starting-from-rough-input-auto-draft) has the scores.
 
-**Print straight on a coloured body.** White print on a frosted bottle or a squeezed tube has no paper to measure it against. The ink templates lay the packshot's print on the frame's own body, in the frame's own print colour, and bow it on a body seen from above or below. They make a keyframe from a frame, its SAM 3 matte and the packshot. See [Print straight on a body](#print-straight-on-a-body-the-ink-templates).
+**Print straight on a coloured body.** White print on a frosted bottle or a squeezed tube, or black print on a pink jar or a white bottle, has no paper to measure it against. The ink templates lay the packshot's print on the frame's own body, in the frame's own print colour, and bow it on a body seen from above or below; dark print is also snapped onto where the generator drew it. They make a keyframe from a frame, its SAM 3 matte and the packshot. See [Print straight on a body](#print-straight-on-a-body-the-ink-templates).
 
 **Video too.** Product Label: Refine (Video) carries a corrected keyframe's label through a whole clip: track the product, fit its surface on every frame, re-project the true label with each frame's light, and change nothing outside the changed pixels. See [Video: the label through a clip](#video-the-label-through-a-clip).
 
-**One workflow for every case.** `workflows/product-label-refinement-all.json` takes an image or a clip and runs only the branch the case needs: a still, a light-ink keyframe, a measured job, or a clip through SAM 3 and Refine (Video). It is the one to deploy; the other templates stay as they are. See [One workflow for every case](#one-workflow-for-every-case).
+**One workflow for every case.** `workflows/product-label-refinement-all.json` takes an image or a clip and runs only the branch the case needs: a still, a keyframe with print on the body (light or dark), a measured job, or a clip through SAM 3 and Refine (Video). It is the one to deploy; the other templates stay as they are. See [One workflow for every case](#one-workflow-for-every-case).
 
 **Renamed from ComfyUI-ImagePost (2026-10-16).** The pack now matches the product-label-refinement skill it ports. GitHub redirects the old URL, so existing clones keep pulling. The node IDs (`ImagePostLoadJob`, `ImagePostAutoDraft`, ...) are unchanged, so saved workflows still load; only the display names ("Product Label: ..."), the menu category, the template file names and the default output folder (`output/product-label-refinement/`) changed. To rename an existing clone's remote: `git remote set-url origin https://github.com/nastyakolykhan-sudo/ComfyUI-ProductLabelRefinement`.
 
@@ -49,12 +49,12 @@ There is one node per step. The math is the product-label-refinement engine's (`
 | **Auto Draft** | scene, reference, `quad`, `model`, `light`, `suggest`, `filename_prefix`, `product_mask`?, `reference_mask`?, `pairs`, `occluders`, `outline`, `mask_skip`, `label`, `ink`, `print_box`, `bow` | `job`, `job_json`, `draft_points`, `report` | a first job from rough input, in place of Load Job; saves it as JSON ([Starting from rough input](#starting-from-rough-input-auto-draft)); `ink`, `print_box` and `bow` for [print straight on a body](#print-straight-on-a-body-the-ink-templates) |
 | **Job Masks** | job, scene | `old_silhouette`, `occluder_mask` | rasterises the generated outline and the foreground objects |
 | **Fit Warp** | job | `homography`, `report` | homography, affine or cylinder fit (labels on bottles), with the optional residual edge correction; shows the residual table |
-| **Warp Reference** | job, homography, scene, reference, `reference_mask`? | `warped`, `product_mask`, `align_overlay`, `coords` | supersampled warp in linear light; warns when the outline takes in the packshot's backdrop (a light rim) or a bottle's measured edge sits past its drop shadow; with `matte` ink light, `coords` also carry the packshot's print as coverage |
+| **Warp Reference** | job, homography, scene, reference, `reference_mask`? | `warped`, `product_mask`, `align_overlay`, `coords` | supersampled warp in linear light; warns when the outline takes in the packshot's backdrop (a light rim) or a bottle's measured edge sits past its drop shadow; with `matte` ink on the body (light or dark), `coords` also carry the packshot's print as coverage (dark print registered onto the frame's own and sharpened to it) |
 | **Grade To Scene** | job, scene, warped, masks, `colour`, `shading`, `reference`?, `coords`?, `relight`? | `graded`, `grade_preview`, `report`, `relight_map`, `ink` | light falloff, colour, the scene's paper field, cylinder shading, relight; `ink` feeds Composite Behind for jobs with `matte: ink` |
 | **Match Finish** | job, scene, graded, masks | `product`, `report` | highlight roll-off, blur and grain match |
-| **Fill Leftovers** | job, scene, masks, `coords`? | `background`, `fill_mask`, `report`, `ink` | harmonic fill; stops with FILL STOPPED. With `shape: generated` it needs Warp Reference's `coords`. With `matte` ink light it removes the frame's garbled print from its body (old_silhouette: the product's mask) and `ink` carries the print's colour to Composite Behind |
-| **Composite Behind** | job, scene, background, product, product_mask, occluder_mask, `ink`?, `coords`? | `image`, `matte` | composite and paste into the scene; with `matte: ink`, only the print goes over the scene's own surface (ink light: Fill Leftovers' `ink`, and `product` isn't read); with `shape: generated`, the generated product's own outline is the matte (needs `coords`) |
-| **QA Sheet** (audit) | ..., `old_silhouette`?, `occluder_mask`?, `coords`?, `ink`? | ..., `audit` | with the masks connected the run audits itself: a missed occluder, a rim of the generated product, a thick fill, print pressed into a bottle's edge, edges off; FAIL blocks delivery. With Fill Leftovers' `ink` (ink light) it also flags pixels changed away from the print (`ink_edges`) |
+| **Fill Leftovers** | job, scene, masks, `coords`? | `background`, `fill_mask`, `report`, `ink` | harmonic fill; stops with FILL STOPPED. With `shape: generated` it needs Warp Reference's `coords`. With `matte` ink on the body it removes the frame's garbled print from its body (old_silhouette: the product's mask) and `ink` carries the print's colour to Composite Behind |
+| **Composite Behind** | job, scene, background, product, product_mask, occluder_mask, `ink`?, `coords`? | `image`, `matte` | composite and paste into the scene; with `matte: ink`, only the print goes over the scene's own surface (ink on the body: Fill Leftovers' `ink`, and `product` isn't read); with `shape: generated`, the generated product's own outline is the matte (needs `coords`) |
+| **QA Sheet** (audit) | ..., `old_silhouette`?, `occluder_mask`?, `coords`?, `ink`? | ..., `audit` | with the masks connected the run audits itself: a missed occluder, a rim of the generated product, a thick fill, print pressed into a bottle's edge, edges off; FAIL blocks delivery. With Fill Leftovers' `ink` (ink on the body) it also flags pixels changed away from the print (`ink_edges`) and a packshot too small for the frame (`packshot`); for dark print, a top line turned against the generated print's (`ink_level`) and cuts along an occluder's edge or a stray line of new ink (`ink_rim`) |
 | **QA Sheet** | job, before, after, reference, matte, fill_mask, reports? | `compare`, `edges`, `before_after`, `report` | QA sheets and `report.json` |
 | **Save PSD** | job, scene, image, background, fill_mask, product, matte, `filename_prefix` | (file) | layered PSD for hand finishing |
 
@@ -164,21 +164,44 @@ What it shows:
 
 ## Print straight on a body (the ink templates)
 
-For print lighter than the body it sits on, with no paper around it: white print on a frosted bottle, a pink tube, a coloured jar. The engine's paper-based ink matte can't lift it (it measures coverage down from the paper's white), and a whole-band composite shows seams and the packshot body's colour. Here the body stays the frame's and only print changes (the engine's `matte: {"type": "ink", "polarity": "light"}`, `imgpost/ink.py`):
+For print straight on a body, with no paper around it. Light print sits on a darker body (white print on a frosted bottle, a pink tube); dark print sits on a lighter one (black print on a pink jar or a white bottle, with its coloured bars and badges). The engine's paper-based ink matte can't lift either: it measures coverage down from the paper's white. A whole-band composite shows seams and the packshot body's colour, and a label fit needs a label's edges. Here the body, its lid and its reflections stay the frame's and only print changes (the engine's `matte: {"type": "ink", "polarity": "light" | "dark"}`, `imgpost/ink.py`):
 
-1. **Warp Reference** reads the packshot's print as coverage above its own body light, inside the job's `reference_outline` (the band of body it maps) and its `print_box`, and warps it.
-2. **Fill Leftovers** finds the frame's garbled print (brighter than its body) near where the true print goes, inset from the product's matte, and fills it from the body around it with the frame's grain. `background` is the frame without its print.
-3. **Composite Behind** lays the true print on in the frame's own print colour (the body times k per channel, k from the garbled print's most-covered pixels), inside the matte and nowhere else.
+1. **Warp Reference** reads the packshot's print as coverage against its own body light (above it for light print, below it for dark), inside the job's `reference_outline` (the band of body it maps) and its `print_box`, and warps it. Dark print is then registered onto the frame's own print: scale, shift, affine and bow, so it sits where the generator drew it. It is also sharpened to the frame's print.
+2. **Fill Leftovers** finds the frame's garbled print (brighter or darker than its body) where the true print goes, inset from the product's matte, and fills it from the body around it with the frame's grain. Dark print's garbled strokes are taken whole, in blocks. `background` is the frame without its print.
+3. **Composite Behind** lays the true print on in the frame's own print colour (the body times k per channel, k from the garbled print's most-covered pixels), inside the matte and nowhere else. A second dark ink (a yellow bar, a badge's disc) keeps its packshot colour, relit by the frame's body.
 
 Grade To Scene and Match Finish aren't used. The product's mask (SAM 3) goes into Fill Leftovers' and QA Sheet's `old_silhouette`: it is the matte the print stays inside.
 
 Two templates:
-- `workflows/product-label-refinement-ink-draft.json`: **Auto Draft** from the frame, its mask and the packshot. `ink` light, `print_box` (the print's box on the packshot, from its first line to its last, inside the frosted rims: without it the packshot's own highlights go on as print) and `bow`.
+- `workflows/product-label-refinement-ink-draft.json`: **Auto Draft** from the frame, its mask and the packshot. Its inputs:
+  - `ink`: light or dark.
+  - `print_box`: the print's box on the packshot, from its first line to its last with a few px to spare, inside the frosted rims, the seams and the lid's edge. Without it the packshot's own highlights and seams go on as print.
+  - `bow`.
 - `workflows/product-label-refinement-ink.json`: the same graph with a measured job in **Load Job** (the ink demo's).
 
 **The bow.** A round body seen from above or below bows every line of print across it, like its seams; a frontal packshot warped flat reads as a printed card. `bow` (the job's `align.bow`) is a profile along the product's axis, t in px from its mask's centre (+ down the image): seen from above, lower parts bow more, and a squeezed tube is flat at its crimp. Write it as `t:b` (given: `-150:0 146:10`), or as seams for Auto Draft to measure across the body: `t` (a level edge), `t/w` (a seam on a narrower ring of half-width w, a collar), `t/matte` (the mask's own end, a base). Empty for a product seen from level.
 
 **How close it gets.** On a real 1080 × 1920 job (a frosted serum bottle and a squeezed lip tube with white print on their bodies, and both printed on a box seen from above), the four keyframes the user approved, made by a job-level script, came out of the engine within 1 level on 1 pixel and out of this pack within 1 level on 1 pixel (the box's two prints with their measured bows included). From a frame, its mask and the packshot alone (the ink-draft template), the tube's print landed within 1 px of the hand-fitted keyframe (median, 2.1 px at worst), and the bottle's 4.9 px off: the hand fit followed the generated print, which the generator drew lower and turned on the body, and Auto Draft fits the packshot to the mask's silhouette. Rough pairs on garbled print are too weak to correct it. Where the print must sit exactly on the generated print, measure its anchors and load the job. Bows measured at the seams came within 1.5 to 2.5 px of the hand values: check the outer print lines at 6x.
+
+**Dark print** (`ink` dark; engine imgpost 0.12.0). A fit to the mask's silhouette can't place print on a round body seen from above. On a pink jar 12 deg from above, its print came out 30 px high and 15 % tall: the mask takes in the lid's top, and the jar's front is foreshortened. So dark print is registered onto the frame's own print: an x and y scale and shift by correlation, then a refinement by Gauss-Newton. The generator draws the layout roughly right. The print stretches only along and across the body's axis, after one fixed turn that sets its rows square to it, so its lines stay parallel to the body's own level edges. A free affine with a fitted bow ran the jar's top rule 1.8 deg against its lid seam; this keeps 0.35 deg, as the generated print's own.
+
+`bow` is optional with `ink` dark. Without it, Auto Draft measures the body's bow from the mask's two ends, and the run keeps that bow only where the print registers better with it: on the jar it did, and on two bottles whose print the generator drew flat it didn't. Warp Reference prints the move (`register`), and Fill Leftovers' report has it under `matte.register`.
+
+Three more steps keep it clean:
+- The packshot's body light is the local mean of its non-print pixels, with the sharpening halos left out (a closing rode on them and washed the box in 13 % grey).
+- Seams and label edges the box takes in at its edge are cleared.
+- The body's own straight lines (a label's edge, a seam, a lid's rim) run on past the print box and are cleared where they enter it.
+- The cover is sharpened to the frame's print (a 1,024 px packshot's 0.95 px edge blur against the generator's 0.62), and a second ink keeps its own flat colour (a white bottle's gold bar, its foil gradient gone).
+- Objects in front (Auto Draft's `occluders`) stay as they are: garbled print isn't looked for within 2 px of one, and the fill never takes its colour. Trace a SAM 3 click's mask for its outline, and add a polygon over what it leaves out (a fish's thin fins).
+
+QA Sheet adds a `packshot` WARN when the frame shows the packshot's print over 1.25x its size: an 800 px packshot shown 1.5x keeps its small print soft, so ask for a larger one. Two more checks come from the user's review of the first dark-print keyframes, which the audit had called clean:
+- `ink_level`: the print's top line turned more than 1 deg against the generated print's. It fires on the first jar (+1.58 deg, "a bit skewed") and not on the fixed one (+0.35).
+- `ink_rim`: dark structure removed at an occluder's edge, the body changed along it, or a straight line of new ink near the body's edge. It fires on the first toner (its "silver line" and the fish's eye) and not on the fixed one.
+
+On the real frames tested from a SAM 3 mask, the pack's keyframes are bit-identical to `run.py draft` plus `run.py`, with the same `matte` report:
+- the jar (1080 × 1350): clean audit, lid untouched, its top rule parallel to the lid seam;
+- a white pump bottle with a gold bar: the text corrected, a `packshot` WARN;
+- a white toner bottle with a fish in front of its wordmark (the fish as occluders): corrected, the fish untouched, a `packshot` WARN.
 
 ## Video: the label through a clip
 
@@ -321,8 +344,8 @@ Typical overrides after a first look at the report: `{"render": {"spark_glow": [
 
 | The case | What runs |
 |---|---|
-| An image, paper or dark ink (`ink` off) | Auto Draft (or the given job), then the graph of `product-label-refinement-draft` (Grade To Scene, Match Finish) |
-| An image, light print on the body (`ink` light) | Auto Draft (or the given job), then the graph of `product-label-refinement-ink-draft` (no grade; the product mask is the matte the print stays inside) |
+| An image, a paper label or print on paper (`ink` off) | Auto Draft (or the given job), then the graph of `product-label-refinement-draft` (Grade To Scene, Match Finish) |
+| An image, print straight on the body (`ink` light or dark) | Auto Draft (or the given job), then the graph of `product-label-refinement-ink-draft` (no grade; the product mask is the matte the print stays inside; dark print snapped onto the generated print) |
 | A measured job | Load Job instead of Auto Draft (Auto Draft doesn't run) |
 | A clip | SAM 3 on the keyframe frame, then through its shot both ways; the stills branch above on the keyframe frame; then Refine (Video) on that shot with that keyframe, spliced back into the clip |
 | An edit (several shots, several products) | the Shot node finds the hard cuts round the keyframe frame, so SAM 3 and Refine work on that shot only, and the output is the whole edit with that shot refined. One run per product shot: the next product runs on the last run's output (`refined_#####.mov [output]`, no download) |
@@ -332,7 +355,7 @@ Typical overrides after a first look at the report: `{"render": {"spark_glow": [
 
 **Triage first.** Every run also draws Label Triage's sheet: the product's print on the frame (an image, or the clip's keyframe frame) next to the packshot's at the same size, both straightened, in colour (the engine's `imgauto/triage.py`). Run once with **Fix this product** off for each product in the input: the sheet and `triage.json` come back in seconds. Turn it on only for the products whose print is wrong; a product that looks fine never costs a draft, a track or a render. OCR on the sheet is an optional hint (`ocr`): at frame scale it can't tell a right print from a garbled one, so the call is the agent's (or yours).
 
-An image never reaches the video nodes, a light-ink job never runs Grade To Scene or Match Finish, and nothing in a skipped branch runs or fails.
+An image never reaches the video nodes, a job with print on the body never runs Grade To Scene or Match Finish, and nothing in a skipped branch runs or fails.
 
 **What it needs** (on top of the pack): ComfyUI 0.19.3 or newer (core SAM 3 nodes; tested on 0.41.0 with frontend 1.55.17), [ComfyUI-MaskAspectCrop](https://github.com/nastyakolykhan-sudo/ComfyUI-MaskAspectCrop) for Crop & Rotate, the SAM 3.1 checkpoint `models/checkpoints/sam3.1_multiplex_fp16.safetensors`, and AllTracker's weights for clips (see the [Swordfish checklist](#swordfish-checklist)).
 
@@ -365,13 +388,13 @@ The ids are the API file's (`workflows/product-label-refinement-all.api.json`), 
 | 70 Label Triage | `ocr`, `glyph` | off: optional hints (tesseract; a letter-scale match), reported only |
 | 9 Fix this product (Boolean) | `value` | `true` (default): fix it. `false`: the triage sheet says it looks fine; only SAM 3 on the keyframe frame and the sheet run |
 | 84 Render the clip (Boolean) | `value` | clips: `true` (default): the keyframe, then SAM 3's track and Refine through the shot. `false`: the keyframe only (seconds), to check it before the clip; queue again with `true` and ComfyUI reuses the keyframe |
-| 8 Auto Draft fits to the product mask (Boolean) | `value` | `true`: Auto Draft fits the outline to the mask (light ink needs it). `false`: a paper draft from `quad` and `pairs` only, as the draft template |
+| 8 Auto Draft fits to the product mask (Boolean) | `value` | `true`: Auto Draft fits the outline to the mask (print on the body needs it). `false`: a paper draft from `quad` and `pairs` only, as the draft template |
 | 86 SAM 3 points | `points` | empty: the text prompt finds the product. `x,y` (keyframe frame px): SAM 3 segments the product clicked and the text prompt is left out (it would add its own detections). For a group shot where the prompt picks the wrong product (3 of 9 on the test edits). One click on the body: two clicks or a `-x,y` shrank or emptied the mask on real frames. Check `triage/mask` |
 | 11 SAM 3 prompt (CLIP Text Encode) | `text` | what the product is, e.g. `pump bottle`. Comma-separated prompts are joined into one mask; `name:N` takes N objects of a kind (1 by default) |
 | 13 SAM 3 on the keyframe frame | `threshold`, `refine_iterations` | 0.33 and 2, as the label-fix workflow |
 | 14 SAM 3 through the shot | `detection_threshold`, `max_objects`, `detect_interval` | 0.33, 1, 1 |
 | 21 Straighten (Crop & Rotate) | `center_x`, `center_y`, `crop_width`, `crop_height`, `rotation` | a frame round the product and the turn that puts its label upright (degrees, + turns the image clockwise behind the frame). All 0: off, the whole frame, and nothing is resampled. When on, the stills branch works on the crop (Auto Draft's `quad`, `pairs`, `occluders` and the job are in the crop's px) and only the pixels it changed go back into the frame |
-| 24 Auto Draft | `ink` | the print type: `off` for paper or dark ink, `light` for light print straight on the body |
+| 24 Auto Draft | `ink` | the print type: `off` for a paper label or print on paper or a flat panel; `light` or `dark` for print straight on a round body with no paper, lighter or darker than it (white print on a frosted bottle; black print on a jar or a white bottle). With `ink` set, give `print_box` |
 | 24 Auto Draft | `quad`, `model`, `light`, `label`, `outline`, `pairs`, `occluders`, `mask_skip`, `print_box`, `bow`, `suggest` | as on the node ([Starting from rough input](#starting-from-rough-input-auto-draft), [Print straight on a body](#print-straight-on-a-body-the-ink-templates)). The template holds the ink demo's |
 | 62 Refine (Video) | `processes`, `model`, `compositing`, `soft_cap`, `glue`, `keyframe_frames`, `tracker` | as on the node ([Video nodes](#video-nodes-image--product-label-refinement--video)); `processes` 8 on a server |
 
@@ -385,9 +408,9 @@ The ids are the API file's (`workflows/product-label-refinement-all.api.json`), 
 | 44 | `product-label-refinement/refined_#####_.png` | the refined image (lossless PNG); for a clip, the refined keyframe |
 | 40 QA Sheet | (its text) | `report.json`: the stills run's report and audit |
 | 45-50 | `product-label-refinement/qa/{compare,edges,before_after,audit,align_overlay,draft_points}_#####_.png` | the QA sheets |
-| 52, 54 | `qa/grade_preview`, `qa/relight_map` | paper and dark ink only |
-| 56 | `qa/print_removed` | light ink only: the body without its garbled print |
-| 58 Save PSD | `product-label-refinement/refined_#####_.psd` | paper and dark ink only; `tools/comfy_run.py` runs it with `--psd` |
+| 52, 54 | `qa/grade_preview`, `qa/relight_map` | the paper graph only |
+| 56 | `qa/print_removed` | print on the body only: the body without its garbled print |
+| 58 Save PSD | `product-label-refinement/refined_#####_.psd` | the paper graph only; `tools/comfy_run.py` runs it with `--psd` |
 | 24 Auto Draft | `product-label-refinement/draft_#####_.json` (and its text) | the drafted job: edit it and give it back as the Job JSON |
 | 63 | `product-label-refinement/video/refined_#####.mov` | clips: the lossless master of the whole clip with the refined shot spliced in (QuickTime PNG, exact RGB; its ui lists it under `files`); the next product's source |
 | 65 | `product-label-refinement/video/review_#####_.mp4` | clips: the refined clip, to review |
@@ -404,7 +427,7 @@ The ids are the API file's (`workflows/product-label-refinement-all.api.json`), 
 | **Load Optional File** | `file`, or `(none)` | `image` (every frame), `mask` (their red channel, as Load Image (as Mask) and Image To Mask read it), `given` |
 | **Switch** | `when`; `if_true`, `if_false` (lazy) | the one picked; only it is computed. `when` is true for true, a non-empty string, a non-zero number or anything given |
 | **Run If** | `value` (lazy), `when`, `run_when` | `value`, or a block: every node after it, output nodes included, is skipped without an error |
-| **Print Type** | `job` | `light`: the job lays light print on the body (`matte` ink, polarity light) |
+| **Print Type** | `job` | `light` (true for both polarities): the job lays print straight on the body (`matte` ink, polarity light or dark); `print` names it |
 | **Pick Frame** | `index`; `images`?, `masks`? | that frame (clamped), and its index |
 | **Shot (between cuts)** | `frames`, `keyframe_index`, `start`, `end`; `masks`? | the keyframe frame's shot: between the hard cuts round it (each frame shrunk to 64x64; a cut changes it by 0.06 or more on average and 8x the clip's median, and changes its colours), or `start` to `end`; its masks (a given mask video cut the same), `start`, the keyframe frame in the shot, and `shot` (JSON) |
 | **Mask Overlay** | `images`, `masks`, `opacity` | the masks on their frames, tinted green with a red edge |
@@ -612,6 +635,7 @@ In-process results on 2026-10-08:
 | Engine 0.10.2 (label mode redraws a wrapping side of the packshot outline on the limb, 2026-10-16): the 6 bottle-label jobs with a quad, a quad and a mask, and a mask alone | all 18 drafts' jobs identical to the engine's, images within 8 levels everywhere; placement as before or closer, except the 4096 px bottle label with a mask alone (5.4 to 8.3 px, its turn round the bottle) |
 | Auto Draft against `run.py draft` (`--draft`): the same 13 jobs, each with a quad, a quad and a mask, and a mask alone | all 39 pass: identical draft jobs; images within 1 level, or both runs stop with the same FILL STOPPED (the shelf card with a mask) |
 | Engine 0.11.0 (print straight on a body: `matte` ink light, `align.bow`, 2026-10-16): the demo with `--psd`, the stills fixture and 10 production jobs (the dark ink matte among them); the ink demo; the four light-ink keyframes of a real job (two products in a tray, both printed on a box with a bow) | all 16 pass: the production jobs within 1 level on 0 to 9,053 px as before, the light-ink jobs within 1 level on 0 or 1 px with the same `matte` report; the engine's own outputs for the 10 production jobs are byte-identical to 0.10.2's. The ink-draft template on the ink demo gives the same draft job and image as `run.py draft` |
+| Engine 0.12.0 (dark print on a body: `matte` ink dark, 2026-10-18): the engine's own outputs, before and after, for 15 jobs (the stills fixture, the ink demo, the four light-ink keyframes, 9 production jobs with the paper ink matte, cylinders and labels); through the pack, the demo with `--psd`, the ink demo, two light-ink keyframes and two dark-ink keyframes of real frames (a pink jar, a white bottle with a gold bar); the ink-draft template with `ink` dark on both frames | the 15 engine outputs byte-identical (images, PSDs, QA sheets, reports); all pack runs pass at 0 px, with identical `matte` reports; the ink-draft keyframes bit-identical to `run.py draft` plus `run.py` (the draft jobs differ only in `grade`, which the ink route doesn't read) |
 
 ComfyUI passes images between nodes in 32-bit floats, where the engine keeps 64-bit, so a value can land on the other side of a threshold. The 12 × 11 px patch is where relight's fine pass kept a slightly different region. Nothing outside the work boxes differed in any run.
 
@@ -674,7 +698,9 @@ Never edit `imgpost/` here. To pick up an engine change:
 
 ## Not covered yet
 
-- Print straight on a bottle, placed exactly on the generated print from a mask alone: the ink templates place it by the silhouette (above). `label: cylinder` needs the label's top and bottom to be edges in both images, which print on a body doesn't have.
+- Light print straight on a bottle, placed exactly on the generated print from a mask alone: the light route places it by the silhouette (above); dark print is registered onto the generated print. `label: cylinder` needs the label's top and bottom to be edges in both images, which print on a body doesn't have.
+- Print on a body from a small packshot: the frame shows an 800 px packshot's small print soft however its edges are sharpened (QA Sheet's `packshot` WARN).
+- A clip with dark print on a body: the keyframe comes out right, but away from it Refine (Video) leaves a ghost of the frame's own print where the generated print drifts against the tracked label (a jar's 49-frame shot through the one workflow, 2026-10-18: a line of text doubled 8 to 40 frames from the keyframe), and its spots check flags dark print on every frame.
 - The turn of a label round its bottle isn't pinned by the edges (above): a 4096 px label can land 5 to 11 px round from where a hand fit puts it.
 - Batch mode: one job across many frames.
 - A GPU path. Everything runs the engine's numpy and scipy code on the CPU, about 4 to 15 s per product.
