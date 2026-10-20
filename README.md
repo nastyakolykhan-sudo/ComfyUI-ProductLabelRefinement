@@ -310,6 +310,8 @@ Typical overrides after a first look at the report: `{"render": {"spark_glow": [
 - **The band carries every line the keyframe corrected:** the measured band is stretched over lines of print the keyframe put in or took out past it, plus up to 32 px of room that stops at the keyframe's next body step (a base, a cap). The tube is still fitted on the measured band (`anchor.fit_band`). `{"anchor": {"over_print": false}}` keeps the measured band; the report's `band_info.over_print` says what moved.
 - **`feather.print_gap` 2:** the label's end fade stops 2 px short of its own print (shorter than `v_px` where print runs close to an end).
 - **`shade_print`:** the frame's light is read on bare surface only, both prints left out, away from the limbs: a bold logo drawn bigger and elsewhere no longer travels with the label as a shadow.
+- **`clear_glass`** (0.7.0): where the stretched band runs over clear glass (a jar's last lines on its glass base: cells of the still label whose hue isn't the body's), the frame keeps its own glass. Its print near the label's letters is filled, and only the label's print goes on. Before, the keyframe's glass came along as soft smudges over the frame's sharp reflections. `{"render": {"clear_glass": false}}` turns it off.
+- **`limb_snap.front: "track"`** (0.7.0): the limb snap moves the label's sides onto the matte but keeps the print facing the camera on its tracks. Before, the two sides' common offset moved the whole print: 6-7 px off the frame's own on a jar seen from above. `"front": "mean"` is the old behaviour.
 
 **The look checks** (0.5.0, in `review`): the same review notes as pass/fail flags, each with the setting to try next in `review.actions` (`{"check", "frames", "why", "try"}`, ready to merge into `settings`):
 - `swim`: the label slides against the product on near-still frames (the body moving 3 px or less), 0.35 px more than the generated print did on two or more pairs close together. Try: glue.
@@ -319,7 +321,7 @@ Typical overrides after a first look at the report: `{"render": {"spark_glow": [
 - `tilt`: the print's side edge turned over 1° or shifted over 4 px against the product's limb, against the keyframe's frame, on crisp frames: a gross check (the `body` check is the fine one). Try: `body_snap`.
 - `ghost` (the sparkle re-add on a list of frames, with `label` compositing): the re-add brings over 60 px of the old print back on a frame. Try: `print` compositing (the re-add stays off there).
 - `spots` (light print): dark marks (4-60 px, 12 levels under the source's body without its print) on the label's body, 4 px clear of the letters: look. On dark print the letters themselves are dark marks, so it isn't judged there (0.6.0).
-- `double` (0.6.0): the source's own print beside the label's: print in the output that the source shows there too, off the label's own strokes and explained by the label's print moved a few px, 150 px or more as a 5-frame median. Since 0.6.1 only ink counts (px near the source's print at least a quarter as deep as the label's own): a round body's soft limb band beside the letters no longer reads as doubled print. Try (at the label's ends): `feather.print_gap`, then more `anchor.over_print.room`; at the sides: look.
+- `double` (0.6.0; 0.7.0: the frame's own glass the render keeps is left out, as in `ghost`): the source's own print beside the label's: print in the output that the source shows there too, off the label's own strokes and explained by the label's print moved a few px, 150 px or more as a 5-frame median. Since 0.6.1 only ink counts (px near the source's print at least a quarter as deep as the label's own): a round body's soft limb band beside the letters no longer reads as doubled print. Try (at the label's ends): `feather.print_gap`, then more `anchor.over_print.room`; at the sides: look.
 `review.looks` has the numbers per shot (swim against the source's, level, sharpness, tilt). `{"review": {"looks": false}}` skips them.
 
 **What the report says about the label against the body:** `geometry` has one entry per refined frame:
@@ -330,7 +332,7 @@ Typical overrides after a first look at the report: `{"render": {"spark_glow": [
 
 `review.checks` now covers edges, ghost, shear, bend, body, glitter, vanish and switch, plus the look checks above (swim, ends, level, sharp, tilt, spots, double).
 
-**`body` and `glitter` are calibrated on one product so far:** a frosted serum bottle with white print. On older approved test clips they still flag some frames: a close-up bottle whose gap to the collar seam swings as it bounces, and a shimmering metallic tube. On a new product type, look at the flagged frames before turning the fix on.
+**`body` and `glitter` are calibrated on one product so far:** a frosted serum bottle with white print. On older approved test clips they still flag some frames: a close-up bottle whose gap to the collar seam swings as it bounces, and a shimmering metallic tube. On a new product type, look at the flagged frames before turning the fix on. On dark print (0.7.0) a glitter speck must also be clear of the frame's own dark print: the gaps in a garbled seal the generator morphs from frame to frame were read as lost glitter.
 
 **Product types.**
 - **`model: tube`** (the default): anything round, such as bottles, jars, tubes and lipsticks. Every delivered example so far was a tube.

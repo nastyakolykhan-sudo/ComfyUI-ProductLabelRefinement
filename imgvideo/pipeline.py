@@ -709,12 +709,18 @@ def _render_context(J, rc, optics, shutter, ax_ref, res=None, art=None):
     """What every frame's render needs, built once: in the main process, or in each render worker."""
     res = _fit(J) if res is None else res
     art = J.artwork()[0] if art is None else art
-    still = None
+    still, glass = None, None
     if (J.work / "still.npz").exists():
         s = np.load(J.work / "still.npz")
         still = ls.sampler(ls.Grid(art, float(s["step"])), s["med"].astype(float))
+        anc = J.v.get("anchor") or {}
+        if rc.get("clear_glass") and getattr(art, "unroll", False) and anc.get("band") and anc.get("fit_band"):
+            # clear glass in the rows the band was stretched over past the body's own (V56)
+            glass = rd.glass_map(art, s["med"].astype(float), float(s["step"]), anc["band"], anc["fit_band"],
+                                 rc["clear_glass"])
     Pv = J.outline()[:, 1]
-    return {"res": res, "art": art, "rc": rc, "optics": optics, "shutter": shutter, "still": still, "ax_ref": ax_ref,
+    return {"res": res, "art": art, "rc": rc, "optics": optics, "shutter": shutter, "still": still, "glass": glass,
+            "ax_ref": ax_ref,
             "Pv": Pv, "vmid": 0.5 * (Pv.min() + Pv.max()), "morph": set(res.get("morph", [])),
             "ax_mode": rc["limb_snap"].get("axial") if isinstance(rc.get("limb_snap"), dict) else None,
             "residual": J.v.get("fit", {}).get("residual"), "body": rc.get("_body") or {},
@@ -776,8 +782,10 @@ FEATHER_PRINT_GAP = 2.0
 
 def print_gap_default(render, given=None):
     """Whole-band compositing (render.alpha "label") from a measured job (V54): the label's end fade stops
-    feather.print_gap px short of its own print, and the frame's light is read off the print (render.shade_print),
-    unless `given` (the settings as written) sets them. Logged in render._defaults. -> the render settings"""
+    feather.print_gap px short of its own print, the frame's light is read off the print (render.shade_print), over
+    clear glass in the rows the band was stretched over the frame keeps its own surface (render.clear_glass, V56), and
+    the limb snap keeps the print facing the camera on its tracks (render.limb_snap.front "track", V57), unless
+    `given` (the settings as written) sets them. Logged in render._defaults. -> the render settings"""
     if not isinstance(render, dict) or render.get("alpha", "label") != "label":
         return render
     out, added = dict(render), {}
@@ -788,6 +796,14 @@ def print_gap_default(render, given=None):
     if "shade_print" not in (given or {}) and "shade_print" not in render:
         out["shade_print"] = True
         added["shade_print"] = {"value": True, "by": "the measured job (the frame's light read off its print)"}
+    if "clear_glass" not in (given or {}) and "clear_glass" not in render:
+        out["clear_glass"] = True
+        added["clear_glass"] = {"value": True, "by": "the measured job (the frame's own glass past the body's band)"}
+    g_ls = (given or {}).get("limb_snap")
+    if isinstance(render.get("limb_snap"), dict) and "front" not in render["limb_snap"] and \
+            not (isinstance(g_ls, dict) and "front" in g_ls):
+        out["limb_snap"] = dict(render["limb_snap"], front="track")
+        added["limb_snap.front"] = {"value": "track", "by": "the measured job (the print facing the camera stays on its tracks)"}
     if added:
         out["_defaults"] = dict(out.get("_defaults") or {}, **added)
     return out
@@ -888,7 +904,7 @@ def _limb(C, J, t, H):
     # the model's straight taper misses a real tube's sides by 10-25 px at the label's ends; light and sparkles stay
     # read through the tracked mapping
     sc_ = {k: v for k, v in (rc["limb_snap"] if isinstance(rc["limb_snap"], dict) else {}).items()
-           if k in ("step", "max_px", "inner", "lam", "hold")}
+           if k in ("step", "max_px", "inner", "lam", "hold", "front")}
     return vf.silhouette_snap(H, J.key(t, H), (Pv.min(), Pv.max()), **sc_)
 
 
@@ -937,7 +953,8 @@ def _render_one(C, J, t, frame, extras=None):
         rct["spark_glow"] = t + J.s0 in C["glow"]
     if C["sparkles"] is not None:                            # the re-add only on these frames (glitter in front, V37)
         rct["sparkles"] = t + J.s0 in C["sparkles"]
-    out, info, _ = rd.render(frame, H, Hs, art, J.key(t, H), rct, label_median=C["still"], seed=t + J.s0)
+    out, info, _ = rd.render(frame, H, Hs, art, J.key(t, H), rct, label_median=C["still"], seed=t + J.s0,
+                             glass=C.get("glass"))
     pr = C["print"]
     if pr is not None:
         # render.alpha "print" (V40): only the print changes, carried onto the source's own body
@@ -959,7 +976,7 @@ def _render_one(C, J, t, frame, extras=None):
         # the review's ghost check on a sparkle re-add frame (V37: the re-add can bring the garbled print back): this
         # render against one without the re-add, which only exists here
         clean, _, _ = rd.render(frame, H, Hs, art, J.key(t, H), dict(rct, sparkles=False), label_median=C["still"],
-                                seed=t + J.s0)
+                                seed=t + J.s0, glass=C.get("glass"))
         info["ghost_px"] = lk.ghost_px(frame, clean, out, J.key(t, H))
     if snap_rep:
         info["snap"] = {k: v for k, v in snap_rep.items() if k in ("left_px", "right_px", "snap")}
@@ -1618,9 +1635,16 @@ def _review(J, parts, ll_path, arrays=None):
                           P.v.get("render", {}).get("feather"), Ru)
             Pv = P.outline()[:, 1]
             (u0, _), (u1, _) = P.outline().min(0), P.outline().max(0)
+            rcv, anc = P.v.get("render") or {}, P.v.get("anchor") or {}
+            glass = rd.glass_map(art, st["med"].astype(float), float(st["step"]), anc["band"], anc["fit_band"],
+                                 rcv["clear_glass"]) if (st is not None and rcv.get("clear_glass") and
+                                                         getattr(art, "unroll", False) and anc.get("band") and
+                                                         anc.get("fit_band")) else None
+            gh.exclude(glass)
             ctx[id(P)] = dict(res=res, maps=maps, art=art, ghost=gh, G=rv.label_grid(P.outline()), v=(Pv.min(), Pv.max()),
-                              shot=(P.s0, P.s1, P.anchor), outline=P.outline(), uc=0.5 * (u0 + u1),
+                              shot=(P.s0, P.s1, P.anchor), outline=P.outline(), uc=0.5 * (u0 + u1), glass=glass,
                               glitter=rv.Glitter(art, print_px=int(cf["glitter_print_px"]), tophat=int(cf["glitter_tophat"]),
+                                                 polarity=rcv.get("polarity", "light"),
                                                  levels=float(cf["glitter_levels"]), max_px=int(cf["glitter_px"]),
                                                  excess=float(cf["glitter_excess"])))
             ctx[id(P)]["body"] = _body_reference(P, ctx[id(P)], lambda T: src[T - lo] if lo <= T < hi else
@@ -1659,7 +1683,7 @@ def _review(J, parts, ll_path, arrays=None):
                 chg = np.any(out[i] != src[i], axis=-1)
                 LF[T] = {"looks": lk.frame_looks(src[i], out[i], m, chg, pol),
                          "ghost_px": c["rinfo"].get(str(T), {}).get("ghost_px"),
-                         "double": rv.doubled(c["art"], out[i], src[i], m, Ho, pol)}
+                         "double": rv.doubled(c["art"], out[i], src[i], m, Ho, pol, glass=c["glass"])}
                 if i > 0 and owner.get(T - 1) is P and (T - 1) in LF:
                     lc = dict(lk.LOOKS, **(looks_cfg or {}))
                     LF[T - 1]["swim"] = lk.swim_pair(src[i - 1], src[i], out[i - 1], out[i], prev[1], m,
@@ -2156,7 +2180,7 @@ def _staged(J, stamps, k_track, k_fit, still_key, f, cfg):
 SETTINGS_SECTIONS = ("track", "fit", "render", "qa", "review", "artwork", "key")
 # render settings the still label doesn't depend on
 RENDER_ONLY = ("body_snap", "sparkles", "spark_glow", "alpha", "print_alpha", "soft_cap", "smear", "_sparkles_asked",
-               "glue", "level", "_defaults", "shade_print")
+               "glue", "level", "_defaults", "shade_print", "clear_glass")
 
 
 def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24.0, work=None, workers=None):

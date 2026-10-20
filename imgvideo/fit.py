@@ -321,14 +321,19 @@ def fit_shot(base, H0, xy0, tracks, vis, wmin=0.5, reject=2.5, half=3, cuts=(), 
 
 
 def silhouette_snap(H, matte, v_range, step=24.0, max_px=30.0, inner=(-1.0, -0.6, -0.2, 0.2, 0.6, 1.0), lam=0.02,
-                    hold=False):
+                    hold=False, front="mean"):
     """A tube's mapping corrected so its limbs land on the product's matte. The rigid tube tapers linearly, but a
     squeezed tube or a generated bottle doesn't: its real sides drift 10-25 px from the model's at the label's ends,
     and the source shows between them as an edge. Per label row: the matte's two edges along the row (through the
     point facing the camera); each side's offset from the model's limb, fitted along the label by a robust quadratic
     (rows an occluder cuts, or edges further than max_px, drop out); then a smooth scene-space correction (the
     engine's Residual) that maps the model's [left, right] limbs onto the matte's, linearly across the row (so the
-    print in the middle moves only by the row's mean offset). -> (mapping, report)"""
+    print in the middle moves only by the row's mean offset). front "track" (V57): the print facing the camera stays
+    where the tracks put it: the two sides' common offset is the cylinder's axis off by it with the print held, a
+    correction of (1 - cos theta) times it across the row (none at the front, all of it at the limbs); their difference
+    stays linear (the radius). On a squat jar seen from above the fit's axis drifted 6-9 px from the matte's centre
+    while its print sat on the tracks, and the mean offset carried the print off the frame's own by as much.
+    -> (mapping, report)"""
     from scipy.ndimage import map_coordinates
     Hb = H
     while hasattr(Hb, "base"):
@@ -409,15 +414,21 @@ def silhouette_snap(H, matte, v_range, step=24.0, max_px=30.0, inner=(-1.0, -0.6
     C, D = [], []
     for v, thL, thR, thc, n in geo_rows:
         a, b = float(fL(v)), float(fR(v))
-        for x in inner:                     # x: -1 at the left limb, +1 at the right; screen-linear in x
+        xs = inner if front != "track" else sorted(set(inner) | {0.0})
+        for x in xs:                        # x: -1 at the left limb, +1 at the right; screen-linear in x
             th = thc + np.arcsin(np.clip(x, -1, 1)) * (thR - thL) / np.pi
             C.append(H.forward([[Hb.u0 + Hb.Ru * th, v]])[0])
-            D.append((a * (1 - x) / 2 + b * (1 + x) / 2) * n)
+            if front == "track":
+                D.append((0.5 * (a + b) * (1 - np.sqrt(max(1 - x * x, 0.0))) + 0.5 * (b - a) * x) * n)
+            else:
+                D.append((a * (1 - x) / 2 + b * (1 + x) / 2) * n)
     C, D = np.array(C), np.array(D)
     span = np.linalg.norm(C[1:] - C[:-1], axis=1)
     sig = float(max(np.median(span[span > 0]) * 1.5, 6.0)) if (span > 0).any() else 12.0
     Hs = geo.Residual(H, C, D, sig, lam)
     Hs.__dict__["limb_snap"] = True                 # (print_mapping: the mapping under it orients the print)
+    if front == "track":
+        rep["front"] = "track"
     rep.update(left_px=[round(float(fL(rows.min())), 1), round(float(fL(np.median(rows))), 1), round(float(fL(rows.max())), 1)],
                right_px=[round(float(fR(rows.min())), 1), round(float(fR(np.median(rows))), 1), round(float(fR(rows.max())), 1)],
                rows_used=[int(okL.sum()), int(okR.sum())], sigma=round(sig, 1))
