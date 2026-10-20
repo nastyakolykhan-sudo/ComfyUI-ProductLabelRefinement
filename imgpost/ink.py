@@ -42,6 +42,8 @@ DEFAULTS = {
     "reg_scale": 0.15,    # the scales tried: 1 +- this
     "reg_min": 0.3,       # the registered print maps' correlation needed to keep it
     "reg_bow": False,     # ... with a bow profile over it, fitted to the generated print (loose: off by default)
+    "bow_from": None,     # "print": the body's bow from the generated print's own lines (line_bows), unless the job's
+                          # bow was given; kept only where the print registers better with it (pitfall 100)
     "reg_model": "affine",  # "scale": stretched along and across the body's axis only (no turn or shear: the print's
                             # lines stay parallel to the body's level edges); "affine": any
     "sharpen": None,      # "auto": the warped print's edges sharpened to the frame's own print's
@@ -56,7 +58,7 @@ DEFAULTS = {
 # generated print, so the print is registered onto it, and garbled strokes are taken whole; a 1,024 px packshot's
 # print came out softer than the generator's (edge blur 0.95 px against 0.62), so it is sharpened to the frame's
 DARK = dict(DEFAULTS, frame_open="auto", gen_rel=0.15, gen_grow=True, register=True, reg_model="scale",
-            sharpen="auto", inks="packshot")
+            bow_from="print", sharpen="auto", inks="packshot")
 POLARITIES = ("light", "dark")
 
 
@@ -534,6 +536,62 @@ def prepare(ref_u8, refmask, cfg, H, roi, crop_u8, ss=4, prefilter=0.6, body=Non
                 H, cov, ex, A, Abow = H.base, cov0, ex0, A0, Abow0
                 crep["register"] = dict(rep0, bow_from_matte=crep["register"]["bow_from_matte"])
                 ex = ex[0] if ex else {}
+        if A is not None and cfg.get("bow_from") == "print" and (bow_auto or not hasattr(H, "profile")) and body:
+            # the bow from the generated print's own lines, at the heights the registered print takes (pitfall 100):
+            # the matte's ends (a lid's rim, a base) bowed 51-63 px, a jar's print lines 73-88
+            from .geometry import Bow
+            base = H.base if hasattr(H, "profile") and hasattr(H, "base") else H
+            cov_a, _, *_ = warp_cover(cov_r, band, Bow(Corrected(base, A), body["centre"], body["axis"],
+                                                       body["half_widths"], H.profile) if hasattr(H, "profile")
+                                      else Corrected(H, A, Abow), roi, **kw)
+            prof, crep["bow_from_print"] = print_bow(crop_u8, in_band > 0.5, cov_a, body, roi[:2],
+                                                     max(7, int(np.ceil(1.5 * stroke)) | 1) if stroke else 15)
+            if prof is not None:
+                frame_wb = {"centre": (np.asarray(body["centre"], float) - np.asarray(roi[:2], float)).tolist(),
+                            "axis": body["axis"], "half_widths": body["half_widths"]}
+                before = (H, cov, ex, A, Abow, crep["register"])
+                for step in range(2):
+                    H = Bow(base, body["centre"], body["axis"], body["half_widths"], prof)
+                    cov, _, *ex = warp_cover(cov_r, band, H, roi, **kw)
+                    ex = ex[0] if ex else {}
+                    A2, Abow2, rep2 = register(crop_u8, cov, in_band, cfg, roi[:2], stroke, body, rows)
+                    if A2 is None:
+                        break
+                    A, Abow = A2, Abow2
+                    crep["register"] = dict(rep2, first=crep["register"].get("first", crep["register"]))
+                    if step:
+                        break
+                    # the packshot's own lines curve too (a jar's front photo: -5 to -14 px of bow), and the warp
+                    # carries that in: the true print's lines measured as warped, the profile corrected by what they
+                    # miss of the generated print's, once
+                    cov_b, _, *_ = warp_cover(cov_r, band, Bow(Corrected(base, A), body["centre"], body["axis"],
+                                                               body["half_widths"], prof), roi, **kw)
+                    got = [l for l in line_bows(np.clip(cov_b, 0, 1), in_band > 0.5, frame_wb)
+                           if abs(l["tilt_deg"]) < 5 and l["rms"] < 3
+                           and prof[0][0] - 10 <= l["t"] <= prof[-1][0] + 10]
+                    if not got:
+                        break
+                    tp = np.array([l["t"] for l in got])
+                    want = np.interp(tp, [q[0] for q in prof], [q[1] for q in prof])
+                    miss = want - np.array([l["b"] for l in got])
+                    wt = np.array([l["n"] for l in got], float)
+                    if len(got) >= 2 and np.ptp(tp) > 20:
+                        A_ = np.c_[np.ones_like(tp), tp] * np.sqrt(wt)[:, None]
+                        m0, m1 = np.linalg.lstsq(A_, miss * np.sqrt(wt), rcond=None)[0]
+                    else:
+                        m0, m1 = float(np.average(miss, weights=wt)), 0.0
+                    prof = [[q[0], round(float(q[1] + m0 + m1 * q[0]), 2)] for q in prof]
+                    crep["bow_from_print"]["packshot_lines"] = [{"t": l["t"], "b": l["b"]} for l in got]
+                    crep["bow_from_print"]["profile_corrected"] = prof
+                # kept only where the print registers better with it, as the matte's bow: a bottle's print the
+                # generator drew flat gave 2-8 px of noise and no better fit (0.697 -> 0.696), a jar's 0.58 -> 0.64
+                with_bow = crep["register"].get("ncc_after", -1) if crep["register"] is not before[5] else -1
+                without = before[5].get("ncc_after", -1)
+                keep = with_bow >= without + 0.005
+                crep["bow_from_print"].update({"with": round(float(with_bow), 3), "without": round(float(without), 3),
+                                               "kept": bool(keep)})
+                if not keep:
+                    H, cov, ex, A, Abow, crep["register"] = before
         if A is not None:
             # the band (the body) stays where the fit put it; only the print moves. The body's bow (align.bow) goes
             # over the correction, not under it: the correction's scale along the axis (0.87 on a jar seen from
@@ -1022,6 +1080,136 @@ def _robust_fit(x, y, deg, tol=2.5, iters=4):
     return c, keep
 
 
+def line_bows(P, M, frame=None, min_len=0.3):
+    """Each line of print's own curve across a round body: its bow and its tilt (pitfall 100).
+    P: a print map over the work box (0..1); M: the body's matte (bool, same box); frame: {centre, axis,
+    half_widths} in work-box px (default: the matte's own, bow.body_axis). The print is unrolled into the body's frame
+    (s across, t along the axis, 1 px steps); the lines are the peaks of its profile along t in the middle strip
+    (|s| under a fifth of the width), each followed outward both ways in 12 px windows by its print's centre of mass,
+    then fitted as t(s) = a + k s + b sqrt(1 - s^2 / w(t)^2): b is the line's bow (+: its ends higher, seen from above),
+    atan(k) its tilt. A jar seen from above: its generated print's lines bowed 73-88 px, its lid's rim 63 and its base
+    51; one bow from those flattened the print's lower lines ("doesn't respect the shape of the product").
+    -> [{"t", "b", "tilt_deg", "s_span", "rms", "n"}, ...] from top to bottom"""
+    from . import bow as bw
+    if frame is None:
+        c, ax, n = bw.body_axis(M)
+        hw = np.asarray(bw.half_widths(M, c, ax, n), float)
+    else:
+        c = np.asarray(frame["centre"], float)
+        ax = np.asarray(frame["axis"], float)
+        ax = ax / np.linalg.norm(ax)
+        n = np.array([ax[1], -ax[0]])
+        hw = np.asarray(frame["half_widths"], float)
+    if len(hw) < 3:
+        return []
+    W = float(np.median(hw[:, 1]))
+    pts = np.argwhere(P > 0.3)
+    if len(pts) < 50:
+        return []
+    tt_all = (pts[:, 1] - c[0]) * ax[0] + (pts[:, 0] - c[1]) * ax[1]
+    t0, t1 = int(np.floor(tt_all.min())) - 6, int(np.ceil(tt_all.max())) + 6
+    S = np.arange(-int(0.95 * W), int(0.95 * W) + 1)
+    T = np.arange(t0, t1 + 1)
+    SS, TT = np.meshgrid(S, T)
+    X, Y = c[0] + SS * n[0] + TT * ax[0], c[1] + SS * n[1] + TT * ax[1]
+    R = ndi.map_coordinates(P, [Y, X], order=1, mode="constant")
+    R *= ndi.map_coordinates(M.astype(float), [Y, X], order=1, mode="constant") > 0.5
+    mid = np.abs(S) <= 0.2 * W
+    prof = ndi.gaussian_filter1d(R[:, mid].mean(1), 1.5)
+    if prof.max() <= 0:
+        return []
+    # the lines: runs of the profile over a quarter of its peak, split at their valleys
+    on = prof > 0.25 * prof.max()
+    lab, nl = ndi.label(on)
+    out = []
+    for i, sl in enumerate(ndi.find_objects(lab), 1):
+        ti = sl[0]
+        if ti.stop - ti.start < 3:
+            continue
+        seg = prof[ti]
+        tc = T[ti][int(np.argmax(seg))]
+        half = max(3.0, (ti.stop - ti.start) / 2.0)
+        # follow it outward from the middle: the centre of mass of its print in a window round the prediction
+        pos, cen = [], []
+        for direction in (1, -1):
+            pred, prev_s = float(tc), 0.0
+            slope = 0.0
+            s0 = 0 if direction == 1 else -6
+            for s_c in range(s0, int(direction * 0.95 * W), direction * 6):
+                cols = (S >= s_c - 6) & (S < s_c + 6)
+                rows = (T >= pred - half - 3) & (T <= pred + half + 3)
+                win = R[np.ix_(rows, cols)]
+                mass = win.sum()
+                if mass < 0.15 * half * 12:
+                    if abs(s_c) > 0.15 * W:
+                        break
+                    continue
+                tm = float((win.sum(1) * T[rows]).sum() / mass)
+                pos.append(s_c)
+                cen.append(tm)
+                if len(pos) >= 2:
+                    slope = 0.7 * slope + 0.3 * (tm - pred) / max(abs(s_c - prev_s), 1)
+                pred, prev_s = tm + slope * 6 * direction, s_c
+        if len(pos) < 8:
+            continue
+        sv, tv = np.asarray(pos, float), np.asarray(cen, float)
+        w = np.interp(tv, hw[:, 0], hw[:, 1])
+        arc = np.sqrt(np.clip(1 - (sv / np.maximum(w, 1)) ** 2, 0, 1))
+        A = np.c_[np.ones_like(sv), sv, arc]
+        keep = np.ones(len(sv), bool)
+        for _ in range(4):
+            coef = np.linalg.lstsq(A[keep], tv[keep], rcond=None)[0]
+            r = tv - A @ coef
+            new = np.abs(r) <= max(2.0, 2.5 * 1.4826 * np.median(np.abs(r[keep])))
+            if new.sum() < 8 or (new == keep).all():
+                break
+            keep = new
+        span = float(sv[keep].max() - sv[keep].min())
+        if span < min_len * 2 * W:
+            continue
+        # b: the arc's coefficient (+: lower in the middle, its ends higher: seen from above), as geometry.Bow draws it
+        out.append({"t": round(float(coef[0] + coef[2]), 1), "b": round(float(coef[2]), 2),
+                    "tilt_deg": round(float(np.degrees(np.arctan(coef[1]))), 2), "s_span": round(span, 1),
+                    "rms": round(float(np.sqrt(np.mean(r[keep] ** 2))), 2), "n": int(keep.sum())})
+    return out
+
+
+def print_bow(crop_u8, M, cover, body, offset, size, pad=10.0):
+    """The body's bow as the generated print draws it: line_bows on the frame's print map, the lines whose middle
+    lies within the (registered) true print's height (pad px either side: a lid seam or a glass base just past it
+    stay out), level (under 5 deg) and smooth (rms under 3 px); their bows fitted as b(t) = a + c t, weighted by
+    their length. -> (profile [[t_top, b], [t_bottom, b]] or None, report)"""
+    Lf = im.lum(im.srgb_to_lin(im.to_float(crop_u8)))
+    P = print_map(Lf, M, size, True)[0] * M
+    frame = {"centre": (np.asarray(body["centre"], float) - np.asarray(offset, float)).tolist(), "axis": body["axis"],
+             "half_widths": body["half_widths"]}
+    lines = line_bows(P, M, frame)
+    c = np.asarray(frame["centre"], float)
+    ax = np.asarray(body["axis"], float)
+    ax = ax / np.linalg.norm(ax)
+    ys, xs = np.nonzero(cover > 0.1)
+    if not len(ys) or not lines:
+        return None, {"lines": lines, "why": "no lines of print measured"}
+    tc = (xs - c[0]) * ax[0] + (ys - c[1]) * ax[1]
+    lo, hi = float(np.percentile(tc, 1)) - pad, float(np.percentile(tc, 99)) + pad
+    use = [l for l in lines if lo <= l["t"] <= hi and abs(l["tilt_deg"]) < 5 and l["rms"] < 3]
+    rep = {"lines": lines, "used": [l["t"] for l in use], "t_range": [round(lo, 1), round(hi, 1)]}
+    if not use:
+        return None, dict(rep, why="no level line of print within the print's height")
+    t = np.array([l["t"] for l in use])                   # along the axis from the body's centre, as Bow's profile
+    b = np.array([l["b"] for l in use])
+    w = np.array([l["n"] for l in use], float)
+    if len(use) >= 2 and np.ptp(t) > 20:
+        A = np.c_[np.ones_like(t), t] * np.sqrt(w)[:, None]
+        a0, a1 = np.linalg.lstsq(A, b * np.sqrt(w), rcond=None)[0]
+    else:
+        a0, a1 = float(np.average(b, weights=w)), 0.0
+    t_top, t_bot = float(t.min()), float(t.max())
+    prof = [[round(t_top, 1), round(float(a0 + a1 * t_top), 2)], [round(t_bot, 1), round(float(a0 + a1 * t_bot), 2)]]
+    rep["profile"] = prof
+    return prof, rep
+
+
 def level_check(src_u8, out_u8, M, size, offset, max_deg=1.0):
     """The print's top edge against the generated print's (the user's note on a jar: "a bit skewed (top edge not
     aligned very well)", which the audit called clean). Per column across the body (in its own frame: its axis from
@@ -1071,6 +1259,56 @@ def level_check(src_u8, out_u8, M, size, offset, max_deg=1.0):
         return [{"check": "ink_level", "level": "WARN", "px": int(keep.sum()), "box": box, "tilt_deg": round(deg, 2),
                  "text": text + ": skewed against the body's lines? (registration, align.bow, the body's axis)"}]
     return [{"check": "ink_level", "level": "INFO", "px": int(keep.sum()), "tilt_deg": round(deg, 2), "text": text}]
+
+
+def shape_check(src_u8, out_u8, M, size, offset, min_px=4.0, share=0.1):
+    """Each line's curve across the body against the generated print's (the user's note on a jar's v2: "the label
+    still looks distorted compared to the original. like it doesn't respect the shape of the product", which ink_level,
+    the top line's turn, passed at 0.35 deg). line_bows on both prints where the fix changed pixels; each of the
+    frame's level, smooth lines matched to the result's nearest (within 12 px along the axis); a line is off when the
+    two bows differ by more than max(min_px, share x the frame's bow). WARN when two lines or more and half of them
+    are off, and the same way (the median difference over the tolerance at the median bow): the user saw every line
+    flatter, where a bottle's generated lines wobble a few px either way. Measured: the jar's v2 (one bow from the
+    matte's ends) 6 of 6 lines 12-44 px flatter than the frame's 73-88 (median -35), v1 (a fitted bow) 6 of 6 off
+    (median +17), the fix 0 of 6 (0.4-5.1 px); the approved bottles 0-2 of 6 and 4-5 of 12 off, medians -2 to -3.
+    -> audit findings ("ink_shape"): one WARN, else one INFO with the numbers"""
+    from . import bow as bw
+    Ps, Po, changed = _print_maps(src_u8, out_u8, M, size)
+    region = ndi.binary_dilation(changed, iterations=int(size)) & M
+    if region.sum() < 100:
+        return []
+    c, ax, n = bw.body_axis(M)
+    frame = {"centre": c.tolist(), "axis": ax.tolist(), "half_widths": bw.half_widths(M, c, ax, n)}
+    src = [l for l in line_bows(Ps * region, M, frame) if abs(l["tilt_deg"]) < 5 and l["rms"] < 3]
+    res = line_bows(Po * region, M, frame)
+    pairs = []
+    for l in src:
+        m = min(res, key=lambda q: abs(q["t"] - l["t"]), default=None)
+        if m is not None and abs(m["t"] - l["t"]) <= 12:
+            d = m["b"] - l["b"]
+            pairs.append((l, m, d, abs(d) > max(min_px, share * abs(l["b"]))))
+    if len(pairs) < 2:
+        return []
+    off = [p for p in pairs if p[3]]
+    nums = ", ".join(f"{l['b']:+.0f}/{m['b']:+.0f}" for l, m, _, _ in pairs)
+    text = (f"{len(off)} of {len(pairs)} lines of print curve unlike the generated print's (bow px, frame/result, "
+            f"top to bottom: {nums})")
+    d = float(np.median([p[2] for p in pairs]))
+    if len(off) >= 2 and 2 * len(off) >= len(pairs) and \
+            abs(d) > max(min_px, share * float(np.median([abs(p[0]["b"]) for p in pairs]))):
+        ys, xs = np.nonzero(region)
+        tv = (xs - c[0]) * ax[0] + (ys - c[1]) * ax[1]
+        t0, t1 = min(p[0]["t"] for p in off) - 15, max(p[0]["t"] for p in off) + 15
+        sel = (tv >= t0 - max(0.0, d) - abs(d)) & (tv <= t1 + abs(d))
+        box = [int(xs[sel].min()) + offset[0], int(ys[sel].min()) + offset[1], int(xs[sel].max()) + offset[0],
+               int(ys[sel].max()) + offset[1]] if sel.any() else None
+        f = {"check": "ink_shape", "level": "WARN", "px": int(sum(p[1]["n"] for p in off)),
+             "bow_px": [[round(p[0]["b"], 1), round(p[1]["b"], 1)] for p in pairs],
+             "text": text + f": {'flatter' if d < 0 else 'more bowed'} by {abs(d):.0f} px (median), the body's "
+                            "curve wrong at those heights? (align.bow, matte bow_from)"}
+        return [dict(f, box=box)] if box else [f]
+    return [{"check": "ink_shape", "level": "INFO", "px": len(pairs),
+             "bow_px": [[round(p[0]["b"], 1), round(p[1]["b"], 1)] for p in pairs], "text": text}]
 
 
 def rim_check(src_u8, out_u8, M, vis, size, offset):
@@ -1124,13 +1362,15 @@ def rim_check(src_u8, out_u8, M, vis, size, offset):
 
 
 def dark_checks(crop_u8, out_u8, info, offset):
-    """The checks the user's notes on dark print became (pitfall 97): ink_level (the print's top line skewed against
-    the generated print's) and ink_rim (an occluder's edge cut, a straight line of new ink near the body's edge).
-    For run.py and the pack's QA Sheet. -> audit findings ([] for light print)"""
+    """The checks the user's notes on dark print became (pitfalls 97-100): ink_level (the print's top line skewed
+    against the generated print's), ink_shape (its lines curving unlike the generated print's) and ink_rim (an
+    occluder's edge cut, a straight line of new ink near the body's edge). For run.py and the pack's QA Sheet.
+    -> audit findings ([] for light print)"""
     if info.get("polarity") != "dark":
         return []
     size = int(info.get("frame_size") or 19)
     return level_check(crop_u8, out_u8, info["matte"], size, offset) + \
+        shape_check(crop_u8, out_u8, info["matte"], size, offset) + \
         rim_check(crop_u8, out_u8, info["matte"], info.get("vis"), size, offset)
 
 
