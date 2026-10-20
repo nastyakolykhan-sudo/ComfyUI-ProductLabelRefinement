@@ -345,6 +345,12 @@ class Ghost:
         self.inner = g.inside & (g.u > P[:, 0].min() + fu) & (g.u < P[:, 0].max() - fu) & (g.v > P[:, 1].min() + fv) & \
             (g.v < P[:, 1].max() - fv)
 
+    def exclude(self, glass):
+        """Leave out where the render keeps the frame's own glass (render.clear_glass, V56): the frame's surface there
+        is the source on purpose, so it correlates with the source's."""
+        if glass is not None:
+            self.inner = self.inner & ~(glass(self.grid.u, self.grid.v) > 0.5)
+
     def __call__(self, out_u8, src_u8, matte, H_out, H_src, min_rs=0.4):
         g, b = self.grid, self.block
         ro, vo = g.unwarp(out_u8, self.art.local(H_out), matte)
@@ -397,7 +403,7 @@ class Ghost:
 
 
 def doubled(art, out_u8, src_u8, matte, H, polarity="light", clear=2, edge=4, tophat=15, thresh=0.03, piece=3, ends=32,
-            reach=10, tile=48, match=0.4, ink=0.25, keep=False):
+            reach=10, tile=48, match=0.4, ink=0.25, glass=None, keep=False):
     """The source's own print beside the label's (V54): the generator's lines drift against the tracked label, so
     wherever the label lets the source through over print (its end fade, a band that ends on a line) the frame's own
     line shows a few px off the label's: the one workflow's jar, its second-last line doubled at its band's
@@ -408,7 +414,9 @@ def doubled(art, out_u8, src_u8, matte, H, polarity="light", clear=2, edge=4, to
     the label's own print moved: per `tile` px tile round it, the shift within `reach` px that best lays the label's
     print onto the source's print (Dice), kept when the two cover each other to `match` (the dark reflections
     of a chrome lid or a glass base showing through a fade are thin marks too, but nothing of the label moved).
-    Pieces of `piece` px or more. -> {"px", "at": [y, x] of the largest piece, "v": [label rows it spans], "by_end":
+    Pieces of `piece` px or more. glass: the render's clear-glass weight (render.clear_glass, V56): the frame's own glass
+    it keeps is left out (its dark reflections beside the letters aren't a doubled line; "glass_px" counts them).
+    -> {"px", "at": [y, x] of the largest piece, "v": [label rows it spans], "by_end":
     px within `ends` rows of the label's top, its bottom, or inside, "band_v": [the label's rows]} or None (keep: plus
     "mask": (roi, the px), for a look)"""
     from scipy.signal import correlate
@@ -421,7 +429,7 @@ def doubled(art, out_u8, src_u8, matte, H, polarity="light", clear=2, edge=4, to
     x0, y0, x1, y1 = roi = work_box(Hl, art, out_u8.shape[:2], pad=4)
     if x1 - x0 < 8 or y1 - y0 < 8:
         return None
-    W, a_lab, (_, V) = wp.warp(art.pack, Hl, roi, art.refmask, ss=2, prefilter=0)
+    W, a_lab, (Ug, V) = wp.warp(art.pack, Hl, roi, art.refmask, ss=2, prefilter=0)
     lab = (W[..., 2] > 0.5) & (a_lab > 0.5) & binary_erosion(matte[y0:y1, x0:x1], iterations=edge)
     if lab.sum() < 200:
         return None
@@ -472,6 +480,13 @@ def doubled(art, out_u8, src_u8, matte, H, polarity="light", clear=2, edge=4, to
         # within 2 px of the source's px at least `ink` times the depth of the label's print in this frame (p75)
         ref = float(np.percentile(d_out[lp & lab], 75))
         g &= binary_dilation(d_src >= ink * ref, iterations=2)
+    n_glass = None
+    if glass is not None:
+        # where the render keeps the frame's own glass (render.clear_glass, V56) what shows is the frame's surface, its
+        # print near the label's letters filled: its dark reflections beside the letters aren't a doubled line
+        kept = glass(np.nan_to_num(Ug), np.nan_to_num(V)) > 0.5
+        n_glass = int((g & kept).sum())
+        g &= ~kept
     lb, n = ndi.label(g, np.ones((3, 3)))
     if n:
         sz = ndi.sum(g, lb, range(1, n + 1))
@@ -479,6 +494,8 @@ def doubled(art, out_u8, src_u8, matte, H, polarity="light", clear=2, edge=4, to
     P = art.polygon
     v0, v1 = float(P[:, 1].min()), float(P[:, 1].max())
     r = {"px": int(g.sum()), "band_v": [round(v0, 1), round(v1, 1)]}
+    if n_glass is not None:
+        r["glass_px"] = n_glass
     if r["px"]:
         lb, n = ndi.label(g, np.ones((3, 3)))
         sz = ndi.sum(g, lb, range(1, n + 1))
@@ -506,10 +523,14 @@ class Glitter:
     product too, a shimmering surface (a metallic tube's sparkle that twinkles from frame to frame) doesn't: the same
     specks are counted in a ring outside the product's matte (`ring` px), per area, for evaluate() to compare. add()
     every refined frame in clip order, then finish(): each frame is measured as soon as the frames after it are in,
-    and only 5 frames are kept (a large label is a million points a frame). -> {frame: measures}"""
+    and only 5 frames are kept (a large label is a million points a frame). Dark print (polarity "dark" or "both"):
+    only off the frame's own dark print too (a 7 px black top-hat over `levels`, dilated 3 px): the gaps between the
+    strokes of a garbled seal the generator morphs from frame to frame, beside the truth's, read as specks (V56).
+    -> {frame: measures}"""
 
-    def __init__(self, art, inset=3, print_px=3, **measure_kw):
+    def __init__(self, art, inset=3, print_px=3, polarity="light", **measure_kw):
         self.art, self.grid = art, ls.Grid(art, 1.0)
+        self.dark = polarity in ("dark", "both")
         prt = map_coordinates(art.pack[..., 0], [self.grid.v, self.grid.u], order=1) > 0.1
         self.inside = binary_erosion(self.grid.inside, iterations=int(inset)) & \
             ~(binary_dilation(prt, iterations=int(print_px)) if print_px > 0 else prt)
@@ -564,6 +585,8 @@ class Glitter:
         ths = Ls - ndi.grey_opening(Ls, size=(tophat, tophat))
         tho = Lo - ndi.grey_opening(Lo, size=(tophat, tophat))
         cand = ok & (ths > levels) & (Ls - ref_d > excess)
+        if self.dark:
+            cand &= ~binary_dilation(ndi.grey_closing(Ls, size=(7, 7)) - Ls > levels, iterations=3)
         lab, n = ndi.label(cand, structure=np.ones((3, 3)))
         base = {"area": int(ok.sum()), "ring": n_ring, "ring_area": a_ring}
         if not n:
