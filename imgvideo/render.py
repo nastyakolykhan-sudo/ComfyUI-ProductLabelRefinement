@@ -215,6 +215,59 @@ def render(frame_u8, H, Hsub, art, key, cfg, label_median=None, seed=0):
     return res, info, {"roi": roi, "R": R, "cov": cov, "F": F, "P_src": P_src & act, "U": U, "V": V}
 
 
+def print_rows(art, strip=4, line=0.25, min_px=3):
+    """Where the label's own print starts and ends along its rows (local reference px), or None: its coverage over 0.2
+    where the texture is on the product, counted in strips of `strip` rows; a strip is print when it holds `line` x
+    the median printed strip (and min_px) or more, so the odd dark speck in a glass base under the last line (the
+    keyframe's relit refraction) doesn't count. Cached on the artwork."""
+    if not hasattr(art, "_print_rows"):
+        p = (art.pack[..., 0] > 0.2) & (art.pack[..., 2] > 0.5)
+        n = p.sum(1)
+        k = int(np.ceil(len(n) / strip)) * strip
+        h = np.pad(n, (0, k - len(n))).reshape(-1, strip).sum(1)
+        ok = h > 0
+        dense = np.nonzero(ok & (h >= max(min_px, line * float(np.median(h[ok])) if ok.any() else min_px)))[0]
+        art._print_rows = (float(dense[0] * strip), float(min(dense[-1] * strip + strip, len(n)) - 1)) \
+            if len(dense) else None
+    return art._print_rows
+
+
+def print_fade(art, fv, gap):
+    """The end fade's length at the label's top and bottom (feather.print_gap): at most fv rows, ending gap px before
+    the label's first (last) print row, at least 1 px. -> (top px, bottom px)"""
+    pr = print_rows(art)
+    if pr is None:
+        return fv, fv
+    vlo, vhi = art.polygon[:, 1].min(), art.polygon[:, 1].max()
+    return (float(np.clip(pr[0] - gap - vlo, 1.0, fv)), float(np.clip(vhi - gap - pr[1], 1.0, fv)))
+
+
+SHADE_PRINT = {"size": 61, "contrast": 0.5, "grow": 2, "rim": 0.15}
+
+
+def shade_print(S_lin, T_lin, act, polarity, spec=True, key=None):
+    """Print in the frame or in the label (render.shade_print): px under `contrast` x the body round them (a grey
+    closing `size` px wide; light print: over 1 / contrast x a grey opening), grown `grow` px, away from the product's
+    limbs (`rim` x the matte's half-width in from its edge, `key` the matte). Black print on a light body sits at a
+    tenth of it. The limbs stay in the light's read: a packshot keyframe's darker limb is light the frame corrects
+    (masked, the tube's right limb came out black). -> bool mask"""
+    c = dict(SHADE_PRINT, **(spec if isinstance(spec, dict) else {}))
+    k = int(c["size"])
+    out = np.zeros(act.shape, bool)
+    for img in (S_lin, T_lin):
+        L = np.where(act, im.lum(img), np.nan)
+        Lf = np.nan_to_num(L, nan=float(np.nanmedian(L)) if np.isfinite(L).any() else 0.0)
+        if polarity in ("dark", "both"):
+            out |= Lf < float(c["contrast"]) * ndi.grey_closing(Lf, size=(k, k))
+        if polarity in ("light", "both"):
+            out |= Lf > ndi.grey_opening(Lf, size=(k, k)) / float(c["contrast"])
+    out = binary_dilation(out & act, iterations=int(c["grow"]))
+    if key is not None and key.any():
+        d = distance_transform_edt(key)
+        out &= d > float(c["rim"]) * float(d.max())
+    return out
+
+
 def _shade(img, m, sigma):
     """Low-pass of img (h x w x 3) over the pixels in m, filled into the gaps from further out."""
     out = np.empty_like(img)
@@ -290,7 +343,16 @@ def _render_texture(frame_u8, crop, S_lin, Hl, Hsub, art, R, act, P_src, a_lab, 
         # the source's own print sits (its tracks), or the misregistered garbled print reads as light
         Ws_, a_s, (Us, Vs) = wp.warp(art.texture, art.local(cfg["source_H"]), roi, art.refmask, ss=ss, prefilter=0)
         Ts, act_s = Ws_, act & (a_s > 0.5)
-    out_lin = T * _ratio_field(S_lin, Ts, act_s, int(cfg.get("shade_block", 8)), int(cfg.get("shade_median", 5)),
+    act_r = act_s
+    if cfg.get("shade_print"):
+        # the frame's light read on bare surface only (V54): the source's own print and the label's left out, at any
+        # stroke width. The block medians outvote thin print, but a bold logo the generator drew bigger and elsewhere
+        # (a tube's logo letter, 30-40 px strokes) wins its blocks: its darkness travelled with the label as a shadow,
+        # and the label's own letter, over the source's bare body, came out with a halo
+        sp = shade_print(S_lin, Ts, act_s, cfg.get("polarity", "light"), cfg["shade_print"], key[y0:y1, x0:x1])
+        act_r = act_s & ~sp
+        info["shade_print_px"] = int((sp & act_s).sum())
+    out_lin = T * _ratio_field(S_lin, Ts, act_r, int(cfg.get("shade_block", 8)), int(cfg.get("shade_median", 5)),
                                float(cfg.get("shade_sigma", 10.0)))
     if cfg.get("blur", 0) > 0:
         out_lin = np.stack([gaussian_filter(out_lin[..., c], float(cfg["blur"])) for c in range(3)], -1)
@@ -331,10 +393,16 @@ def _render_texture(frame_u8, crop, S_lin, Hl, Hsub, art, R, act, P_src, a_lab, 
         vlo, vhi = art.polygon[:, 1].min(), art.polygon[:, 1].max()
         fu = max(float(fe.get("theta_deg", 10.0)) * np.pi / 180.0 * getattr(getattr(Hl, "base", Hl), "Ru", 100.0), 1.0)
         fv = max(float(fe.get("v_px", 20.0)), 1.0)
+        fv0 = fv1 = fv
+        if fe.get("print_gap") is not None:
+            # the end fade stops print_gap px short of the label's own print (V54): faded over a line, the label lets
+            # the frame's own line through beside its own, and the generator's lines drift against the tracked label
+            fv0, fv1 = print_fade(art, fv, float(fe["print_gap"]))
+            info["feather_v_px"] = [round(fv0, 1), round(fv1, 1)]
         def ss(x):
             x = np.clip(x, 0, 1)
             return x * x * (3 - 2 * x)
-        wf = ss((U - ulo) / fu) * ss((uhi - U) / fu) * ss((V - vlo) / fv) * ss((vhi - V) / fv)
+        wf = ss((U - ulo) / fu) * ss((uhi - U) / fu) * ss((V - vlo) / fv0) * ss((vhi - V) / fv1)
         alpha = alpha * wf
         info["feather"] = True
     if occ is not None:

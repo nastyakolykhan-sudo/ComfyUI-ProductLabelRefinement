@@ -25,6 +25,12 @@ with pass/fail flags and the setting an agent tries next (summary["actions"]). P
           print-only render the same measure counts only the source's glitter, 45-250 px a frame).
   spots   small marks a print-only composite leaves: changed pixels darker than the source's own body by spot_levels,
           clear of the output's print by spot_clear px (letter fringes are not spots), in pieces under spot_max_px.
+          Light print only: dark print's own letters are dark marks it can't tell from spots.
+  double  the source's own print beside the label's (review.doubled, V54): where the label lets the source through
+          over print (its end fade, a band that ends on a line), the generator's line, drifting against the tracked
+          label, shows a few px off the label's own (the one workflow's jar: its second-last line doubled
+          away from the keyframe). double_px or more, as a 5-frame median. Ink only: a round body's soft limb
+          band passes the rest of the test next to the label's letters (V55).
 """
 import math
 
@@ -62,6 +68,8 @@ LOOKS = {
     "spot_clear": 4,         # ... this far from the output's print (dilation, px): a letter's fringe isn't a spot
     "spot_min_px": 4,        # ... and at least this big
     "spot_body": 15,         # px: the grey opening of the source that gives its body under the garbled print
+    "double_px": 150,        # px of the source's own print beside the label's (review.doubled), 5-frame median: the
+                             # one workflow's jar v1 read 426-639 a frame, fixed 0-88
 }
 
 
@@ -258,9 +266,13 @@ def frame_looks(src, out, M, changed, polarity="light"):
         r["base_deg"] = lvl.base_deg(M)
     except (ValueError, np.linalg.LinAlgError):
         pass
-    sp = spots(src, out, changed)
-    if sp:
-        r["spots"] = sp
+    if polarity == "light":
+        # a light-print measure: dark print's own letters are dark marks on the body it can't tell from spots (it
+        # flagged every frame of the one workflow's dark-print jar and tube, V54); stray dark print there is the
+        # double check's (review.doubled)
+        sp = spots(src, out, changed)
+        if sp:
+            r["spots"] = sp
     return r
 
 
@@ -435,6 +447,36 @@ def evaluate(F, shots, fps=24.0, cfg=None):
         for t, v in sp.items():
             flag(t, "spots", f"{len(v)} dark spot{'s' if len(v) > 1 else ''} on the label's body (at " +
                  ", ".join(f"{x},{y}" for y, x, _ in v[:3]) + "): look")
-        S["spots"] = {"frames": len(sp), "flagged": len(sp)}
+        S["spots"] = {"frames": len(sp), "flagged": len(sp)} if sh.get("polarity", "light") == "light" else \
+            {"judged": False, "why": f"{sh.get('polarity')} print: its letters are dark marks (the double check reads "
+                                     f"stray print)"}
+        # double: the source's own print beside the label's (V54), where the label lets the source through over print
+        db = {t: F[t]["double"] for t in ts if F[t].get("double") is not None}
+        if db:
+            tl = sorted(db)
+            med = median_filter(np.array([db[t]["px"] for t in tl], float), 5, mode="nearest")
+            hit = [t for t, v in zip(tl, med) if v >= c["double_px"]]
+            fe = sh.get("feather") if isinstance(sh.get("feather"), dict) else {}
+            names = {"bottom": "at its lower end", "top": "at its upper end", "inside": "inside it"}
+            for t in hit:
+                d = db[t]
+                be = d.get("by_end") or {}
+                where = ", ".join(f"{be[k]} px {names[k]}" for k in ("bottom", "top", "inside") if be.get(k))
+                flag(t, "double", f"the source's own print shows beside the label's: {d['px']} px ({where}; the "
+                                  f"largest piece at {d['at'][1]},{d['at'][0]})")
+            # at the label's ends (a fade or band end over a line) the band's settings help; elsewhere (the side
+            # fades: a generated layout wider than the keyframe's, the tube's packshot keyframe) look
+            at_ends = sum((db[t].get("by_end") or {}).get(k, 0) for t in hit for k in ("top", "bottom"))
+            inside = sum((db[t].get("by_end") or {}).get("inside", 0) for t in hit)
+            if hit and at_ends >= inside:
+                if sh.get("alpha", "label") == "label" and fe and fe.get("print_gap") is None:
+                    try_ = {"render": {"feather": dict(fe, print_gap=2)}}
+                else:
+                    try_ = {"anchor": {"over_print": {"room": 48}}}
+                act("double", hit, "the frame's own print shows beside the label's (its end fade or band end over a "
+                                   "line)", try_)
+            v = [d["px"] for d in db.values()]
+            S["double"] = {"frames": len(db), "median_px": int(np.median(v)), "max_px": int(max(v)), "flagged": len(hit),
+                           "px": {str(t): d["px"] for t, d in sorted(db.items()) if d["px"]}}
         summ[str(key)] = S
     return flags, {"looks": summ, "actions": actions}

@@ -271,6 +271,8 @@ class Job:
         cache = self.work / "anchor.json"
         spec = {"keyframe": str(anc["keyframe"]), "frame": anc.get("frame", "auto"), "band": anc["band"],
                 "model": anc.get("model", "homography"), "theta_lim": anc.get("theta_lim", 75.0)}
+        if anc.get("fit_band"):                  # (only when given: older jobs keep their cache)
+            spec["fit_band"] = anc["fit_band"]
         if cache.exists():
             m = json.loads(cache.read_text())
             if m.get("spec") == spec:
@@ -286,7 +288,13 @@ class Job:
         m = {"spec": spec, "frame": int(k), "match_outside_mask": d, "runner_up": d2, "polygon": poly, "quad": quad, **axis}
         if spec["model"] == "tube":
             from . import surface
-            T, W, Hh, info = surface.from_keyframe(self.masks()[k - self.s0], anc["band"], spec["theta_lim"])
+            fb = anc.get("fit_band")
+            T, W, Hh, info = surface.from_keyframe(self.masks()[k - self.s0], fb or anc["band"], spec["theta_lim"])
+            if fb:
+                # the tube fitted on the body's own band, the label over the whole anchor.band (V54): v = 0 at its start
+                T = rd.shift_ref(T, 0.0, float(anc["band"][0] - fb[0]))
+                Hh = int(np.ceil(anc["band"][1] - anc["band"][0])) + 1
+                info["fit_band"] = [int(fb[0]), int(fb[1])]
             tex, lpoly = surface.unroll(self.kf, T, W, Hh, spec["theta_lim"])
             Image.fromarray(tex).save(self.work / "label_texture.png")
             Image.fromarray(surface.unroll_mask(self.masks()[k - self.s0], T, W, Hh).astype(np.uint8) * 255).save(
@@ -758,6 +766,28 @@ def print_defaults(render, given=None):
             out["_sparkles_asked"] = out["sparkles"]
         out["sparkles"] = False
         added["sparkles"] = {"value": False, "by": by}
+    if added:
+        out["_defaults"] = dict(out.get("_defaults") or {}, **added)
+    return out
+
+
+FEATHER_PRINT_GAP = 2.0
+
+
+def print_gap_default(render, given=None):
+    """Whole-band compositing (render.alpha "label") from a measured job (V54): the label's end fade stops
+    feather.print_gap px short of its own print, and the frame's light is read off the print (render.shade_print),
+    unless `given` (the settings as written) sets them. Logged in render._defaults. -> the render settings"""
+    if not isinstance(render, dict) or render.get("alpha", "label") != "label":
+        return render
+    out, added = dict(render), {}
+    if isinstance(render.get("feather"), dict) and "print_gap" not in ((given or {}).get("feather") or {}) and \
+            "print_gap" not in render["feather"]:
+        out["feather"] = dict(render["feather"], print_gap=FEATHER_PRINT_GAP)
+        added["feather.print_gap"] = {"value": FEATHER_PRINT_GAP, "by": "the measured job (the label's end fade off its print)"}
+    if "shade_print" not in (given or {}) and "shade_print" not in render:
+        out["shade_print"] = True
+        added["shade_print"] = {"value": True, "by": "the measured job (the frame's light read off its print)"}
     if added:
         out["_defaults"] = dict(out.get("_defaults") or {}, **added)
     return out
@@ -1628,7 +1658,8 @@ def _review(J, parts, ll_path, arrays=None):
                 pol = (P.v.get("render") or {}).get("polarity", "light")
                 chg = np.any(out[i] != src[i], axis=-1)
                 LF[T] = {"looks": lk.frame_looks(src[i], out[i], m, chg, pol),
-                         "ghost_px": c["rinfo"].get(str(T), {}).get("ghost_px")}
+                         "ghost_px": c["rinfo"].get(str(T), {}).get("ghost_px"),
+                         "double": rv.doubled(c["art"], out[i], src[i], m, Ho, pol)}
                 if i > 0 and owner.get(T - 1) is P and (T - 1) in LF:
                     lc = dict(lk.LOOKS, **(looks_cfg or {}))
                     LF[T - 1]["swim"] = lk.swim_pair(src[i - 1], src[i], out[i - 1], out[i], prev[1], m,
@@ -1664,6 +1695,8 @@ def _review(J, parts, ll_path, arrays=None):
             shots[f"{c['shot'][0]}-{c['shot'][1]}"] = {
                 "frames": [T for T, Q in owner.items() if Q is P and T in LF], "keyframe": P.anchor,
                 "glue": (P.v.get("render") or {}).get("glue"), "level_on": on,
+                "feather": (P.v.get("render") or {}).get("feather"), "alpha": (P.v.get("render") or {}).get("alpha", "label"),
+                "polarity": (P.v.get("render") or {}).get("polarity", "light"),
                 "level_target": "base" if on and "level_deg" in kb and not kb.get("skipped") else None}
         lflags, lsum = lk.evaluate(LF, shots, J.info["fps"], looks_cfg or None)
         for t, v in lflags.items():
@@ -1804,7 +1837,8 @@ def plot_qa(rows, rep, path):
     if rep.get("review"):
         # the automatic review checks: one row per check, a mark on each flagged frame (refined or not)
         ax = axs[-1]
-        names = ["edges", "ghost", "shear", "bend", "vanish", "switch", "swim", "ends", "level", "sharp", "tilt", "spots"]
+        names = ["edges", "ghost", "shear", "bend", "vanish", "switch", "swim", "ends", "level", "sharp", "tilt", "spots",
+                 "double"]
         ax.set_facecolor(surf)
         for i, k in enumerate(names):
             xs = [int(t) for t, v in checks.items() if k in v]
@@ -1939,6 +1973,162 @@ def _patch_matte(J, f, cfg):
     return out, k
 
 
+BAND_OVER_PRINT = {
+    "room": 32,         # px along the axis past the keyframe's last line: the end fade (24) and the generator's drift
+                        # against the tracked label (the jar's second-last line sat 6-8 px off it away from the keyframe)
+    "strip": 4,         # px: the profile's strips along the axis
+    "line": 0.25,       # a strip is part of a line of print when it holds this share of the band's median strip's
+                        # corrected print or more (the jar's glass base under its last line: 1-16 %, its lines 60-200 %)
+    "gap": 8,           # px: a line starting this close past the band's end (or the last line) is carried too
+    "inset": 4,         # px: corrected print this far inside the matte (a limb's re-render isn't print)
+    "trim": 4,          # px: the band stays this far inside the matte's ends
+    "step": 20.0,       # levels: the room stops where the keyframe's body steps this far off the body under the last
+                        # line (imgauto's cap and collar steps: 25-65; text lines under 15)
+    "letter": 48,       # px: the source's strokes the keyframe took out count in pieces up to this size (letters) ...
+    "letter_min": 2.5,  # ... and at least this many strokes tall along the axis,
+    "letter_gap": 6,    # ... in lines: letters this many strokes apart or closer along the normal ...
+    "line_len": 0.25,   # ... running this share of the body's width or more
+}
+
+
+def band_over_print(band, changed, mask, kf, polarity, stroke, c=None, src=None):
+    """The measured band (the product profile's: the segment between a cap, collar or base step that carries the most
+    print) stretched over the lines of print the keyframe corrected that run past it, plus `room` px, within the
+    matte's ends (V54). Corrected print: the keyframe's changed px on its strokes or on its source frame's `src` (a
+    top-hat 2 x stroke + 1 px of the print's polarity at 0.03 linear: print it put in, print it took out), in strips
+    along the axis; a strip is print when it holds `line` x the band's
+    median strip; lines `gap` px apart are one block. On the one workflow's jar the profile ended the band at the
+    step from the pink body to the glass base, through the last line but one: the corrected last line was left out, and
+    the 24 px end fade ran over the line before it, which showed doubled away from the keyframe.
+    The keyframe's changes over the glass base (its relit refraction) are not print and don't stretch it. The surface
+    is still fitted on the profile's band (anchor.fit_band): fitted down to the jar's rounded foot, its tube missed
+    the silhouette by 21.6 px (1.9 on the band). A band given in settings stays as given.
+    -> (band, report or None when unchanged)"""
+    from scipy import ndimage as ndi
+
+    from .keyframe import product_axis
+    c = dict(BAND_OVER_PRINT, **(c or {}))
+    L = pa.lin_lum(kf)
+    k = 2 * int(stroke) + 1
+    th = []
+    if polarity in ("light", "both"):
+        th.append(L - ndi.grey_opening(L, size=(k, k)))
+    if polarity != "light":
+        th.append(ndi.grey_closing(L, size=(k, k)) - L)
+    pr = np.max(th, 0) > 0.03
+    if src is not None:
+        # the source's own strokes the keyframe changed count too: the tube's keyframe (the packshot's smaller layout)
+        # took the generated last line out, and left outside the band it stayed under the label's last line
+        Ls = pa.lin_lum(src)
+        ts = []
+        if polarity in ("light", "both"):
+            ts.append(Ls - ndi.grey_opening(Ls, size=(k, k)))
+        if polarity != "light":
+            ts.append(ndi.grey_closing(Ls, size=(k, k)) - Ls)
+        # as whole letters, away from the keyframe's own strokes (2 px): a piece `letter_min` x stroke tall or more
+        # along the axis and `letter` px at most either way. The tube's dropped line is letters 13-19 px tall; what
+        # the jar's keyframe relit is slivers of its own lines and its glass rim under them (1-5 px tall), which
+        # would stretch the band to the jar's foot
+        gone = (np.max(ts, 0) > 0.03) & ~binary_dilation(pr, iterations=2) & changed
+        lb, n = ndi.label(gone, np.ones((3, 3)))
+        if n:
+            cen0, ax0, n0 = product_axis(mask)
+            ys_, xs_ = np.nonzero(lb)
+            P_ = np.c_[xs_, ys_] - cen0
+            ta, tn, li = P_ @ ax0, P_ @ n0, lb[ys_, xs_]
+            ext = lambda v: ndi.maximum(v, li, range(1, n + 1)) - ndi.minimum(v, li, range(1, n + 1)) + 1
+            ha, wn = ext(ta), ext(tn)
+            ok = 1 + np.nonzero((ha >= float(c["letter_min"]) * float(stroke)) & (ha <= c["letter"]) &
+                                (wn <= c["letter"]))[0]
+            let = np.isin(lb, ok)
+            # in lines: the letters closed up along the axis' normal (gaps up to `letter_gap` x stroke) into a run
+            # `line_len` of the body's width or more. The jar's glass base keeps a few dark blobs 50-100 px apart
+            L = int(round(float(c["letter_gap"]) * float(stroke)))
+            k_ = np.zeros((2 * L + 1, 2 * L + 1), bool)
+            for q in np.linspace(-L, L, 4 * L + 1):
+                k_[int(round(L + q * n0[1])), int(round(L + q * n0[0]))] = True
+            run, m_ = ndi.label(ndi.binary_closing(let, structure=k_) | let, np.ones((3, 3)))
+            if m_:
+                ys_, xs_ = np.nonzero(run)
+                tn_, li_ = (np.c_[xs_, ys_] - cen0) @ n0, run[ys_, xs_]
+                wide = ndi.maximum(tn_, li_, range(1, m_ + 1)) - ndi.minimum(tn_, li_, range(1, m_ + 1)) + 1
+                my_, mx_ = np.nonzero(mask)
+                body_w = float(np.ptp((np.c_[mx_, my_] - cen0) @ n0))
+                pr |= let & np.isin(run, 1 + np.nonzero(wide >= float(c["line_len"]) * body_w)[0])
+    pr &= changed & binary_erosion(mask, iterations=int(c["inset"]))
+    ys, xs = np.nonzero(pr)
+    if len(xs) < 200:
+        return band, None
+    cen, ax, nrm = product_axis(mask)
+    t = (np.c_[xs, ys] - cen) @ ax
+    my, mx = np.nonzero(mask)
+    tm = (np.c_[mx, my] - cen) @ ax
+    st = float(c["strip"])
+    edges = np.arange(np.floor(tm.min()), tm.max() + st, st)
+    h, _ = np.histogram(t, bins=edges)
+    lo_e = edges[:-1]
+    inb = (lo_e >= band[0]) & (lo_e + st <= band[1]) & (h > 0)
+    if not inb.any():
+        return band, None
+    dense = h >= float(c["line"]) * float(np.median(h[inb]))
+
+    def reach(end, sgn):
+        """the far edge of the print block that starts within `gap` of `end` (walking away from the band)"""
+        last = float(end)
+        idx = np.nonzero(dense)[0]
+        order = idx if sgn > 0 else idx[::-1]
+        for i in order:
+            a_, b_ = lo_e[i], lo_e[i] + st
+            if sgn > 0 and b_ > end:
+                if a_ - last > c["gap"]:
+                    break
+                last = max(last, b_)
+            elif sgn < 0 and a_ < end:
+                if last - b_ > c["gap"]:
+                    break
+                last = min(last, a_)
+        return last
+    p0, p1 = reach(band[0], -1), reach(band[1], 1)
+    # the keyframe's body along the axis (the middle of the body, print left out), per strip: the room stops where it
+    # steps off the body under the last line (the tube's keyframe, the packshot, starts its tan base 17 px past it,
+    # where the source still shows pink: carried, it was a brown line under the label)
+    pb = binary_dilation(np.max(th, 0) > 0.03, iterations=2)
+    inner = binary_erosion(mask, iterations=12) & ~pb
+    yi, xi = np.nonzero(inner)
+    Pi = np.c_[xi, yi] - cen
+    ti, qi = Pi @ ax, Pi @ nrm
+    mid = np.abs(qi) < 0.35 * float(np.ptp(qi)) if len(qi) else qi
+    gk = kf.astype(np.float32).mean(-1)[yi, xi]
+
+    def body(a_, b_):
+        sel = mid & (ti >= a_) & (ti < b_)
+        return float(np.median(gk[sel])) if sel.sum() > 20 else None
+
+    def room(p, sgn):
+        """how far past the print at p the body stays the print's own (at most `room` px)"""
+        ref = body(p - 3 * st, p) if sgn > 0 else body(p, p + 3 * st)
+        if ref is None:
+            return float(c["room"])
+        d = 0.0
+        while d + st <= c["room"]:
+            v = body(p + d, p + d + st) if sgn > 0 else body(p - d - st, p - d)
+            if v is not None and abs(v - ref) > c["step"]:
+                return max(d - 2.0, 0.0)
+            d += st
+        return float(c["room"])
+    b0, b1 = int(band[0]), int(band[1])
+    if p0 < band[0]:
+        b0 = min(b0, max(int(np.floor(p0 - room(p0, -1))), int(np.ceil(tm.min())) + int(c["trim"])))
+    if p1 > band[1]:
+        b1 = max(b1, min(int(np.ceil(p1 + room(p1, 1))), int(np.floor(tm.max())) - int(c["trim"])))
+    if [b0, b1] == [int(band[0]), int(band[1])]:
+        return band, None
+    share = float(((t >= band[0]) & (t <= band[1])).mean())
+    return [b0, b1], {"from": [int(band[0]), int(band[1])], "print": [round(float(p0), 1), round(float(p1), 1)],
+                      "print_in_band": round(share, 3),
+                      "room_px": [round(float(p0 - b0), 1), round(float(b1 - p1), 1)]}
+
+
 def _staged(J, stamps, k_track, k_fit, still_key, f, cfg):
     """track and fit only when their inputs changed since the last run in this folder (the work/ caches are video.py's
     own), then the matte patch, then still (when its inputs, the patched mattes included, changed). -> patch"""
@@ -1966,7 +2156,7 @@ def _staged(J, stamps, k_track, k_fit, still_key, f, cfg):
 SETTINGS_SECTIONS = ("track", "fit", "render", "qa", "review", "artwork", "key")
 # render settings the still label doesn't depend on
 RENDER_ONLY = ("body_snap", "sparkles", "spark_glow", "alpha", "print_alpha", "soft_cap", "smear", "_sparkles_asked",
-               "glue", "level", "_defaults")
+               "glue", "level", "_defaults", "shade_print")
 
 
 def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24.0, work=None, workers=None):
@@ -1974,7 +2164,9 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
     masks      T x H x W bool: the product's matte, same count and size
     keyframes  [H x W x 3 uint8, ...]: corrected frames of the clip (the label fixed), one per shot to cover
     settings   video.py's vjob sections (track, fit, render, qa, review, artwork, key) merged over the measured ones,
-               plus "anchor" (band, model, theta_lim: the same for every keyframe, or a list, one per keyframe),
+               plus "anchor" (band, model, theta_lim: the same for every keyframe, or a list, one per keyframe;
+               over_print: false keeps the measured band where the keyframe corrected print past it, or
+               {BAND_OVER_PRINT keys}, V54),
                "shots" ([[a, b] or null per keyframe]) and "words" (the label's copy, for OCR in QA)
     keyframe_frames  [frame or None per keyframe]; None: matched outside the matte (video.py's anchor.frame "auto")
     work       folder for each shot's work/ caches; reused across runs (track, fit and still run again only when their
@@ -2036,17 +2228,27 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
             d["skipped"] = "the matte is (nearly) empty on the keyframe's frame"
             continue
         anc = dict(per_keyframe("anchor", i) or {})
+        over_print = anc.pop("over_print", True)
+        changed, outside = aver.edit_region(kf, frames[f], m)
+        polarity = (cfg.get("render") or {}).get("polarity") or aver.print_polarity(kf, m, changed)
+        stroke = aver.stroke_width(frames[f], m, changed) or 4
         if anc.get("band"):
             band, binfo = [int(x) for x in anc["band"]], {"from": "settings"}
         else:
             band, binfo = aver.body_band(kf, m)
             binfo = dict(binfo, **{"from": "measured (product profile)"})
+            if band and over_print is not False:
+                # the label carries every line the keyframe corrected, with room for its end fade; the tube is still
+                # fitted on the profile's band (V54)
+                b2, over = band_over_print(band, changed, m, kf, polarity, stroke,
+                                           over_print if isinstance(over_print, dict) else None, src=frames[f])
+                if over:
+                    binfo["over_print"] = over
+                    anc.setdefault("fit_band", list(band))
+                    band = b2
         if not band:
             d["skipped"] = "no label band found on the keyframe (give anchor.band in settings)"
             continue
-        changed, outside = aver.edit_region(kf, frames[f], m)
-        polarity = (cfg.get("render") or {}).get("polarity") or aver.print_polarity(kf, m, changed)
-        stroke = aver.stroke_width(frames[f], m, changed) or 4
         boxes = []                           # QA's OCR boxes, in the unrolled keyframe's label px, when the copy is given
         tube = anc.get("model", "tube") == "tube"
         if words and tube and not (cfg.get("qa") or {}).get("text_boxes"):
@@ -2087,6 +2289,7 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
             vj["render"]["_defaults"] = dflt
         # render.alpha "print": its defaults over the measured job's (feather.v_px 4 unless the settings give one)
         vj["render"] = print_defaults(vj["render"], cfg.get("render") or {})
+        vj["render"] = print_gap_default(vj["render"], cfg.get("render") or {})
         vj["about"] = "written by imgvideo.pipeline.refine (in memory)"
         d.update(shot=[a, b], shot_from=shot_from, band=band, band_info=binfo, polarity=polarity, stroke_px=stroke,
                  edit_outside_matte=round(outside, 4))
