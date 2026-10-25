@@ -196,7 +196,51 @@ def run(crop_u8, after_u8, alpha, old, vis, F, offset, align_rep=None, squeeze=N
                               "text": f"{l['label']}: {m:.1f} px off the generated edge after the fit" +
                                       (" (the shape is the generated outline: a margin moves, bled or cut)" if shape else "")})
 
+    if not ink and (align_rep or {}).get("model") != "cylinder":
+        found += bow_check(crop_u8, after_u8, old, offset)
     return found, sheet(crop_u8, after_u8, found, offset)
+
+
+def bow_check(crop_u8, after_u8, old, offset, size=19, min_px=4.0, share=0.1):
+    """The product's lines across its body against the generated product's (pitfall 101: the user on a tube's
+    keyframe, its packshot warped flat onto a tube seen from above, "the label doesn't follow the curved tube's
+    shape", which the audit had called clean). bow.long_lines in the frame and in the result over the generated
+    product's matte, paired by their place in the layout (bow.pair_lines). A pair is off when its bows differ by more
+    than max(min_px, share x the frame's). WARN when two pairs or more and half of them are off, and the median
+    difference is over that tolerance at the median bow: every line flatter (or more bowed), not one line of text's
+    letters. The tube's flat keyframe fires (4 of 4, 9 px flatter: its rules 0 against the frame's 6 and 9); its bowed one and
+    the approved jobs stay quiet. Only for a fit that draws no curve of its own (affine, homography; not a cylinder,
+    whose bow is the body's geometry and can be truer than the generator's lines: a toner label bowed 4-8 px more than
+    its garbled print, delivered as it was). Dark print on a body has its own (ink_shape). -> findings ([] when quiet)"""
+    from . import bow as bw
+    from . import images as im
+    if old.sum() < 400:
+        return []
+    c, ax, n = bw.body_axis(old)
+    hw = bw.half_widths(old, c, ax, n)
+    if len(hw) < 4:
+        return []
+    frame = {"centre": c.tolist(), "axis": ax.tolist(), "half_widths": hw}
+    gen = bw.long_lines(im.lum(im.srgb_to_lin(im.to_float(crop_u8))), old, frame, size)
+    res = bw.long_lines(im.lum(im.srgb_to_lin(im.to_float(after_u8))), old, frame, size)
+    _, pairs = bw.pair_lines(gen, res)
+    if len(pairs) < 2:
+        return []
+    d = np.array([r["b"] - g["b"] for g, r in pairs])
+    off = [abs(x) > max(min_px, share * abs(g["b"])) for x, (g, _) in zip(d, pairs)]
+    med = float(np.median(d))
+    if sum(off) < 2 or 2 * sum(off) < len(pairs) or \
+            abs(med) <= max(min_px, share * float(np.median([abs(g["b"]) for g, _ in pairs]))):
+        return []
+    ys, xs = np.nonzero(old)
+    return [{"check": "bow", "level": "WARN",
+             "box": [int(xs.min()) + offset[0], int(ys.min()) + offset[1], int(xs.max()) + offset[0],
+                     int(ys.max()) + offset[1]],
+             "bow_px": [[round(g["b"], 1), round(r["b"], 1)] for g, r in pairs],
+             "text": f"{sum(off)} of {len(pairs)} lines across the product curve unlike the generated product's: "
+                     f"{'flatter' if med < 0 else 'more bowed'} by {abs(med):.0f} px (median; bow px, frame/result: " +
+                     ", ".join(f"{g['b']:+.0f}/{r['b']:+.0f}" for g, r in pairs) + "): the body's curve missing? "
+                     "(align.bow; Auto Draft bow print)"}]
 
 
 def sheet(before_u8, after_u8, found, offset, tile=220):

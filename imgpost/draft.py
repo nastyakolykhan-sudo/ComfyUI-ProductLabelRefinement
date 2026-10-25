@@ -260,7 +260,7 @@ def draft(scene_u8, ref_u8, ref_alpha=None, quad=None, pairs=(), occluders=(), m
     }
     return {"job": job, "H": H, "points": points, "corners": corners, "props": props, "sil_found": sil_found,
             "mask_note": mask_note, "orient": af.orientation(H, (bx0, by0, bx1, by1)), "white_box": wb, "notes": notes,
-            "sheet": af.match_sheet(scene, ref, H, [p for p in points])}
+            "sheet": af.match_sheet(scene, ref, H, [p for p in points]), "ref_u8": ref_u8, "ref_alpha": ref_alpha}
 
 
 # ---- label mode ----
@@ -772,7 +772,8 @@ def label_draft(scene_u8, ref_u8, ref_alpha=None, quad=None, outline=None, kind=
             "paper": paper}
     return {"job": job, "H": H, "points": points, "corners": corners, "props": [], "sil_found": None, "mask_note": None,
             "orient": af.orientation(H, (bx0, by0, bx1, by1)), "white_box": None, "notes": notes,
-            "sheet": af.match_sheet(scene, ref, H, points) if points else None, "label": info}
+            "sheet": af.match_sheet(scene, ref, H, points) if points else None, "label": info,
+            "ref_u8": ref_u8, "ref_alpha": ref_alpha}
 
 
 def print_on_body(d, scene_u8, mask=None, ink=None, print_box=None, bow=None):
@@ -783,7 +784,8 @@ def print_on_body(d, scene_u8, mask=None, ink=None, print_box=None, bow=None):
                    inside is the product's mask: run.py draft sets old_silhouette to its file, the ComfyUI template
                    wires it into Fill Leftovers.
       bow          text for bow.parse ("-150:0 146.5"): align.bow, its centre, axis and half-widths measured from the
-                   product mask (needed), b given or measured at the seams.
+                   product mask (needed), b given or measured at the seams; "print": b from the generated product's own
+                   long lines less the warped packshot's (bow.from_print, pitfall 101: a packshot warped whole).
     Adds a line per change to d["notes"]."""
     from . import bow as bw
     job = d["job"]
@@ -798,6 +800,23 @@ def print_on_body(d, scene_u8, mask=None, ink=None, print_box=None, bow=None):
         d["notes"].append(f"matte ink, {ink}: the packshot's print on the frame's own body" +
                           ("" if print_box else "; no print_box: a body's highlights, seams or lid edge may be taken "
                                                 "for print (pitfall 93), give the print's rows on the packshot"))
+    if isinstance(bow, str) and bow.strip().lower() == "print":
+        # the bow the generated product draws, less the packshot's own as the fit warps it (a tube warped flat)
+        if mask is None:
+            raise DraftError("bow print: needs the product mask (the body's frame, and its lines)")
+        if d.get("ref_u8") is None:
+            raise DraftError("bow print: the draft has no reference image")
+        from . import outline as ol
+        refmask = ol.RefMask(job["reference_outline"], d["ref_u8"], d.get("ref_alpha"))
+        prof, prep = bw.from_print(scene_u8, mask, d["ref_u8"], refmask, d["H"])
+        if prof is None:
+            raise DraftError(f"bow print: {prep['why']} (give the bow as t:b, or leave it empty)")
+        bow = {"b": prof, "from": "print"}
+        d["notes"].append("bow from the print's lines: the frame's " +
+                          ", ".join(f"{l['b']:+.1f}" for l in prep["frame_lines"]) + " px, the warped packshot's " +
+                          ", ".join(f"{l['b']:+.1f}" for l in prep["packshot_lines"]) + " px (top to bottom)" +
+                          (f"; the matte's {' and '.join(prep['matte_ends']['used'])} end too"
+                           if prep["matte_ends"]["used"] else ""))
     spec = bw.parse(bow) if isinstance(bow, str) else bow
     if not spec and ink == "dark" and mask is not None:
         # dark print without a bow given: the body's own bow from its matte's two ends (a jar seen from above bows
@@ -807,6 +826,7 @@ def print_on_body(d, scene_u8, mask=None, ink=None, print_box=None, bow=None):
             spec = {"b": prof, "from": "matte"}
             d["notes"].append(f"bow from the matte's ends: {prof[0][1]:+g} px at its top, {prof[1][1]:+g} at its base "
                               "(no --bow given; kept only where the generated print bows too)")
+    if spec:
         if mask is None:
             raise DraftError("bow: needs the product mask (its centre, axis and half-widths)")
         try:
