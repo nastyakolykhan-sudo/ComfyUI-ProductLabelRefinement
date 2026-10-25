@@ -468,7 +468,8 @@ def axis_ends(H, matte, v_mid, reach=600.0):
 # ---------------------------------------------------------------- the label against the body (V39)
 
 BODY_SNAP = {"top": "auto", "bottom": "auto", "reach": [0.37, 0.42], "across": 0.65, "inside": 0.05, "window": 0.5,
-             "median": 5, "outlier_k": 4.0, "stretch": [0.9, 1.1], "roll_max": 4.0, "shift_max": 0.15}
+             "median": 5, "outlier_k": 4.0, "stretch": [0.9, 1.1], "roll_max": 4.0, "shift_max": 0.15, "turn": False,
+             "turn_max": 0.08}
 
 
 def _edge_profile(p, ax, lum, reach):
@@ -585,7 +586,19 @@ def body_measure(H, lum, matte, v_range, uc, top="rise", bottom="matte", reach=(
         pa = (q[1] - q[0]) / max(float(np.linalg.norm(q[1] - q[0])), 1e-6)
         bax = bax if bax @ pa > 0 else -bax
         roll = float(np.degrees(np.arctan2(pa[0] * bax[1] - pa[1] * bax[0], pa @ bax)))
-    return {"top": tp, "bot": bt, "L": L, "roll": roll, "pivot": p[2].tolist()}
+    # the label point under the body's centreline at the label's middle (its u, through the tube): the label's turn
+    # against the body (body_snap.turn, V59)
+    u_body = np.nan
+    Hb = H
+    while hasattr(Hb, "base"):
+        Hb = Hb.base
+    on = np.nonzero(map_coordinates(matte, [p[2][1] + S_ * n[1], p[2][0] + S_ * n[0]], order=1) > 0.5)[0]
+    if len(on) >= 10 and hasattr(Hb, "inverse"):
+        cm = p[2] + n * 0.5 * (S_[on.min()] + S_[on.max()])
+        uu, _, okk = Hb.inverse(np.array([cm[0]]), np.array([cm[1]]))
+        if okk is None or bool(np.asarray(okk).ravel()[0]):
+            u_body = float(np.asarray(uu).ravel()[0])
+    return {"top": tp, "bot": bt, "L": L, "roll": roll, "pivot": p[2].tolist(), "u_body": u_body}
 
 
 def body_offsets(m, ref):
@@ -596,13 +609,16 @@ def body_offsets(m, ref):
     B, Bk = m["top"] + m["L"] + m["bot"], ref["top"] + ref["L"] + ref["bot"]
     return {"top_px": m["top"] - B * ref["top"] / Bk, "bottom_px": m["bot"] - B * ref["bot"] / Bk,
             "roll_deg": m["roll"] - ref["roll"] if np.isfinite(m["roll"]) and np.isfinite(ref["roll"]) else np.nan,
-            "stretch": (m["L"] / B) / (ref["L"] / Bk)}
+            "stretch": (m["L"] / B) / (ref["L"] / Bk),
+            "turn_px": m.get("u_body", np.nan) - ref.get("u_body", np.nan)}
 
 
-def body_corrections(meas, ref, v_range, median=5, outlier_k=4.0, stretch=(0.9, 1.1), roll_max=4.0, shift_max=0.15):
+def body_corrections(meas, ref, v_range, median=5, outlier_k=4.0, stretch=(0.9, 1.1), roll_max=4.0, shift_max=0.15,
+                     turn=False, turn_max=None):
     """Per frame, the tube correction that puts the label back at the reference frame's proportion of the body and its
-    print at the reference's angle to the body's centreline: {t: (f, p, roll_deg)} for Tube v -> p + f v (label px)
-    and a turn by roll_deg about the label's middle (body_snapped).
+    print at the reference's angle to the body's centreline: {t: (f, p, roll_deg, du)} for Tube v -> p + f v (label
+    px), a turn by roll_deg about the label's middle, and (turn) a turn round the axis by du label px that keeps the
+    label point under the body's centreline the reference's (body_snapped).
     meas: {t: body_measure}. Each series is cleared of outliers (a sparkle trail splitting the matte) against a
     `median`-frame running median, then median-filtered, then clamped (stretch, roll_max deg, shift_max of the
     label's length). A frame measured as None takes its neighbours' correction."""
@@ -613,18 +629,18 @@ def body_corrections(meas, ref, v_range, median=5, outlier_k=4.0, stretch=(0.9, 
     for t in ts:
         m = meas[t]
         if m is None:                                    # not measured here: its neighbours' correction
-            raw.append([np.nan, np.nan, np.nan])
+            raw.append([np.nan, np.nan, np.nan, np.nan])
             continue
         o = body_offsets(m, ref)
         sig = m["L"] / (v1 - v0)
         vt = v0 - o["top_px"] / sig                      # where the label's top should go, in the old label v
         vb = v1 + o["bottom_px"] / sig
         f = (vb - vt) / (v1 - v0)
-        raw.append([f, vt - f * v0, o["roll_deg"]])          # (a turn by +roll puts the print on the body's axis)
-    arr = np.array(raw, float).reshape(-1, 3)
+        raw.append([f, vt - f * v0, o["roll_deg"], -o["turn_px"] if turn else 0.0])   # (+roll: onto the body's axis)
+    arr = np.array(raw, float).reshape(-1, 4)
     if not len(arr):
         return {}
-    for j in range(3):
+    for j in range(4):
         x = arr[:, j]
         if not np.isfinite(x).any():
             arr[:, j] = 0.0 if j else 1.0
@@ -636,17 +652,20 @@ def body_corrections(meas, ref, v_range, median=5, outlier_k=4.0, stretch=(0.9, 
     arr[:, 0] = np.clip(arr[:, 0], *stretch)
     arr[:, 1] = np.clip(arr[:, 1], -shift_max * (v1 - v0), shift_max * (v1 - v0))
     arr[:, 2] = np.clip(arr[:, 2], -roll_max, roll_max)
-    return {t: (float(a[0]), float(a[1]), float(a[2])) for t, a in zip(ts, arr)}
+    if turn_max is not None:
+        arr[:, 3] = np.clip(arr[:, 3], -turn_max, turn_max)
+    return {t: (float(a[0]), float(a[1]), float(a[2]), float(a[3])) for t, a in zip(ts, arr)}
 
 
-def body_snapped(H, p, f, roll_deg, pivot):
-    """H with its tube's label moved along the axis and stretched (Tube v -> p + f v) and turned by roll_deg about
-    pivot (scene px); a Residual on top (the fit's) keeps its scene-space correction."""
+def body_snapped(H, p, f, roll_deg, pivot, du=0.0):
+    """H with its tube's label moved along the axis and stretched (Tube v -> p + f v), turned by roll_deg about pivot
+    (scene px) and turned round the axis by du label px (u0 + du); a Residual on top (the fit's) keeps its scene-space
+    correction."""
     import copy
     from .surface import Tube
     if hasattr(H, "base"):
         R = copy.copy(H)
-        R.__dict__["base"] = body_snapped(H.base, p, f, roll_deg, pivot)
+        R.__dict__["base"] = body_snapped(H.base, p, f, roll_deg, pivot, du)
         return R
     A = H.A.copy()
     a = H.a + H.A[:, 1] * p
@@ -654,4 +673,4 @@ def body_snapped(H, p, f, roll_deg, pivot):
     c, s = np.cos(np.radians(roll_deg)), np.sin(np.radians(roll_deg))
     Rm = np.array([[c, -s], [s, c]])
     pv = np.asarray(pivot, float)
-    return Tube(H.u0, H.Ru, H.R + H.k * p, H.k * f, Rm @ A, Rm @ (a - pv) + pv)
+    return Tube(H.u0 + du, H.Ru, H.R + H.k * p, H.k * f, Rm @ A, Rm @ (a - pv) + pv)
