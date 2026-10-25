@@ -950,6 +950,8 @@ def _render_one(C, J, t, frame, extras=None):
     H, H0_, sh, bs, snap_rep = _place(C, J, t)
     if sh is not None:
         rct["axial_shift"] = sh
+    if bs is not None and len(bs) > 4 and bs[4]:
+        rct["held_turn"] = True                              # render.body_snap.turn moved the label off its tracks
     placed = None
     if H is not H0_:
         rct.setdefault("source_H", H0_)

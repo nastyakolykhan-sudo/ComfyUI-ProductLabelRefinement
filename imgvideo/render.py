@@ -271,6 +271,22 @@ def glass_map(art, med, step, band, fit_band, spec=True):
     return weight
 
 
+def _fill_print(crop, F, act, roi):
+    """crop with the px in F filled from the surface round them (harmonic, else normalized convolution), blended in
+    over a 0.6 px edge."""
+    if not F.any():
+        return crop
+    D = binary_dilation(F) & ~F & act
+    try:
+        base, _ = fl.harmonic_fill(crop, F, D, offset=(roi[0], roi[1]))
+    except fl.FillError:
+        base = crop.copy()
+        for ch in range(3):
+            base[..., ch] = np.where(F, normconv(crop[..., ch], ~F & act, 4.0)[0], crop[..., ch])
+    Fs = np.clip(gaussian_filter(F.astype(float), 0.6), 0, 1)
+    return crop * (1 - Fs[..., None]) + base * Fs[..., None]
+
+
 def _clear_glass(comp, crop, out, alpha, Wk, P_src, act, sil, a_lab, U, V, roi, glass, info, Wk_src=None):
     """Over clear glass (glass_map's weight) the frame keeps its own surface: its print (the generator's line, within
     `near` px of the label's) is filled from the glass round it, and only the label's print goes on, relit as the
@@ -289,17 +305,7 @@ def _clear_glass(comp, crop, out, alpha, Wk, P_src, act, sil, a_lab, U, V, roi, 
         lab = lab | (np.clip(Wk_src, 0, 1) * sil > 0.2)
     F = (binary_dilation(cov > 0.04, iterations=1) |
          (P_src & binary_dilation(lab, iterations=int(getattr(glass, "near", 10))))) & on
-    base = crop
-    if F.any():
-        D = binary_dilation(F) & ~F & act
-        try:
-            base, _ = fl.harmonic_fill(crop, F, D, offset=(x0, y0))
-        except fl.FillError:
-            base = crop.copy()
-            for ch in range(3):
-                base[..., ch] = np.where(F, normconv(crop[..., ch], ~F & act, 4.0)[0], crop[..., ch])
-        Fs = np.clip(gaussian_filter(F.astype(float), 0.6), 0, 1)
-        base = crop * (1 - Fs[..., None]) + base * Fs[..., None]
+    base = _fill_print(crop, F, act, roi)
     a_ink = np.clip(cov * alpha, 0, 1)
     comp_g = base * (1 - a_ink[..., None]) + out * a_ink[..., None]
     info["clear_glass_px"] = int((gw > 0.5).sum())
@@ -449,7 +455,7 @@ def _render_texture(frame_u8, crop, S_lin, Hl, Hsub, art, R, act, P_src, a_lab, 
     Pk = Wk > 0.2                                            # keyframe's print
     # (clear glass, V59) the label's print where the tracking puts it, when the render places it elsewhere
     Wk_s = wp.warp(art.pack, art.local(cfg["source_H"]), roi, art.refmask, ss=max(2, ss // 2), prefilter=0)[0][..., 0] \
-        if glass is not None and cfg.get("source_H") is not None else None
+        if (glass is not None or cfg.get("held_turn")) and cfg.get("source_H") is not None else None
     occ = None
     if cfg.get("occluder_feather"):
         # something in front (a sparkle trail the matte cuts out) leaves a hole inside the label; only holes well
@@ -531,6 +537,14 @@ def _render_texture(frame_u8, crop, S_lin, Hl, Hsub, art, R, act, P_src, a_lab, 
         x = np.clip((distance_transform_edt(~occ) - 1.0) / float(cfg["occluder_feather"]), 0, 1)
         alpha = alpha * x * x * (3 - 2 * x)
         info["occluder_px"] = int(occ.sum())
+    if cfg.get("held_turn") and Wk_s is not None:
+        # (V59) held off its tracks by the body snap's turn, the label fades over the frame's own print a few px off
+        # its letters (a seal's ring near the limb echoed beside the label's): where the label lets the frame
+        # through, the frame's print near the letters where the tracking puts them is filled from the surface
+        # round it
+        Ff = P_src & binary_dilation(np.clip(Wk_s, 0, 1) * sil > 0.2, iterations=10) & (alpha < 0.98) & (sil > 0)
+        crop = _fill_print(crop, Ff, act, roi)
+        info["held_fill_px"] = int(Ff.sum())
     comp = crop * (1 - alpha[..., None]) + out * alpha[..., None]
     if glass is not None:
         comp = _clear_glass(comp, crop, out, alpha, Wk, P_src, act, sil, a_lab, U, V, roi, glass, info, Wk_s)
