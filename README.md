@@ -334,8 +334,9 @@ Typical overrides after a first look at the report: `{"render": {"spark_glow": [
 - its share of the body against the keyframe's (`stretch`);
 - its turn round the body off the keyframe frame's place (`turn_px`, label px at its middle; 0.8.0).
 
-`review.checks` now covers edges, ghost, shear, bend, body, slide, glitter, shimmer, vanish and switch, plus the look checks above (swim, ends, level, sharp, tilt, spots, double):
+`review.checks` now covers edges, step, ghost, shear, bend, body, slide, glitter, shimmer, vanish and switch, plus the look checks above (swim, ends, level, sharp, tilt, spots, double):
 - `slide` (0.8.0): the label turned round the product off its place on the body, over 4 px as a 5-frame median for a quarter of a second. Look first: if the product doesn't turn on its axis there, `body_snap.turn` holds the label.
+- `step` (0.8.0): the product's step (a band's edge) shown twice at the label's end: the output steps twice the same way 3-16 px apart where the source steps once, across 15 % of the end, 3 frames in a row. Since 0.8.0 a body step inside the label's last rows (a keyframe that curves the band's edge with the body) isn't taken for print, so the label's end fade runs its full length over it.
 - `shimmer` (0.8.0): the light on the label's body blinking from frame to frame more than the source's at the same points (the output read through the mapping that rendered it): over 0.5 % of the body 3 or more levels above, 3 frames in a row. The flag names the fix (`shade_local`).
 
 **`body` and `glitter` are calibrated on one product so far:** a frosted serum bottle with white print. On older approved test clips they still flag some frames: a close-up bottle whose gap to the collar seam swings as it bounces, and a shimmering metallic tube. On a new product type, look at the flagged frames before turning the fix on. On dark print (0.7.0) a glitter speck must also be clear of the frame's own dark print: the gaps in a garbled seal the generator morphs from frame to frame were read as lost glitter.

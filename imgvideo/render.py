@@ -313,13 +313,62 @@ def _clear_glass(comp, crop, out, alpha, Wk, P_src, act, sil, a_lab, U, V, roi, 
     return comp * (1 - gw[..., None]) + comp_g * gw[..., None]
 
 
+END_STEPS = {"reach": 16, "ref": 64, "dist": 0.3, "run": 15}
+
+
+def end_steps(art, reach=16, ref=64, dist=0.3, run=15):
+    """Cells of the still label within `reach` rows of its top or bottom that are a body step, not print: a hue off the
+    body's (chromaticity, log r/g and log b/g, over `dist` from the median of the bare body in the `ref` rows inside
+    that end) in runs `run` px long and 3 rows tall (a line of print is neutral and thin), with the ink in the end rows
+    that touches it (the step's darker rim). A keyframe that curves its
+    band edge with the body (Auto Draft's bow "print") brought it into the label's straight end, higher at the sides:
+    counted as print, it cut the end fade to 1 px (V60). Cached on the artwork. -> bool mask (local reference px)"""
+    from scipy.ndimage import binary_opening
+    if not hasattr(art, "_end_steps"):
+        T = np.asarray(art.texture, float)
+        T = T / 255.0 if T.max() > 1.5 else T
+        val = art.pack[..., 2] > 0.5
+        ink = art.pack[..., 0] > 0.2
+        lr = np.log(np.maximum(T[..., 0], 1e-3) / np.maximum(T[..., 1], 1e-3))
+        lb = np.log(np.maximum(T[..., 2], 1e-3) / np.maximum(T[..., 1], 1e-3))
+        out = np.zeros(val.shape, bool)
+        h = val.shape[0]
+        rows = np.nonzero(val.any(1))[0]
+        if len(rows):
+            v0, v1 = int(rows[0]), int(rows[-1]) + 1
+            for a, b, ra, rb in ((v0, v0 + reach, v0 + reach, v0 + reach + ref), (v1 - reach, v1, v1 - reach - ref, v1 - reach)):
+                a, b, ra, rb = max(a, 0), min(b, h), max(ra, 0), min(rb, h)
+                body = val[ra:rb] & ~ink[ra:rb]
+                if body.sum() < 50:
+                    continue
+                d = np.hypot(lr[a:b] - np.median(lr[ra:rb][body]), lb[a:b] - np.median(lb[ra:rb][body]))
+                out[a:b] = val[a:b] & (d > dist)
+            raw = out
+            out = binary_opening(raw, structure=np.ones((3, int(run)), bool))
+            for _ in range(4):                               # back over the step's own tips (its thin ends)
+                out = binary_dilation(out) & raw
+            if out.any():
+                # and the step's own rim, darker and less coloured: ink in the end rows touching it
+                ends = np.zeros(val.shape, bool)
+                ends[max(v0, 0):min(v0 + reach, h)] = True
+                ends[max(v1 - reach, 0):min(v1, h)] = True
+                lab, n = ndi.label(ink & val & ends, np.ones((3, 3)))
+                hit = np.unique(lab[binary_dilation(out, iterations=2) & (lab > 0)])
+                out |= np.isin(lab, hit[hit > 0])
+        art._end_steps = out
+    return art._end_steps
+
+
 def print_rows(art, strip=4, line=0.25, min_px=3):
     """Where the label's own print starts and ends along its rows (local reference px), or None: its coverage over 0.2
     where the texture is on the product, counted in strips of `strip` rows; a strip is print when it holds `line` x
     the median printed strip (and min_px) or more, so the odd dark speck in a glass base under the last line (the
-    keyframe's relit refraction) doesn't count. Cached on the artwork."""
+    keyframe's relit refraction) doesn't count. A body step at either end (end_steps, V60) isn't print. Cached on the
+    artwork."""
     if not hasattr(art, "_print_rows"):
         p = (art.pack[..., 0] > 0.2) & (art.pack[..., 2] > 0.5)
+        if getattr(art, "texture", None) is not None:
+            p &= ~end_steps(art)
         n = p.sum(1)
         k = int(np.ceil(len(n) / strip)) * strip
         h = np.pad(n, (0, k - len(n))).reshape(-1, strip).sum(1)

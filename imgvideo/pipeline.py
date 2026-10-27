@@ -1682,7 +1682,8 @@ def _review(J, parts, ll_path, arrays=None):
             Ho = c["maps"].get(T, H)
             r.update(shot=c["shot"], gap=rv.limb_gap(Ho, m, c["v"]), shear=rv.shear_of(H), pts=rv.shape_points(H, c["G"]),
                      ghost=c["ghost"](out[i], src[i], m, Ho, c["res"].get("morph_source", {}).get(t, H)),
-                     occl=rv.occluder_edge(Ho, H, m, c["v"], cf["bend_slope"], cf["bend_ends"], cf["bend_moved"]))
+                     occl=rv.occluder_edge(Ho, H, m, c["v"], cf["bend_slope"], cf["bend_ends"], cf["bend_moved"]),
+                     endstep=rv.end_doubled(c["art"], out[i], src[i], m, Ho))
             c["glitter"].add(T, c["shot"], src[i], out[i], m, c["res"].get("morph_source", {}).get(t, H), H_out=Ho)
             b = c["body"]
             if b is not None:

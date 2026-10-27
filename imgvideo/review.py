@@ -83,6 +83,9 @@ DEFAULTS = {
     "shimmer_frac": 0.005,       # difference, block means over this many px), on this share of the body ...
     "shimmer_run": 3,            # ... for this many frames in a row: the tube's body boiled in soft patches round its
                                  # text (0.6% of it a frame, median), 0.06% with render.shade_local (V58)
+    "step_share": 0.15,          # step: the product's step shown twice at the label's end on this share of its columns
+    "step_run": 3,               # ... for this many frames in a row: the tube's curved keyframe 38-49% on every frame,
+                                 # 0 with render.end_steps; v3's tube and the jar 0-1% (V60)
 }
 
 
@@ -639,6 +642,54 @@ class Glitter:
         return dict(base, specks=int(small.sum()), lost=int(lost.sum()), lost_px=int(ndi.sum(cand, lab, idx)[lost].sum()))
 
 
+def end_doubled(art, out_u8, src_u8, matte, H, reach=24, every=4, thresh=12.0, sep=(3, 16), span=0.7):
+    """The product's step shown twice at the label's ends (V60): a band edge the keyframe curves with the body, cut by
+    the label's straight end, showed as a dark line inside the label with the frame's own band edge a few px past
+    it. Columns across the middle `span` of the label every `every` px, through the mapping that rendered the frame
+    (its surface runs on past the label): the luminance (sRGB levels) along the axis within `reach` px of each end,
+    the same image points in the output and the source. A column is doubled where the output steps twice the same
+    way (`thresh` levels per px, `sep` px apart) and the source doesn't. -> {"top": share, "bottom": share} of the
+    columns inside the matte, or None"""
+    from imgpost import geometry as geo
+    P = art.polygon
+    if P is None:
+        return None
+    u0, u1 = float(P[:, 0].min()), float(P[:, 0].max())
+    v0, v1 = float(P[:, 1].min()), float(P[:, 1].max())
+    um = 0.5 * (u0 + u1)
+    us = np.arange(um - 0.5 * span * (u1 - u0), um + 0.5 * span * (u1 - u0) + 1e-6, every)
+    Hl = art.local(H)
+    Lo, Ls = srgb_lum(out_u8), srgb_lum(src_u8)
+    h, w = matte.shape
+    out = {}
+    for end, vc in (("top", v0), ("bottom", v1)):
+        vs = np.arange(vc - reach, vc + reach + 1e-6, 1.0)
+        U, V = np.meshgrid(us, vs)
+        XY = geo.apply_H(Hl, np.c_[U.ravel(), V.ravel()])
+        x, y = XY[:, 0].reshape(U.shape), XY[:, 1].reshape(U.shape)
+        ok = (x >= 0) & (x <= w - 1) & (y >= 0) & (y <= h - 1)
+        xi, yi = np.clip(np.round(x).astype(int), 0, w - 1), np.clip(np.round(y).astype(int), 0, h - 1)
+        ok &= matte[yi, xi]
+        cols = ok.all(0)
+        if cols.sum() < 5:
+            continue
+        def steps(L):
+            prof = map_coordinates(L, [y, x], order=1, mode="nearest")[:, cols]
+            d = 0.5 * (prof[2:] - prof[:-2])
+            n = []
+            for j in range(d.shape[1]):
+                dj = d[:, j]
+                pk = [i for i in range(1, len(dj) - 1) if abs(dj[i]) >= thresh and abs(dj[i]) >= abs(dj[i - 1]) and
+                      abs(dj[i]) >= abs(dj[i + 1])]
+                pairs = any(sep[0] <= b - a <= sep[1] and np.sign(dj[a]) == np.sign(dj[b]) for a in pk for b in pk if b > a)
+                n.append((len(pk), pairs))
+            return n
+        so, ss_ = steps(Lo), steps(Ls)
+        dbl = [po and no > ns for (no, po), (ns, ps) in zip(so, ss_)]
+        out[end] = round(float(np.mean(dbl)), 3)
+    return out or None
+
+
 def label_jump(art, H0, H1, src0, src1, m0, m1, step=2.0):
     """The source's own print read back through each frame's mapping: how far it moves in label space between the two
     frames (label px), and that in scene px. A mapping that follows the body keeps it in place."""
@@ -880,6 +931,17 @@ def evaluate(F, fps=24.0, cfg=None):
                 flags[t].append(("shimmer", f"the light on {100 * shim(t):.1f}% of the label's body blinks "
                                             f"{c['shimmer_levels']:g}+ levels more than the source's from frame to frame "
                                             f"(render.shade_local reads it round each patch)"))
+    # step: the product's step (a band's edge) shown twice at the label's end (V60)
+    def stp(t):
+        e = F[t].get("endstep") or {}
+        return max(e.values()) if e else 0.0
+    for a, b in _runs([t for t in refined if stp(t) >= c["step_share"]]):
+        if b - a + 1 >= c["step_run"]:
+            for t in range(a, b + 1):
+                e = F[t]["endstep"]
+                end = max(e, key=e.get)
+                flags[t].append(("step", f"the product's step shows twice at the label's {end} end ({100 * e[end]:.0f}% of "
+                                         f"it): the keyframe's edge inside the label beside the frame's own"))
     # mask dropouts inside a shot (V13): the product leaves the matte between frames with no cut
     empty = [t for t in T if F[t]["matte_px"] == 0 and (t - 1) in F and F[t - 1]["matte_px"] > 5000 and not cut(t)]
     flags = {t: v for t, v in flags.items() if v}
@@ -918,6 +980,7 @@ def notes_block(flags, summary, title="Automatic checks"):
              "slide": "The label turned round the product off its place on the body (print sliding, or the product turning)",
              "glitter": "Glitter in front of the label lost (it seems to pass behind the label)",
              "shimmer": "The light on the label's body blinks from frame to frame (soft patches boil)",
+             "step": "The product's step (a band's edge) shown twice at the label's end",
              "swim": "The label slides against the product on near-still frames",
              "ends": "The label slides on a held run's first or last frames (the glue's edge)",
              "level": "The label's lines off the product's base (straightened)",
@@ -933,8 +996,8 @@ def notes_block(flags, summary, title="Automatic checks"):
         out.append("No frame flagged.")
     else:
         out.append("")
-        for k in ("edges", "ghost", "shear", "bend", "body", "slide", "glitter", "shimmer", "vanish", "switch", "swim", "ends",
-                  "level", "sharp", "tilt", "spots", "double"):
+        for k in ("edges", "step", "ghost", "shear", "bend", "body", "slide", "glitter", "shimmer", "vanish", "switch", "swim",
+                  "ends", "level", "sharp", "tilt", "spots", "double"):
             if k in summary["checks"]:
                 ex = next(why for t in sorted(flags) for kk, why in flags[t] if kk == k)
                 out.append(f"- **{names[k]}:** frames {summary['checks'][k]} (e.g. {ex}).")
