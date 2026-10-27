@@ -64,6 +64,9 @@ DEFAULTS = {
     "body_frac": 0.0055,         # (or this share of the label's length, if more: 1 px on the serum's 188 px label),
     "body_roll": 0.5,            # or its axis this many deg off the body's centreline (each a 5-frame median) ...
     "body_run_s": 0.25,          # ... held this long
+    "slide_px": 4.0,             # the label turned round the product this far off the keyframe's place on the body (label
+                                 # px at its middle, 5-frame median, held body_run_s): the jar's label slid 13 px with its
+                                 # generated print across the camera move (V59)
     "glitter_tophat": 5,         # specks: a white top-hat this wide (px) ...
     "glitter_levels": 25.0,      # ... above this (sRGB levels), at most glitter_px across,
     "glitter_px": 6,
@@ -75,6 +78,14 @@ DEFAULTS = {
     "glitter_density": 3.0,      # specks are at most this many times denser than those (else: the surface shimmers)
     "glitter_pad": 2,            # sparkles_frames: the flagged runs padded by this many frames, and merged across
     "glitter_gap": 4,            # gaps up to this, within a shot
+    "shimmer_levels": 3.0,       # shimmer: the light on the label's body (off its print) blinking from frame to frame
+    "shimmer_block": 9,          # this many levels more than the source's at the same label points (temporal 2nd
+    "shimmer_frac": 0.005,       # difference, block means over this many px), on this share of the body ...
+    "shimmer_run": 3,            # ... for this many frames in a row: the tube's body boiled in soft patches round its
+                                 # text (0.6% of it a frame, median), 0.06% with render.shade_local (V58)
+    "step_share": 0.15,          # step: the product's step shown twice at the label's end on this share of its columns
+    "step_run": 3,               # ... for this many frames in a row: the tube's curved keyframe 38-49% on every frame,
+                                 # 0 with render.end_steps; v3's tube and the jar 0-1% (V60)
 }
 
 
@@ -403,7 +414,7 @@ class Ghost:
 
 
 def doubled(art, out_u8, src_u8, matte, H, polarity="light", clear=2, edge=4, tophat=15, thresh=0.03, piece=3, ends=32,
-            reach=10, tile=48, match=0.4, ink=0.25, glass=None, keep=False):
+            reach=10, tile=48, match=0.4, ink=0.25, glass=None, keep=False, H_src=None):
     """The source's own print beside the label's (V54): the generator's lines drift against the tracked label, so
     wherever the label lets the source through over print (its end fade, a band that ends on a line) the frame's own
     line shows a few px off the label's: the one workflow's jar, its second-last line doubled at its band's
@@ -415,7 +426,10 @@ def doubled(art, out_u8, src_u8, matte, H, polarity="light", clear=2, edge=4, to
     print onto the source's print (Dice), kept when the two cover each other to `match` (the dark reflections
     of a chrome lid or a glass base showing through a fade are thin marks too, but nothing of the label moved).
     Pieces of `piece` px or more. glass: the render's clear-glass weight (render.clear_glass, V56): the frame's own glass
-    it keeps is left out (its dark reflections beside the letters aren't a doubled line; "glass_px" counts them).
+    it keeps is left out (its dark reflections beside the letters aren't a doubled line; "glass_px" counts them),
+    except the frame's print where the tracking puts the label's (H_src, when the render placed the label elsewhere:
+    render.body_snap.turn holds it off the generator's print, V59), off the label's own strokes: the generator's line
+    left showing beside the label's ("glass_line_px", counted in "px").
     -> {"px", "at": [y, x] of the largest piece, "v": [label rows it spans], "by_end":
     px within `ends` rows of the label's top, its bottom, or inside, "band_v": [the label's rows]} or None (keep: plus
     "mask": (roi, the px), for a look)"""
@@ -487,6 +501,13 @@ def doubled(art, out_u8, src_u8, matte, H, polarity="light", clear=2, edge=4, to
         kept = glass(np.nan_to_num(Ug), np.nan_to_num(V)) > 0.5
         n_glass = int((g & kept).sum())
         g &= ~kept
+        if H_src is not None:
+            Ws = wp.warp(art.pack, art.local(H_src), roi, art.refmask, ss=2, prefilter=0)[0][..., 0] > 0.2
+            gl = (d_out > thresh) & sp & kept & lab & ~binary_dilation(own, iterations=clear) & \
+                binary_dilation(Ws, iterations=2)
+            if ref is not None:
+                gl &= binary_dilation(d_src >= ink * ref, iterations=2)
+            g |= gl
     lb, n = ndi.label(g, np.ones((3, 3)))
     if n:
         sz = ndi.sum(g, lb, range(1, n + 1))
@@ -496,6 +517,8 @@ def doubled(art, out_u8, src_u8, matte, H, polarity="light", clear=2, edge=4, to
     r = {"px": int(g.sum()), "band_v": [round(v0, 1), round(v1, 1)]}
     if n_glass is not None:
         r["glass_px"] = n_glass
+        if H_src is not None:
+            r["glass_line_px"] = int((g & kept).sum())
     if r["px"]:
         lb, n = ndi.label(g, np.ones((3, 3)))
         sz = ndi.sum(g, lb, range(1, n + 1))
@@ -526,7 +549,11 @@ class Glitter:
     and only 5 frames are kept (a large label is a million points a frame). Dark print (polarity "dark" or "both"):
     only off the frame's own dark print too (a 7 px black top-hat over `levels`, dilated 3 px): the gaps between the
     strokes of a garbled seal the generator morphs from frame to frame, beside the truth's, read as specks (V56).
-    -> {frame: measures}"""
+    The same rows give the shimmer measure (V58): the light on the label's body blinking from frame to frame against
+    the source's at the same points (each one's temporal 2nd difference, block means over `shimmer_block` px; the
+    body px where the output's is `shimmer_levels` above the source's). For it the output is read through the mapping
+    it was rendered with (add()'s H_out): where the render holds the label off the tracks (body_snap.turn, V59), its
+    print read through the source's mapping moves across the body and reads as blinking light. -> {frame: measures}"""
 
     def __init__(self, art, inset=3, print_px=3, polarity="light", **measure_kw):
         self.art, self.grid = art, ls.Grid(art, 1.0)
@@ -551,11 +578,12 @@ class Glitter:
     def _levels(lin):
         return srgb_lum(np.clip(im.lin_to_srgb(np.clip(lin, 0, None)), 0, 1) * 255.0)
 
-    def add(self, T, shot, src_u8, out_u8, matte, H_src, ring=(4, 40)):
+    def add(self, T, shot, src_u8, out_u8, matte, H_src, ring=(4, 40), H_out=None):
         tophat, levels, max_px = (self.kw.get(k, d) for k, d in (("tophat", 5), ("levels", 25.0), ("max_px", 6)))
         Hl = self.art.local(H_src)
         rs, vs = self.grid.unwarp(src_u8, Hl, matte)
         ro, _ = self.grid.unwarp(out_u8, Hl, matte)
+        rr, vr = self.grid.unwarp(out_u8, self.art.local(H_out), matte) if H_out is not None else (None, None)
         # specks around the product: a ring outside its matte (no frame-to-frame reference: the background moves)
         ys, xs = np.nonzero(matte)
         n_ring = a_ring = 0
@@ -568,15 +596,31 @@ class Glitter:
             lab, n = ndi.label(rg & (L - ndi.grey_opening(L, size=(tophat, tophat)) > levels), structure=np.ones((3, 3)))
             n_ring = sum((a.stop - a.start) <= max_px and (b.stop - b.start) <= max_px for a, b in ndi.find_objects(lab))
             a_ring = int(rg.sum())
-        self.rows[T] = (shot, self._levels(rs), self._levels(ro), vs & self.inside, int(n_ring), a_ring)
+        Lo = self._levels(ro)
+        self.rows[T] = (shot, self._levels(rs), Lo, vs & self.inside, int(n_ring), a_ring,
+                        Lo if rr is None else self._levels(rr), vs & self.inside if vr is None else vr & vs & self.inside)
         self._flush(T - 2)
 
-    def measures(self, T, tophat=5, levels=25.0, max_px=6, excess=12.0, reach=3):
+    def measures(self, T, tophat=5, levels=25.0, max_px=6, excess=12.0, reach=3, shimmer_levels=3.0, shimmer_block=9):
         import warnings
-        shot, Ls, Lo, v, n_ring, a_ring = self.rows[T]
+        shot, Ls, Lo, v, n_ring, a_ring, Lr, vr = self.rows[T]
         nb = [self.rows[u] for u in (T - 2, T - 1, T + 1, T + 2) if u in self.rows and self.rows[u][0] == shot]
         if len(nb) < 2 or v.sum() < 50:
             return None
+        shim = None
+        p, q = self.rows.get(T - 1), self.rows.get(T + 1)
+        if p is not None and q is not None and p[0] == shot and q[0] == shot:
+            okk = vr & p[7] & q[7]
+            if okk.sum() >= 500:
+                B = int(shimmer_block)
+                wsum = ndi.uniform_filter(okk.astype(np.float32), B)
+
+                def blk(L, Lp, Lq):
+                    d2 = np.where(okk, np.abs(L - 0.5 * (Lp + Lq)), 0.0).astype(np.float32)
+                    return ndi.uniform_filter(d2, B) / np.maximum(wsum, 1e-6)
+                good = okk & (wsum > 0.5)
+                ex = blk(Lr, p[6], q[6]) - blk(Ls, p[1], q[1])
+                shim = {"area": int(good.sum()), "px": int((good & (ex > shimmer_levels)).sum())}
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
             ref = np.nanmedian(np.stack([np.where(n[3], n[1], np.nan) for n in nb]), 0)
@@ -588,7 +632,7 @@ class Glitter:
         if self.dark:
             cand &= ~binary_dilation(ndi.grey_closing(Ls, size=(7, 7)) - Ls > levels, iterations=3)
         lab, n = ndi.label(cand, structure=np.ones((3, 3)))
-        base = {"area": int(ok.sum()), "ring": n_ring, "ring_area": a_ring}
+        base = {"area": int(ok.sum()), "ring": n_ring, "ring_area": a_ring, "shimmer": shim}
         if not n:
             return dict(base, specks=0, lost=0, lost_px=0)
         idx = np.arange(1, n + 1)
@@ -596,6 +640,54 @@ class Glitter:
         ps, po = ndi.maximum(ths, lab, idx), ndi.maximum(tho, lab, idx)
         lost = small & (po < 0.5 * ps)
         return dict(base, specks=int(small.sum()), lost=int(lost.sum()), lost_px=int(ndi.sum(cand, lab, idx)[lost].sum()))
+
+
+def end_doubled(art, out_u8, src_u8, matte, H, reach=24, every=4, thresh=12.0, sep=(3, 16), span=0.7):
+    """The product's step shown twice at the label's ends (V60): a band edge the keyframe curves with the body, cut by
+    the label's straight end, showed as a dark line inside the label with the frame's own band edge a few px past
+    it. Columns across the middle `span` of the label every `every` px, through the mapping that rendered the frame
+    (its surface runs on past the label): the luminance (sRGB levels) along the axis within `reach` px of each end,
+    the same image points in the output and the source. A column is doubled where the output steps twice the same
+    way (`thresh` levels per px, `sep` px apart) and the source doesn't. -> {"top": share, "bottom": share} of the
+    columns inside the matte, or None"""
+    from imgpost import geometry as geo
+    P = art.polygon
+    if P is None:
+        return None
+    u0, u1 = float(P[:, 0].min()), float(P[:, 0].max())
+    v0, v1 = float(P[:, 1].min()), float(P[:, 1].max())
+    um = 0.5 * (u0 + u1)
+    us = np.arange(um - 0.5 * span * (u1 - u0), um + 0.5 * span * (u1 - u0) + 1e-6, every)
+    Hl = art.local(H)
+    Lo, Ls = srgb_lum(out_u8), srgb_lum(src_u8)
+    h, w = matte.shape
+    out = {}
+    for end, vc in (("top", v0), ("bottom", v1)):
+        vs = np.arange(vc - reach, vc + reach + 1e-6, 1.0)
+        U, V = np.meshgrid(us, vs)
+        XY = geo.apply_H(Hl, np.c_[U.ravel(), V.ravel()])
+        x, y = XY[:, 0].reshape(U.shape), XY[:, 1].reshape(U.shape)
+        ok = (x >= 0) & (x <= w - 1) & (y >= 0) & (y <= h - 1)
+        xi, yi = np.clip(np.round(x).astype(int), 0, w - 1), np.clip(np.round(y).astype(int), 0, h - 1)
+        ok &= matte[yi, xi]
+        cols = ok.all(0)
+        if cols.sum() < 5:
+            continue
+        def steps(L):
+            prof = map_coordinates(L, [y, x], order=1, mode="nearest")[:, cols]
+            d = 0.5 * (prof[2:] - prof[:-2])
+            n = []
+            for j in range(d.shape[1]):
+                dj = d[:, j]
+                pk = [i for i in range(1, len(dj) - 1) if abs(dj[i]) >= thresh and abs(dj[i]) >= abs(dj[i - 1]) and
+                      abs(dj[i]) >= abs(dj[i + 1])]
+                pairs = any(sep[0] <= b - a <= sep[1] and np.sign(dj[a]) == np.sign(dj[b]) for a in pk for b in pk if b > a)
+                n.append((len(pk), pairs))
+            return n
+        so, ss_ = steps(Lo), steps(Ls)
+        dbl = [po and no > ns for (no, po), (ns, ps) in zip(so, ss_)]
+        out[end] = round(float(np.mean(dbl)), 3)
+    return out or None
 
 
 def label_jump(art, H0, H1, src0, src1, m0, m1, step=2.0):
@@ -804,10 +896,23 @@ def evaluate(F, fps=24.0, cfg=None):
                     flags[t].append(("body", f"the label sits off the body: top {med['top_px'][i]:+.1f} px, bottom "
                                              f"{med['bottom_px'][i]:+.1f} px off the keyframe's proportion, axis "
                                              f"{med['roll_deg'][i]:+.2f} deg off the body's centreline"))
+        # slide: the label turned round the product off the keyframe's place on the body (the print it follows sliding
+        # across the body, V59)
+        x = np.array([F[t]["body"].get("turn_px") if F[t]["body"].get("turn_px") is not None else np.nan for t in ts], float)
+        med["turn_px"] = ndi.median_filter(np.where(np.isfinite(x), x, np.nanmedian(x) if np.isfinite(x).any() else 0.0),
+                                           5, mode="nearest") if len(x) else x
+        for a, b in _runs([t for i, t in enumerate(ts) if np.isfinite(x).any() and abs(med["turn_px"][i]) > c["slide_px"]]):
+            if b - a + 1 >= body_run:
+                for t in range(a, b + 1):
+                    i = ts.index(t)
+                    flags[t].append(("slide", f"the label turned {med['turn_px'][i]:+.1f} px round the product off the "
+                                              f"keyframe's place on its body: if the product doesn't turn on its axis "
+                                              f"there, render.body_snap.turn holds it"))
         for i, t in enumerate(ts):
             geometry[t] = dict(F[t]["body"], top_px_med=round(float(med["top_px"][i]), 2),
                                bottom_px_med=round(float(med["bottom_px"][i]), 2),
-                               roll_deg_med=round(float(med["roll_deg"][i]), 3))
+                               roll_deg_med=round(float(med["roll_deg"][i]), 3),
+                               **({"turn_px_med": round(float(med["turn_px"][i]), 2)} if np.isfinite(x).any() else {}))
     # glitter: specks in front of the label in the source that the output lost (V37)
     for t in refined:
         g = F[t].get("glitter")
@@ -816,6 +921,27 @@ def evaluate(F, fps=24.0, cfg=None):
                 g["lost"] / max(g.get("area", 1), 1) <= c["glitter_density"] * g["ring"] / max(g.get("ring_area", 1), 1):
             flags[t].append(("glitter", f"{g['lost']} of the source's {g['specks']} specks in front of the label lost "
                                         f"(glitter seems to pass behind it): render.sparkles on this frame"))
+    # shimmer: the light on the label's body blinking from frame to frame against the source's (V58)
+    def shim(t):
+        s = (F[t].get("glitter") or {}).get("shimmer")
+        return s["px"] / max(s["area"], 1) if s else 0.0
+    for a, b in _runs([t for t in refined if shim(t) > c["shimmer_frac"]]):
+        if b - a + 1 >= c["shimmer_run"]:
+            for t in range(a, b + 1):
+                flags[t].append(("shimmer", f"the light on {100 * shim(t):.1f}% of the label's body blinks "
+                                            f"{c['shimmer_levels']:g}+ levels more than the source's from frame to frame "
+                                            f"(render.shade_local reads it round each patch)"))
+    # step: the product's step (a band's edge) shown twice at the label's end (V60)
+    def stp(t):
+        e = F[t].get("endstep") or {}
+        return max(e.values()) if e else 0.0
+    for a, b in _runs([t for t in refined if stp(t) >= c["step_share"]]):
+        if b - a + 1 >= c["step_run"]:
+            for t in range(a, b + 1):
+                e = F[t]["endstep"]
+                end = max(e, key=e.get)
+                flags[t].append(("step", f"the product's step shows twice at the label's {end} end ({100 * e[end]:.0f}% of "
+                                         f"it): the keyframe's edge inside the label beside the frame's own"))
     # mask dropouts inside a shot (V13): the product leaves the matte between frames with no cut
     empty = [t for t in T if F[t]["matte_px"] == 0 and (t - 1) in F and F[t - 1]["matte_px"] > 5000 and not cut(t)]
     flags = {t: v for t, v in flags.items() if v}
@@ -851,10 +977,14 @@ def notes_block(flags, summary, title="Automatic checks"):
              "switch": "Hard switch at a fix's end, or a jump where two shots meet",
              "bend": "The label bends along an occluder's edge (snapped onto it, not onto the product's limb)",
              "body": "The label off the product's body (its ends off the keyframe's proportion, or turned off its axis)",
+             "slide": "The label turned round the product off its place on the body (print sliding, or the product turning)",
              "glitter": "Glitter in front of the label lost (it seems to pass behind the label)",
+             "shimmer": "The light on the label's body blinks from frame to frame (soft patches boil)",
+             "step": "The product's step (a band's edge) shown twice at the label's end",
              "swim": "The label slides against the product on near-still frames",
              "ends": "The label slides on a held run's first or last frames (the glue's edge)",
              "level": "The label's lines off the product's base (straightened)",
+             "lines": "The label's lines turned against the frame's own print",
              "sharp": "The print softer than the source's own print",
              "tilt": "The print's side edge turned or shifted against the product's limb",
              "spots": "Dark spots on the label's body",
@@ -867,8 +997,8 @@ def notes_block(flags, summary, title="Automatic checks"):
         out.append("No frame flagged.")
     else:
         out.append("")
-        for k in ("edges", "ghost", "shear", "bend", "body", "glitter", "vanish", "switch", "swim", "ends", "level", "sharp",
-                  "tilt", "spots", "double"):
+        for k in ("edges", "step", "ghost", "shear", "bend", "body", "slide", "glitter", "shimmer", "vanish", "switch", "swim",
+                  "ends", "level", "lines", "sharp", "tilt", "spots", "double"):
             if k in summary["checks"]:
                 ex = next(why for t in sorted(flags) for kk, why in flags[t] if kk == k)
                 out.append(f"- **{names[k]}:** frames {summary['checks'][k]} (e.g. {ex}).")

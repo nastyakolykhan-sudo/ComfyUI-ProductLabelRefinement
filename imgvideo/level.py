@@ -9,8 +9,8 @@ own upright axis (body_axis: two passes, so a tilted body's rounded base and sho
           body's level (the normal to its axis), degrees (+: falls toward the body's right)
   target  the keyframe frame's level (the median over it and `window` frames each side), plus `offset`: degrees, or
           "base": minus the keyframe's own lines against its base, measured on the keyframe image (its print's skew
-          by point projection against the matte's bottom edge, both straightened), so the label sits level with the
-          base on every frame, the keyframe's own included
+          by point projection against the matte's bottom edge, both straightened; bowed lines at the axis, V61), so
+          the label sits level with the base on every frame, the keyframe's own included
   smooth  the difference over time: a robust local line (Huber weights, `sigma` frames), so the matte's axis noise
           doesn't come through
   shear   the label sheared along the body's axis about the copy block's centre by minus that: its lines turn to the
@@ -41,6 +41,12 @@ LEVEL = {
 }
 
 
+SQUAT = 3.0     # the matte's eigenvalue ratio under this (about 1.7 x as tall as wide), or wider than tall: squat
+ROUND = 1.3     # ... and under this, near round: its axis is the image vertical (imgauto triage TH)
+BOW_PX = 6.0    # px: the print's lines bowing more than this across the copy block are read at the body's axis (V61)
+BOW_K = 0.004   # 1/px: the bow searched, y - k x^2 (the jar's lines from above: 0.0004-0.0006)
+
+
 def settings(spec):
     """render.level (true or a dict) merged over LEVEL."""
     c = dict(LEVEL, **(spec if isinstance(spec, dict) else {}))
@@ -60,21 +66,29 @@ def body_axis(M, lower=0.6, mid=(0.2, 0.8)):
     rounded base and shoulder, so their midpoints lean the axis (4 deg off on half of a tilted bottle's frames). Two
     passes: the principal axis of the matte's lower `lower` share along its own length (the body without a pump or
     cap); then, straightened on it, a line through the limbs' midpoints across the body's middle (`mid` of its length),
-    twice. -> (centre point, unit axis direction pointing down the body, angle from image vertical in degrees,
-    half-width px)"""
+    twice. A squat matte (a jar, a balm: eigenvalue ratio under SQUAT, or wider than tall) starts from the axis nearest
+    the image vertical, and the second pass keeps it (V53, V61). -> (centre point, unit axis direction pointing down the
+    body, angle from image vertical in degrees, half-width px)"""
     ys, xs = np.nonzero(M)
     P = np.stack([xs, ys], 1).astype(float)
     c = P.mean(0)
     w, V = np.linalg.eigh(np.cov((P - c).T))
     d = V[:, np.argmax(w)]
+    squat = w.max() < SQUAT * w.min() or abs(d[0]) > abs(d[1])
+    if squat:
+        # a squat product (a jar, a balm: about as wide as tall, or wider): its largest axis can run across the body,
+        # and the lower 60 % along that is one side of it. The axis nearest the image vertical instead, the vertical
+        # itself on a near-round matte, kept by the second pass (imgauto's triage, V53; V61)
+        d = np.array([0.0, 1.0]) if w.max() < ROUND * w.min() else V[:, np.argmax(np.abs(V[1]))]
     if d[1] < 0:
         d = -d
     a = (P - c) @ d
     keep = a > a.min() + (1 - lower) * np.ptp(a)
     Pb = P[keep]
     c = Pb.mean(0)
-    w, V = np.linalg.eigh(np.cov((Pb - c).T))
-    d = V[:, np.argmax(w)]
+    if not squat:
+        w, V = np.linalg.eigh(np.cov((Pb - c).T))
+        d = V[:, np.argmax(w)]
     d = d if d[1] > 0 else -d
     for _ in range(2):
         n = np.array([d[1], -d[0]])
@@ -148,15 +162,49 @@ def print_mask(L, inner, polarity="light", thresh=0.03):
     return (th > thresh) & inner, th
 
 
+def _sharpness(q, wv, kern):
+    """measure's profile sharpness (0.25 px bins from q.min() - 1, smoothed), by bincount"""
+    h = np.bincount(((q - q.min() + 1.0) * 4.0).astype(np.int64), weights=wv)
+    return float((np.convolve(h, kern, mode="same") ** 2).sum())
+
+
+def _bowed(yy, xr, wv, kern, ang):
+    """The print's lines through a parabola about the body's axis (x = xr), where they bow more than BOW_PX across the
+    block: their angle (deg) at the axis, or None (straight enough: the straight read stands)."""
+    x2 = xr ** 2
+    dk = BOW_K / 40
+    t_ = np.radians(ang)
+    ks = np.arange(-BOW_K, BOW_K + 1e-12, dk)
+    k0 = ks[int(np.argmax([_sharpness((yy - k * x2) * np.cos(t_) - xr * np.sin(t_), wv, kern) for k in ks]))]
+    if abs(k0) * x2.max() <= BOW_PX:
+        return None
+
+    def search(ks, angs):
+        best = (-1.0, 0.0, 0.0)
+        for k in ks:
+            yk = yy - k * x2
+            for a in angs:
+                t_ = np.radians(a)
+                v = _sharpness(yk * np.cos(t_) - xr * np.sin(t_), wv, kern)
+                if v > best[0]:
+                    best = (v, float(a), float(k))
+        return best[1], best[2]
+    a, k = search(np.arange(k0 - 10 * dk, k0 + 10 * dk + 1e-12, dk), np.arange(-6.0, 6.0001, 0.25))
+    a, _ = search(np.arange(k - dk, k + dk + 1e-12, dk / 10), np.arange(max(-6.0, a - 0.3), min(6.0, a + 0.3) + 1e-9, 0.05))
+    return round(a, 2)
+
+
 def measure(F, M, polarity="light"):
     """Is the label level with the product (check_level.py)? The frame straightened on the body's axis; there:
       text  the copy's lines: the angle within +-6 deg (0.05 steps) whose row profile of the print's own pixel
             positions (projected, 0.25 px bins, smoothed 1 px: image rotation and whole-pixel bins both bias toward 0)
-            is sharpest, over the copy block (the print right of its first quarter: a vertical wordmark stays out)
+            is sharpest, over the copy block (the print right of its first quarter: a vertical wordmark stays out);
+            lines that bow over BOW_PX across the block (a squat product seen from above), their angle at the body's
+            axis through a parabola (V61)
       base  the matte's bottom edge (base_line)
       gaps  the bottom print line to the base at the copy block's two ends (px)
     -> {"text_deg", "base_deg", "level_deg" (text - base, +: the label's right side lower than the body's),
-        "gap_left_px", "gap_right_px", "axis_deg"}, or None"""
+        "gap_left_px", "gap_right_px", "axis_deg", "block_px" (the copy block's width)}, or None"""
     L, m, hw, axis = straighten(M, F)
     inner = binary_erosion(m, iterations=6)
     ink, th = print_mask(L, inner, polarity)
@@ -183,6 +231,13 @@ def measure(F, M, polarity="light"):
         if v > best:
             best, ang = v, a
     text = float(ang)                              # + : the lines fall to the right
+    # bowed lines (a squat product seen from above: the jar's sag 40-50 px across the copy block): a straight line reads
+    # the chord of each arc over the block, degrees off its fall (V61). Read where each arc runs level on a round body,
+    # at the axis, through a parabola: q = (y - k x^2) cos a - x sin a, x from the axis column
+    xr = (xx + c_lo - (hw + 15.0)).astype(float)
+    bow = _bowed(yy, xr, wv, kern, text)
+    if bow is not None:
+        text = bow
     b = base_line(m)
     if b is None:
         return None
@@ -196,7 +251,8 @@ def measure(F, M, polarity="light"):
     gl = (k * (c_lo + w / 2) + c) - low(c_lo, c_lo + w)
     gr = (k * (c_hi - w / 2) + c) - low(c_hi - w, c_hi)
     return {"text_deg": round(text, 2), "base_deg": round(base, 2), "level_deg": round(text - base, 2),
-            "gap_left_px": round(float(gl), 1), "gap_right_px": round(float(gr), 1), "axis_deg": round(axis, 2)}
+            "gap_left_px": round(float(gl), 1), "gap_right_px": round(float(gr), 1), "axis_deg": round(axis, 2),
+            "block_px": int(c_hi - c_lo)}
 
 
 def mapping_level(H, d, uv, du):

@@ -782,10 +782,12 @@ FEATHER_PRINT_GAP = 2.0
 
 def print_gap_default(render, given=None):
     """Whole-band compositing (render.alpha "label") from a measured job (V54): the label's end fade stops
-    feather.print_gap px short of its own print, the frame's light is read off the print (render.shade_print), over
-    clear glass in the rows the band was stretched over the frame keeps its own surface (render.clear_glass, V56), and
-    the limb snap keeps the print facing the camera on its tracks (render.limb_snap.front "track", V57), unless
-    `given` (the settings as written) sets them. Logged in render._defaults. -> the render settings"""
+    feather.print_gap px short of its own print, the frame's light is read off the print (render.shade_print) from the
+    bare surface round each patch (render.shade_local, V58), over clear glass in the rows the band was stretched over
+    the frame keeps its own surface (render.clear_glass, V56), and the limb snap keeps the print facing the camera on
+    its tracks (render.limb_snap.front "track", V57), unless `given` (the settings as written) sets them. Logged in
+    render._defaults. Not render.body_snap.turn (V59): a product that really turns on its axis turns its print with
+    it, and the matte can't tell that from the generator's print sliding round the body. -> the render settings"""
     if not isinstance(render, dict) or render.get("alpha", "label") != "label":
         return render
     out, added = dict(render), {}
@@ -796,6 +798,9 @@ def print_gap_default(render, given=None):
     if "shade_print" not in (given or {}) and "shade_print" not in render:
         out["shade_print"] = True
         added["shade_print"] = {"value": True, "by": "the measured job (the frame's light read off its print)"}
+    if "shade_local" not in (given or {}) and "shade_local" not in render:
+        out["shade_local"] = True
+        added["shade_local"] = {"value": True, "by": "the measured job (the frame's light read off the bare surface round each patch)"}
     if "clear_glass" not in (given or {}) and "clear_glass" not in render:
         out["clear_glass"] = True
         added["clear_glass"] = {"value": True, "by": "the measured job (the frame's own glass past the body's band)"}
@@ -926,7 +931,7 @@ def _place(C, J, t):
     if bs is not None:
         # the label placed by the product's body, not by the generated print it tracks (render.body_snap, V39): along
         # the axis and turned onto the body's centreline; the limb snap then puts its sides on the matte
-        H = vf.body_snapped(H, bs[1], bs[0], bs[2], bs[3])
+        H = vf.body_snapped(H, bs[1], bs[0], bs[2], bs[3], bs[4] if len(bs) > 4 else 0.0)
     H, snap_rep = _limb(C, J, t, H)
     return H, H0_, sh, bs, snap_rep
 
@@ -945,6 +950,8 @@ def _render_one(C, J, t, frame, extras=None):
     H, H0_, sh, bs, snap_rep = _place(C, J, t)
     if sh is not None:
         rct["axial_shift"] = sh
+    if bs is not None and len(bs) > 4 and bs[4]:
+        rct["held_turn"] = True                              # render.body_snap.turn moved the label off its tracks
     placed = None
     if H is not H0_:
         rct.setdefault("source_H", H0_)
@@ -983,7 +990,8 @@ def _render_one(C, J, t, frame, extras=None):
     if "axial_shift" in rct:
         info["axial_shift"] = rct["axial_shift"]
     if bs is not None:
-        info["body_snap"] = {"stretch": round(bs[0], 5), "shift": round(bs[1], 3), "roll_deg": round(bs[2], 3)}
+        info["body_snap"] = {"stretch": round(bs[0], 5), "shift": round(bs[1], 3), "roll_deg": round(bs[2], 3),
+                             **({"turn_px": round(bs[4], 2)} if len(bs) > 4 and bs[4] else {})}
     return out, info, span, len(Hs), placed
 
 
@@ -1023,15 +1031,15 @@ def _body_snap(J, C, fr, frames):
     # every other frame round the gaps the reference's proportion predicts for it (None: its neighbours' correction)
     meas = {t: (ref if t == a else measure(t, kinds["top"], kinds["bottom"], ref)) for t in sorted(frames)}
     corr = vf.body_corrections(meas, ref, vr, bc["median"], bc["outlier_k"], bc["stretch"], bc["roll_max"],
-                               bc["shift_max"])
-    corr[a] = (1.0, 0.0, 0.0)                              # the keyframe's frame is the truth
+                               bc["shift_max"], turn=bool(bc.get("turn")), turn_max=float(bc["turn_max"]) * float(u1 - u0))
+    corr[a] = (1.0, 0.0, 0.0, 0.0)                         # the keyframe's frame is the truth
     only = frame_set(bc["frames"]) if bc.get("frames") else None
 
     def pivot(t):
         return meas[t]["pivot"] if meas[t] is not None else \
             geo.apply_H(placed(t)[0], np.array([[uc, 0.5 * (vr[0] + vr[1])]]))[0].tolist()
-    body = {t: (f, p, r, pivot(t)) for t, (f, p, r) in corr.items()
-            if (f, p, r) != (1.0, 0.0, 0.0) and (only is None or t + J.s0 in only)}
+    body = {t: (f, p, r, pivot(t), du) for t, (f, p, r, du) in corr.items()
+            if (f, p, r, du) != (1.0, 0.0, 0.0, 0.0) and (only is None or t + J.s0 in only)}
     off = {t: vf.body_offsets(m, ref) for t, m in meas.items() if m is not None}
     meas_n = sum(m is not None for m in meas.values())
 
@@ -1042,13 +1050,17 @@ def _body_snap(J, C, fr, frames):
            "reference": {"top_gap_px": round(ref["top"], 2), "bottom_gap_px": round(ref["bot"], 2),
                          "label_px": round(ref["L"], 2), "roll_deg": round(ref["roll"], 3)},
            "before": {"top_px": rng("top_px"), "bottom_px": rng("bottom_px"), "roll_deg": rng("roll_deg"),
-                      "stretch": rng("stretch")},
+                      "stretch": rng("stretch"), "turn_px": rng("turn_px")},
            "stretch": [round(min(c[0] for c in corr.values()), 4), round(max(c[0] for c in corr.values()), 4)],
-           "roll_deg": [round(min(c[2] for c in corr.values()), 3), round(max(c[2] for c in corr.values()), 3)]}
+           "roll_deg": [round(min(c[2] for c in corr.values()), 3), round(max(c[2] for c in corr.values()), 3)],
+           **({"turn_px": [round(min(c[3] for c in corr.values()), 2), round(max(c[3] for c in corr.values()), 2)]}
+              if bc.get("turn") else {})}
     print(f"body snap  {len(body)} of {len(frames)} frames placed by the body (reference frame {a + J.s0}, edges "
           f"{kinds['top']} above / {kinds['bottom']} below): before, the label's top {rep['before']['top_px']} px and "
           f"bottom {rep['before']['bottom_px']} px off the keyframe's proportion, roll {rep['before']['roll_deg']} deg; "
-          f"stretch {rep['stretch']}, roll {rep['roll_deg']} deg")
+          f"stretch {rep['stretch']}, roll {rep['roll_deg']} deg" +
+          (f"; turned round the axis {rep['turn_px']} label px (the label point under the body's centreline held at the "
+           f"keyframe's; before, it slid {rep['before']['turn_px']} px)" if bc.get("turn") else ""))
     return body, rep
 
 
@@ -1646,7 +1658,9 @@ def _review(J, parts, ll_path, arrays=None):
                               glitter=rv.Glitter(art, print_px=int(cf["glitter_print_px"]), tophat=int(cf["glitter_tophat"]),
                                                  polarity=rcv.get("polarity", "light"),
                                                  levels=float(cf["glitter_levels"]), max_px=int(cf["glitter_px"]),
-                                                 excess=float(cf["glitter_excess"])))
+                                                 excess=float(cf["glitter_excess"]),
+                                                 shimmer_levels=float(cf["shimmer_levels"]),
+                                                 shimmer_block=int(cf["shimmer_block"])))
             ctx[id(P)]["body"] = _body_reference(P, ctx[id(P)], lambda T: src[T - lo] if lo <= T < hi else
                                                  P.media.frames(T, T + 1)[0])
             rj = json.loads((P.work / "render.json").read_text()) if (P.work / "render.json").exists() else {}
@@ -1668,8 +1682,9 @@ def _review(J, parts, ll_path, arrays=None):
             Ho = c["maps"].get(T, H)
             r.update(shot=c["shot"], gap=rv.limb_gap(Ho, m, c["v"]), shear=rv.shear_of(H), pts=rv.shape_points(H, c["G"]),
                      ghost=c["ghost"](out[i], src[i], m, Ho, c["res"].get("morph_source", {}).get(t, H)),
-                     occl=rv.occluder_edge(Ho, H, m, c["v"], cf["bend_slope"], cf["bend_ends"], cf["bend_moved"]))
-            c["glitter"].add(T, c["shot"], src[i], out[i], m, c["res"].get("morph_source", {}).get(t, H))
+                     occl=rv.occluder_edge(Ho, H, m, c["v"], cf["bend_slope"], cf["bend_ends"], cf["bend_moved"]),
+                     endstep=rv.end_doubled(c["art"], out[i], src[i], m, Ho))
+            c["glitter"].add(T, c["shot"], src[i], out[i], m, c["res"].get("morph_source", {}).get(t, H), H_out=Ho)
             b = c["body"]
             if b is not None:
                 mb = vf.body_measure(Ho, src[i].astype(float).mean(-1), m.astype(float), c["v"], c["uc"], b["edges"]["top"],
@@ -1683,7 +1698,8 @@ def _review(J, parts, ll_path, arrays=None):
                 chg = np.any(out[i] != src[i], axis=-1)
                 LF[T] = {"looks": lk.frame_looks(src[i], out[i], m, chg, pol),
                          "ghost_px": c["rinfo"].get(str(T), {}).get("ghost_px"),
-                         "double": rv.doubled(c["art"], out[i], src[i], m, Ho, pol, glass=c["glass"])}
+                         "double": rv.doubled(c["art"], out[i], src[i], m, Ho, pol, glass=c["glass"],
+                                              H_src=c["res"].get("morph_source", {}).get(t, H) if Ho is not H else None)}
                 if i > 0 and owner.get(T - 1) is P and (T - 1) in LF:
                     lc = dict(lk.LOOKS, **(looks_cfg or {}))
                     LF[T - 1]["swim"] = lk.swim_pair(src[i - 1], src[i], out[i - 1], out[i], prev[1], m,
@@ -1772,7 +1788,8 @@ def _body_row(m, ref):
     def r(x, n=2):
         return round(float(x), n) if np.isfinite(x) else None
     return {"top_gap_px": r(m["top"]), "bottom_gap_px": r(m["bot"]), "label_px": r(m["L"]), "top_px": r(o["top_px"]),
-            "bottom_px": r(o["bottom_px"]), "roll_deg": r(o["roll_deg"], 3), "stretch": r(o["stretch"], 4)}
+            "bottom_px": r(o["bottom_px"]), "roll_deg": r(o["roll_deg"], 3), "stretch": r(o["stretch"], 4),
+            "turn_px": r(o["turn_px"])}
 
 
 def _delivered(path):
@@ -2180,7 +2197,7 @@ def _staged(J, stamps, k_track, k_fit, still_key, f, cfg):
 SETTINGS_SECTIONS = ("track", "fit", "render", "qa", "review", "artwork", "key")
 # render settings the still label doesn't depend on
 RENDER_ONLY = ("body_snap", "sparkles", "spark_glow", "alpha", "print_alpha", "soft_cap", "smear", "_sparkles_asked",
-               "glue", "level", "_defaults", "shade_print", "clear_glass")
+               "glue", "level", "_defaults", "shade_print", "shade_local", "clear_glass")
 
 
 def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24.0, work=None, workers=None):
