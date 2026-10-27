@@ -349,7 +349,9 @@ class ImagePostAutoDraft:
                     "product_mask). t along the product's axis from the mask's centre, px, + down the image: "
                     "t:b given (-150:0 for a squeezed tube's flat crimp); t a seam measured across the body; t/w a "
                     "seam on a narrower ring of half-width w (a collar); t/matte the mask's own end (a base). "
-                    "Example: \"-150:0 146.5\". Empty: no bow (seen from level).")}),
+                    "Example: \"-150:0 146.5\". print: the bow the generated product's own long lines draw (its "
+                    "rules, a band's edges), less the warped packshot's, for a packshot warped whole (a squeeze "
+                    "tube seen from above). Empty: no bow (seen from level).")}),
             },
         }
 

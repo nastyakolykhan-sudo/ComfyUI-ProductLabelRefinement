@@ -1,19 +1,19 @@
 {
   "skill": "~/Documents/Claude/product-label-refinement",
-  "imgpost_version": "0.13.0",
-  "synced": "2026-10-20",
+  "imgpost_version": "0.13.1",
+  "synced": "2026-10-25",
   "files": {
-    "__init__.py": "af94cf926beb92e5480a2e363139d7bbeb3da8e7a7caebdb902f6991d59d2889",
-    "audit.py": "2f582ca12605addb74cb0b0d880a880764d79152a8d9efd2f9e525d5286189ff",
+    "__init__.py": "b1540af17c11dd7637dc18681df39b2f3eb05f6c553cb5df63ca44c46877aae8",
+    "audit.py": "2e761de246eca7f7b455718d81d4f0a3320e9db24c42fb3048def93e1440a4f8",
     "autofit.py": "92c60d7045eee4be40853a4c35777e739b814044585b7ca343b724c0fdf168e9",
-    "bow.py": "c0893f3639b60b0160be6d1a1c68c7d395c780c2cb615b348a44cca24e0c1c63",
-    "draft.py": "a8e7828ccad0c6462cea0567aab998872f11db78b73cc85a2a4346a4085e0306",
+    "bow.py": "56f709307bfe94bf9c96f6e30068586d6f33898202f753a81528b6fe1404b456",
+    "draft.py": "b360d429a2736d7b2989654b1b6af83b4ea68e79ad10b3fdc441a5b6f0c67b4e",
     "fill.py": "4267aca68ce18703a25e1bbdd32670de80bcafd5701b2cd7577f46c93722a4af",
     "finish.py": "ddf6fecf4a3246bf1d931fdcb24ae95a8067230523e72a3ac5ba6399848101f0",
     "geometry.py": "2cc8d23c3d2e140d3ec0dab72b72bd0ef1d046cc73ecbe9fc4dd65f405a273b9",
     "grade.py": "fe0c9d16dbc4c9df56f1cd8e69a88e37f5f87cd976089370a0fcd1e21f728d2b",
     "images.py": "7d2e9e6f77b4f70c555bcf35412a11caa7705afbffff83e8636dbac0604d7e3d",
-    "ink.py": "4be8f6d65f9353d6be09f4222069a488425fa50f2a71e62a5077ef30f19a0f00",
+    "ink.py": "68e80cc42998c4176968a25c02554804c6f4625e5e8f4aeaf1fd16919198a97c",
     "masks.py": "2f46b382f3b6f0654d603557ed3b2b39f130f7dd825ccacbe0bb725e464b91a9",
     "outline.py": "134de36ca4749f6d58a5d177f2e97f90c6c84400edf6fc30cbd2992d252ad60f",
     "psd.py": "132fdcb5dd9ef88004cdb29c78a5bd67621f395c53b39e47fc8f5b1a0a13f868",
@@ -24,7 +24,7 @@
   "run_py": "a0c00400b57cc004329b2b0d98f360c977f9b07e9b9243b97ed02e9d0edfeb0b",
   "video_engine": {
     "synced": "2026-10-27",
-    "imgpost_version": "0.13.0",
+    "imgpost_version": "0.13.1",
     "packages": {
       "imgvideo": {
         "version": "0.9.0",

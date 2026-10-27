@@ -1089,7 +1089,8 @@ def line_bows(P, M, frame=None, min_len=0.3):
     then fitted as t(s) = a + k s + b sqrt(1 - s^2 / w(t)^2): b is the line's bow (+: its ends higher, seen from above),
     atan(k) its tilt. A jar seen from above: its generated print's lines bowed 73-88 px, its lid's rim 63 and its base
     51; one bow from those flattened the print's lower lines ("doesn't respect the shape of the product").
-    -> [{"t", "b", "tilt_deg", "s_span", "rms", "n"}, ...] from top to bottom"""
+    -> [{"t", "b", "tilt_deg", "s_span", "rms", "n", "h"}, ...] from top to bottom (h: the line's height in the middle
+    strip, px: a rule or an edge a few, a line of text its letters' height)"""
     from . import bow as bw
     if frame is None:
         c, ax, n = bw.body_axis(M)
@@ -1170,7 +1171,8 @@ def line_bows(P, M, frame=None, min_len=0.3):
         # b: the arc's coefficient (+: lower in the middle, its ends higher: seen from above), as geometry.Bow draws it
         out.append({"t": round(float(coef[0] + coef[2]), 1), "b": round(float(coef[2]), 2),
                     "tilt_deg": round(float(np.degrees(np.arctan(coef[1]))), 2), "s_span": round(span, 1),
-                    "rms": round(float(np.sqrt(np.mean(r[keep] ** 2))), 2), "n": int(keep.sum())})
+                    "rms": round(float(np.sqrt(np.mean(r[keep] ** 2))), 2), "n": int(keep.sum()),
+                    "h": int(ti.stop - ti.start)})
     return out
 
 
