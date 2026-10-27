@@ -273,7 +273,9 @@ def glass_map(art, med, step, band, fit_band, spec=True):
 
 def _fill_print(crop, F, act, roi):
     """crop with the px in F filled from the surface round them (harmonic, else normalized convolution), blended in
-    over a 0.6 px edge."""
+    over a 0.6 px edge. Only inside the label's area (act), where the surface it fills from is: past it a fill had
+    nothing to borrow from and the convolution's empty sum came out black (V62); px it can't reach keep the frame."""
+    F = F & act
     if not F.any():
         return crop
     D = binary_dilation(F) & ~F & act
@@ -282,7 +284,8 @@ def _fill_print(crop, F, act, roi):
     except fl.FillError:
         base = crop.copy()
         for ch in range(3):
-            base[..., ch] = np.where(F, normconv(crop[..., ch], ~F & act, 4.0)[0], crop[..., ch])
+            v, w = normconv(crop[..., ch], ~F & act, 4.0)
+            base[..., ch] = np.where(F & (w > 1e-3), v, crop[..., ch])
     Fs = np.clip(gaussian_filter(F.astype(float), 0.6), 0, 1)
     return crop * (1 - Fs[..., None]) + base * Fs[..., None]
 
@@ -590,8 +593,8 @@ def _render_texture(frame_u8, crop, S_lin, Hl, Hsub, art, R, act, P_src, a_lab, 
         # (V59) held off its tracks by the body snap's turn, the label fades over the frame's own print a few px off
         # its letters (a seal's ring near the limb echoed beside the label's): where the label lets the frame
         # through, the frame's print near the letters where the tracking puts them is filled from the surface
-        # round it
-        Ff = P_src & binary_dilation(np.clip(Wk_s, 0, 1) * sil > 0.2, iterations=10) & (alpha < 0.98) & (sil > 0)
+        # round it; inside the label's area only (past it, a glass base's rim was filled flat, V62)
+        Ff = P_src & binary_dilation(np.clip(Wk_s, 0, 1) * sil > 0.2, iterations=10) & (alpha < 0.98) & act
         crop = _fill_print(crop, Ff, act, roi)
         info["held_fill_px"] = int(Ff.sum())
     comp = crop * (1 - alpha[..., None]) + out * alpha[..., None]

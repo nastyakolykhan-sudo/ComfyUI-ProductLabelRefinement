@@ -546,7 +546,8 @@ def body_measure(H, lum, matte, v_range, uc, top="rise", bottom="matte", reach=(
     axis (H_print's, default print_mapping(H)) to the body's centreline (the matte limbs' midpoints across the label's
     middle 60 %; + = the body runs clockwise from the print on screen: turning the label by +roll puts it on the
     body), "pivot": the label's middle, px}, or None (no body end within reach).
-    reach: how far to search above / below, as shares of the label's length; across: half the search across; inside:
+    reach: how far to search above / below, as shares of the label's length; across: half the search across (widened
+    while the body runs past it, V61); inside:
     how far back inside the label a "dark" / "light" line is searched (share of its length). ref: the reference
     frame's measure: then each edge is searched only round the gap the reference's proportion predicts for this frame
     (+- window x that gap + 2 % of the label's length), so a frame can't jump to another edge (a cap's top, a
@@ -569,12 +570,24 @@ def body_measure(H, lum, matte, v_range, uc, top="rise", bottom="matte", reach=(
     bt = _edge_along(p[1], ax, lum, matte, win[1][1], bottom, inside * L, win[1][0]) if bottom not in (None, "none") else 0.0
     if tp is None or bt is None:
         return None
+
+    def sections(R):
+        S_ = np.arange(-R, R + 0.5, 0.5)
+        return S_, [np.nonzero(map_coordinates(matte, [c[1] + S_ * n[1], c[0] + S_ * n[0]], order=1) > 0.5)[0]
+                    for c in [p[0] + (p[1] - p[0]) * fr for fr in np.linspace(0.2, 0.8, 9)] + [p[2]]]
+    # the search across: `across` x the label's length, widened while the body runs on past its end. A squat product
+    # is wider than that (a jar's body, 0.6 x its label's length each side): sections cut at the window's end leaned
+    # the centreline halfway toward the label's own axis (V61)
     R = max(60.0, np.round(across * L * 2) / 2)
-    S_ = np.arange(-R, R + 0.5, 0.5)
+    S_, ons = sections(R)
+    for _ in range(4):
+        if not any(len(on) >= 10 and (on.min() == 0 or on.max() == len(S_) - 1) for on in ons):
+            break
+        R = np.round(1.5 * R * 2) / 2
+        S_, ons = sections(R)
     mids = []
-    for fr in np.linspace(0.2, 0.8, 9):
+    for fr, on in zip(np.linspace(0.2, 0.8, 9), ons[:9]):
         c = p[0] + (p[1] - p[0]) * fr
-        on = np.nonzero(map_coordinates(matte, [c[1] + S_ * n[1], c[0] + S_ * n[0]], order=1) > 0.5)[0]
         if len(on) >= 10:
             mids.append(c + n * 0.5 * (S_[on.min()] + S_[on.max()]))
     roll = np.nan
@@ -592,7 +605,7 @@ def body_measure(H, lum, matte, v_range, uc, top="rise", bottom="matte", reach=(
     Hb = H
     while hasattr(Hb, "base"):
         Hb = Hb.base
-    on = np.nonzero(map_coordinates(matte, [p[2][1] + S_ * n[1], p[2][0] + S_ * n[0]], order=1) > 0.5)[0]
+    on = ons[9]
     if len(on) >= 10 and hasattr(Hb, "inverse"):
         cm = p[2] + n * 0.5 * (S_[on.min()] + S_[on.max()])
         uu, _, okk = Hb.inverse(np.array([cm[0]]), np.array([cm[1]]))

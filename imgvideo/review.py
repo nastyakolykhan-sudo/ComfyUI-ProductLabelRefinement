@@ -984,6 +984,7 @@ def notes_block(flags, summary, title="Automatic checks"):
              "swim": "The label slides against the product on near-still frames",
              "ends": "The label slides on a held run's first or last frames (the glue's edge)",
              "level": "The label's lines off the product's base (straightened)",
+             "lines": "The label's lines turned against the frame's own print",
              "sharp": "The print softer than the source's own print",
              "tilt": "The print's side edge turned or shifted against the product's limb",
              "spots": "Dark spots on the label's body",
@@ -997,7 +998,7 @@ def notes_block(flags, summary, title="Automatic checks"):
     else:
         out.append("")
         for k in ("edges", "step", "ghost", "shear", "bend", "body", "slide", "glitter", "shimmer", "vanish", "switch", "swim",
-                  "ends", "level", "sharp", "tilt", "spots", "double"):
+                  "ends", "level", "lines", "sharp", "tilt", "spots", "double"):
             if k in summary["checks"]:
                 ex = next(why for t in sorted(flags) for kk, why in flags[t] if kk == k)
                 out.append(f"- **{names[k]}:** frames {summary['checks'][k]} (e.g. {ex}).")
