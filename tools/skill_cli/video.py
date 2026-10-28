@@ -27,7 +27,9 @@ VJOB.json (paths relative to its folder):
                   {"keyframe": "reference.png", "frame": "auto" | N, "band": [t0, t1], "model": "homography" | "tube",
                   "theta_lim": 75}   a corrected keyframe; band is the label's stretch along the product's axis in px
                   from the matte's centre (cap, pump and crimp outside it); "tube" unrolls the keyframe onto a surface
-                  of revolution (a tapered tube, a bottle), so print that spins across it stays on it; or
+                  of revolution (a tapered tube, a bottle), so print that spins across it stays on it; "fit_band":
+                  [t0, t1] fits the tube on that stretch instead (the body's own, where band runs past a base step to
+                  carry the last lines of print, V54); or
                   {"texture_job": "../job", "reacquire": N, "roll_search": [-4, 4, 0.25]}   another shot: the keyframe's
                   unrolled label from that job, found again on frame N of this shot by correlating the print (spin, axial
                   offset, scale; roll with roll_search, or better "roll_from_print": {"box": [u0, v0, u1, v1]}: the frame's
@@ -64,7 +66,9 @@ VJOB.json (paths relative to its folder):
                    sparkles list: on those frames), "occluder_feather": px
                    (holes the matte cuts inside the label for something in front: fade into the source around them,
                    so its spilled haze stays), "feather": {"theta_deg":
-                   10, "v_px": 24} (keyframe texture: the label fades into the source at its sides and band ends),
+                   10, "v_px": 24} (keyframe texture: the label fades into the source at its sides and band ends;
+                   "print_gap": px ends each end's fade that far short of the label's own print, shorter where the
+                   print runs close to the end: a fade over a line lets the frame's own line through beside it, V54),
                    "limb_snap": {"step": 24, "max_px": 30} (tube: the label's sides snapped onto the matte's per row;
                    a real tube isn't a straight taper; "hold": true keeps each side's fit to the rows it measured
                    (an occluder in front); "axial": "top" | "bottom": on morph frames, also the product's

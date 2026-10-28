@@ -11,8 +11,14 @@ with pass/fail flags and the setting an agent tries next (summary["actions"]). P
   ends    the same on the first and last pairs of a run the label holds: the glue's smoothing at a run's ends (edge
           "line" extrapolates the next frames' trend, "mean" doesn't; "mean" helped one product and hurt another).
   level   the label's lines against the product's base, both straightened on the body's axis (level.measure: skew by
-          point projection, 1 px profile smoothing). Against 0 where render.level levelled to the base, else against
-          the keyframe frame's own level. Only where the base holds steady (base_mad_max), as render.level.
+          point projection, 1 px profile smoothing; bowed lines at the axis, V61). Against 0 where render.level
+          levelled to the base, else against the keyframe frame's own level. Only where the base holds steady
+          (base_mad_max), as render.level.
+  lines   the label's lines against the frame's own print, the same measure on both on the same straightening, off
+          their difference on the keyframe's frame (the one workflow's jar: a 0.5-0.75 deg turn on 140-163 that
+          level's 1 deg doesn't reach, V61). Judged where the frame's print holds level with the base as on the
+          keyframe's frame (lines_print_deg): where the generator slants its print (V45) the label follows the body,
+          and level judges it.
   sharp   the print's edge strength against the keyframe frame's (the user: "the label gets too blurry at some
           points"), under sharp_floor and softer than the source's own print there by sharp_margin (a source that is
           soft too gets matching motion blur on purpose).
@@ -25,6 +31,12 @@ with pass/fail flags and the setting an agent tries next (summary["actions"]). P
           print-only render the same measure counts only the source's glitter, 45-250 px a frame).
   spots   small marks a print-only composite leaves: changed pixels darker than the source's own body by spot_levels,
           clear of the output's print by spot_clear px (letter fringes are not spots), in pieces under spot_max_px.
+          Light print only: dark print's own letters are dark marks it can't tell from spots.
+  double  the source's own print beside the label's (review.doubled, V54): where the label lets the source through
+          over print (its end fade, a band that ends on a line), the generator's line, drifting against the tracked
+          label, shows a few px off the label's own (the one workflow's jar: its second-last line doubled
+          away from the keyframe). double_px or more, as a 5-frame median. Ink only: a round body's soft limb
+          band passes the rest of the test next to the label's letters (V55).
 """
 import math
 
@@ -45,6 +57,12 @@ LOOKS = {
     "ends_frames": 4,        # the pairs within this many frames of a held run's first and last frames: "ends"
     "level_deg": 1.0,        # deg: the lines off the base (or the keyframe's level), 5-frame median ...
     "level_run_s": 0.25,     # ... held this long
+    "lines_deg": 0.3,        # deg: the label's lines turned against the frame's own print beyond their keyframe frame's
+    "lines_px": 3.0,         # difference, and by this many px end to end across the copy block (a small label's block
+                             # reads 0.8 deg a px), 5-frame median, held level_run_s (the jar on 0.8.0: 0.65 deg, 5.4
+                             # px; fixed: under 0.2 deg; an approved bottle with small white print: 1.75 deg, 2.3 px)
+    "lines_print_deg": 0.5,  # deg: the frame's print off the base by this much more than on the keyframe's frame: not
+                             # judged there (the generator slanting its print, V45)
     "base_mad_max": 0.5,     # deg: the straightened base's frame-to-frame scatter above this: level not judged
     "base_jump_deg": 1.5,    # deg: a frame's base this far off its 15-frame running median (a sparkle trail splitting
                              # the matte read 21 deg) isn't judged
@@ -62,6 +80,8 @@ LOOKS = {
     "spot_clear": 4,         # ... this far from the output's print (dilation, px): a letter's fringe isn't a spot
     "spot_min_px": 4,        # ... and at least this big
     "spot_body": 15,         # px: the grey opening of the source that gives its body under the garbled print
+    "double_px": 150,        # px of the source's own print beside the label's (review.doubled), 5-frame median: the
+                             # one workflow's jar v1 read 426-639 a frame, fixed 0-88
 }
 
 
@@ -254,13 +274,23 @@ def frame_looks(src, out, M, changed, polarity="light"):
         lv = None
     if lv is not None:
         r["level"] = lv
+        try:                                     # the frame's own print, the same way (lines)
+            lv = lvl.measure(src, M, polarity)
+        except (ValueError, np.linalg.LinAlgError):
+            lv = None
+        if lv is not None:
+            r["level_src"] = lv
     try:
         r["base_deg"] = lvl.base_deg(M)
     except (ValueError, np.linalg.LinAlgError):
         pass
-    sp = spots(src, out, changed)
-    if sp:
-        r["spots"] = sp
+    if polarity == "light":
+        # a light-print measure: dark print's own letters are dark marks on the body it can't tell from spots (it
+        # flagged every frame of the one workflow's dark-print jar and tube, V54); stray dark print there is the
+        # double check's (review.doubled)
+        sp = spots(src, out, changed)
+        if sp:
+            r["spots"] = sp
     return r
 
 
@@ -383,6 +413,33 @@ def evaluate(F, shots, fps=24.0, cfg=None):
                 if not to_base and kfl is not None and abs(kfl) > c["level_deg"] / 2:
                     act("keyframe_level", [kf], f"the keyframe's own lines run {kfl:+.2f} deg against its base",
                         {"render": {"level": {"offset": "base"}}})
+        # lines: the label's lines against the frame's own print, off their keyframe frame's difference, where the
+        # frame's print holds level with the base as on the keyframe's frame (only where level judges: a steady base)
+        ln = {t: (lv0[t]["text_deg"] - F[t]["looks"]["level_src"]["text_deg"], F[t]["looks"]["level_src"]["level_deg"],
+                  lv0[t].get("block_px", 0)) for t in lv if F[t]["looks"].get("level_src")} if S["level"]["judged"] else {}
+        k0 = [ln[t] for t in ln if abs(t - kf) <= c["ref_window"]]
+        if len(ln) >= 5 and k0:
+            d0, p0 = float(np.median([d for d, _, _ in k0])), float(np.median([p for _, p, _ in k0]))
+            tl = sorted(ln)
+            x = median_filter(np.array([ln[t][0] - d0 for t in tl]), 5, mode="nearest")
+            px = np.abs(np.tan(np.radians(x))) * np.array([ln[t][2] for t in tl])
+            judged = {t for t in tl if abs(ln[t][1] - p0) <= c["lines_print_deg"]}
+            run = max(2, int(math.ceil(c["level_run_s"] * fps)))
+            off = [t for t, v, d in zip(tl, x, px) if t in judged and abs(v) > c["lines_deg"] and d > c["lines_px"]]
+            hit = [t for a, b in _runs(off) if b - a + 1 >= run for t in range(a, b + 1) if t in judged]
+            for t in hit:
+                flag(t, "lines", f"the label's lines run {x[tl.index(t)]:+.2f} deg ({px[tl.index(t)]:.1f} px across the "
+                                 f"copy) against the frame's own print, off their difference on the keyframe's frame "
+                                 f"(+: lower on the right)")
+            if hit and not sh.get("level_on"):
+                act("lines", hit, "the label's lines turned against the frame's print", {"render": {"level": True}})
+            xj = np.array([v for t, v in zip(tl, x) if t in judged])
+            S["lines"] = {"frames": len(ln), "judged": len(judged), "keyframe_diff_deg": round(d0, 2),
+                          "median_abs_deg": round(float(np.median(np.abs(xj))), 2) if len(xj) else None,
+                          "max_abs_deg": round(float(np.abs(xj).max()), 2) if len(xj) else None,
+                          "max_px": round(float(max(d for t, d in zip(tl, px) if t in judged)), 1) if len(xj) else None,
+                          "flagged": len(hit),
+                          "not_judged": sorted(set(tl) - judged)}
         # sharp: against the keyframe frame's own, and the source's
         ko, ks = (F.get(kf, {}).get("looks") or {}).get("sharp_out"), (F.get(kf, {}).get("looks") or {}).get("sharp_src")
         if ko:
@@ -435,6 +492,36 @@ def evaluate(F, shots, fps=24.0, cfg=None):
         for t, v in sp.items():
             flag(t, "spots", f"{len(v)} dark spot{'s' if len(v) > 1 else ''} on the label's body (at " +
                  ", ".join(f"{x},{y}" for y, x, _ in v[:3]) + "): look")
-        S["spots"] = {"frames": len(sp), "flagged": len(sp)}
+        S["spots"] = {"frames": len(sp), "flagged": len(sp)} if sh.get("polarity", "light") == "light" else \
+            {"judged": False, "why": f"{sh.get('polarity')} print: its letters are dark marks (the double check reads "
+                                     f"stray print)"}
+        # double: the source's own print beside the label's (V54), where the label lets the source through over print
+        db = {t: F[t]["double"] for t in ts if F[t].get("double") is not None}
+        if db:
+            tl = sorted(db)
+            med = median_filter(np.array([db[t]["px"] for t in tl], float), 5, mode="nearest")
+            hit = [t for t, v in zip(tl, med) if v >= c["double_px"]]
+            fe = sh.get("feather") if isinstance(sh.get("feather"), dict) else {}
+            names = {"bottom": "at its lower end", "top": "at its upper end", "inside": "inside it"}
+            for t in hit:
+                d = db[t]
+                be = d.get("by_end") or {}
+                where = ", ".join(f"{be[k]} px {names[k]}" for k in ("bottom", "top", "inside") if be.get(k))
+                flag(t, "double", f"the source's own print shows beside the label's: {d['px']} px ({where}; the "
+                                  f"largest piece at {d['at'][1]},{d['at'][0]})")
+            # at the label's ends (a fade or band end over a line) the band's settings help; elsewhere (the side
+            # fades: a generated layout wider than the keyframe's, the tube's packshot keyframe) look
+            at_ends = sum((db[t].get("by_end") or {}).get(k, 0) for t in hit for k in ("top", "bottom"))
+            inside = sum((db[t].get("by_end") or {}).get("inside", 0) for t in hit)
+            if hit and at_ends >= inside:
+                if sh.get("alpha", "label") == "label" and fe and fe.get("print_gap") is None:
+                    try_ = {"render": {"feather": dict(fe, print_gap=2)}}
+                else:
+                    try_ = {"anchor": {"over_print": {"room": 48}}}
+                act("double", hit, "the frame's own print shows beside the label's (its end fade or band end over a "
+                                   "line)", try_)
+            v = [d["px"] for d in db.values()]
+            S["double"] = {"frames": len(db), "median_px": int(np.median(v)), "max_px": int(max(v)), "flagged": len(hit),
+                           "px": {str(t): d["px"] for t, d in sorted(db.items()) if d["px"]}}
         summ[str(key)] = S
     return flags, {"looks": summ, "actions": actions}

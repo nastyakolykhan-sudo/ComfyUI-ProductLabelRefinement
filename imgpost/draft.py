@@ -260,7 +260,7 @@ def draft(scene_u8, ref_u8, ref_alpha=None, quad=None, pairs=(), occluders=(), m
     }
     return {"job": job, "H": H, "points": points, "corners": corners, "props": props, "sil_found": sil_found,
             "mask_note": mask_note, "orient": af.orientation(H, (bx0, by0, bx1, by1)), "white_box": wb, "notes": notes,
-            "sheet": af.match_sheet(scene, ref, H, [p for p in points])}
+            "sheet": af.match_sheet(scene, ref, H, [p for p in points]), "ref_u8": ref_u8, "ref_alpha": ref_alpha}
 
 
 # ---- label mode ----
@@ -772,30 +772,60 @@ def label_draft(scene_u8, ref_u8, ref_alpha=None, quad=None, outline=None, kind=
             "paper": paper}
     return {"job": job, "H": H, "points": points, "corners": corners, "props": [], "sil_found": None, "mask_note": None,
             "orient": af.orientation(H, (bx0, by0, bx1, by1)), "white_box": None, "notes": notes,
-            "sheet": af.match_sheet(scene, ref, H, points) if points else None, "label": info}
+            "sheet": af.match_sheet(scene, ref, H, points) if points else None, "label": info,
+            "ref_u8": ref_u8, "ref_alpha": ref_alpha}
 
 
 def print_on_body(d, scene_u8, mask=None, ink=None, print_box=None, bow=None):
     """Print straight on a coloured body (pitfalls 92-95), added to a draft from draft() (either mode), in place:
-      ink "light"  job matte {"type": "ink", "polarity": "light", "print_box"}: the packshot's light print laid on
-                   the frame's own body (imgpost/ink.py). print_box: [x0, y0, x1, y1] reference px, the print's rows
-                   inside the frosted rims. The matte the ink stays inside is the product's mask: run.py draft sets
-                   old_silhouette to its file, the ComfyUI template wires it into Fill Leftovers.
+      ink "light"  job matte {"type": "ink", "polarity": "light" | "dark", "print_box"}: the packshot's print laid
+        / "dark"   on the frame's own body (imgpost/ink.py), lighter or darker than it. print_box: [x0, y0, x1, y1]
+                   reference px, the print's rows inside the frosted rims, seams and lid edge. The matte the ink stays
+                   inside is the product's mask: run.py draft sets old_silhouette to its file, the ComfyUI template
+                   wires it into Fill Leftovers.
       bow          text for bow.parse ("-150:0 146.5"): align.bow, its centre, axis and half-widths measured from the
-                   product mask (needed), b given or measured at the seams.
+                   product mask (needed), b given or measured at the seams; "print": b from the generated product's own
+                   long lines less the warped packshot's (bow.from_print, pitfall 101: a packshot warped whole).
     Adds a line per change to d["notes"]."""
     from . import bow as bw
     job = d["job"]
     if ink not in (None, "off"):
-        if ink != "light":
-            raise DraftError(f"ink {ink!r}: only 'light' (print lighter than the body it sits on)")
-        job["matte"] = {"type": "ink", "polarity": "light"}
+        if ink not in ("light", "dark"):
+            raise DraftError(f"ink {ink!r}: 'light' (print lighter than the body it sits on) or 'dark' (darker)")
+        job["matte"] = {"type": "ink", "polarity": ink}
+        if ink == "dark":
+            job["prefilter"] = "auto"           # no blur before sampling where the frame shows the packshot larger
         if print_box:
             job["matte"]["print_box"] = [int(round(v)) for v in print_box]
-        d["notes"].append("matte ink, light: the packshot's print on the frame's own body" +
-                          ("" if print_box else "; no print_box: a frosted body's highlights may be taken for print "
-                                                "(pitfall 93), give the print's rows on the packshot"))
+        d["notes"].append(f"matte ink, {ink}: the packshot's print on the frame's own body" +
+                          ("" if print_box else "; no print_box: a body's highlights, seams or lid edge may be taken "
+                                                "for print (pitfall 93), give the print's rows on the packshot"))
+    if isinstance(bow, str) and bow.strip().lower() == "print":
+        # the bow the generated product draws, less the packshot's own as the fit warps it (a tube warped flat)
+        if mask is None:
+            raise DraftError("bow print: needs the product mask (the body's frame, and its lines)")
+        if d.get("ref_u8") is None:
+            raise DraftError("bow print: the draft has no reference image")
+        from . import outline as ol
+        refmask = ol.RefMask(job["reference_outline"], d["ref_u8"], d.get("ref_alpha"))
+        prof, prep = bw.from_print(scene_u8, mask, d["ref_u8"], refmask, d["H"])
+        if prof is None:
+            raise DraftError(f"bow print: {prep['why']} (give the bow as t:b, or leave it empty)")
+        bow = {"b": prof, "from": "print"}
+        d["notes"].append("bow from the print's lines: the frame's " +
+                          ", ".join(f"{l['b']:+.1f}" for l in prep["frame_lines"]) + " px, the warped packshot's " +
+                          ", ".join(f"{l['b']:+.1f}" for l in prep["packshot_lines"]) + " px (top to bottom)" +
+                          (f"; the matte's {' and '.join(prep['matte_ends']['used'])} end too"
+                           if prep["matte_ends"]["used"] else ""))
     spec = bw.parse(bow) if isinstance(bow, str) else bow
+    if not spec and ink == "dark" and mask is not None:
+        # dark print without a bow given: the body's own bow from its matte's two ends (a jar seen from above bows
+        # tens of px, and the seams inside it are hard to read)
+        prof, mrep = bw.matte_ends(mask)
+        if prof is not None and max(abs(prof[0][1]), abs(prof[1][1])) >= 1.0:
+            spec = {"b": prof, "from": "matte"}
+            d["notes"].append(f"bow from the matte's ends: {prof[0][1]:+g} px at its top, {prof[1][1]:+g} at its base "
+                              "(no --bow given; kept only where the generated print bows too)")
     if spec:
         if mask is None:
             raise DraftError("bow: needs the product mask (its centre, axis and half-widths)")

@@ -104,9 +104,10 @@ def silhouette(key, inset=1.5, soft=0.7):
     return np.clip(d / max(2 * soft, 1e-3) + 0.5, 0, 1)
 
 
-def render(frame_u8, H, Hsub, art, key, cfg, label_median=None, seed=0):
+def render(frame_u8, H, Hsub, art, key, cfg, label_median=None, seed=0, glass=None):
     """One frame. H: the frame's mapping (reference px -> scene px); Hsub: the mappings across the shutter (motion
-    blur; [H] for none); key: bool product matte, full frame. -> (output frame uint8, info dict, layers for QA)"""
+    blur; [H] for none); key: bool product matte, full frame; glass: a keyframe label's clear-glass weight (glass_map).
+    -> (output frame uint8, info dict, layers for QA)"""
     Hl = art.local(H)
     roi = work_box(Hl, art, frame_u8.shape[:2])
     x0, y0, x1, y1 = roi
@@ -136,7 +137,7 @@ def render(frame_u8, H, Hsub, art, key, cfg, label_median=None, seed=0):
     if getattr(art, "texture_mode", False):              # a keyframe's whole label, relit (no ink, no fill)
         info = {"roi": roi, "src_print_px": int((P_src & act).sum()), "blur_px": round(float(cfg.get("blur", 0)), 3)}
         return _render_texture(frame_u8, crop, S_lin, Hl, Hsub, art, R, act, P_src, a_lab, sil, U, V, roi, cfg, info,
-                               label_median, seed, key)
+                               label_median, seed, key, glass)
     P_ink = binary_dilation(cov > 0.04, iterations=1)
     F = (P_src | P_ink) & act
     D = binary_dilation(F) & ~F & act
@@ -215,6 +216,208 @@ def render(frame_u8, H, Hsub, art, key, cfg, label_median=None, seed=0):
     return res, info, {"roi": roi, "R": R, "cov": cov, "F": F, "P_src": P_src & act, "U": U, "V": V}
 
 
+CLEAR_GLASS = {"dist": 0.2, "ref_px": 64, "spread": 1.5, "soft": 1.0, "near": 10}
+
+
+def glass_map(art, med, step, band, fit_band, spec=True):
+    """Clear glass under a keyframe's label (render.clear_glass, V56): in the rows the label's band was stretched over
+    past the body's own band (anchor.fit_band) to carry the print the keyframe corrected (V54), the still label's cells
+    whose bare surface (the label's print 2 cells round taken out) isn't the body's hue: chromaticity (log r/g, log b/g
+    of linear RGB) more than `dist` from the body's just inside the stretched end (`ref_px` rows). Hue, not brightness:
+    a limb's shading is the body darker (with brightness the jar's own body cells spread 0.3-0.6, and the tube's pink
+    stretched rows read as glass). Measured: the jar's stretched rows 91 % over 0.2, the tube's none. A jar's last lines sit where
+    its pink body meets a clear glass base: carried from the keyframe, the glass there (and the keyframe's fills over
+    the garbled print in it) showed as soft smudges against the frame's own sharp reflections, and the glitter in
+    front was lost. Cells under the print take their bare neighbours' call (`spread` cells); the weight is smoothed by
+    `soft` cells. -> a function (U, V) local reference px -> weight 0..1, or None (no stretched rows, no glass)"""
+    from scipy.ndimage import map_coordinates
+    from . import labelspace as ls
+    c = dict(CLEAR_GLASS, **(spec if isinstance(spec, dict) else {}))
+    oy = art.off[1]
+    f0, f1 = fit_band[0] - band[0] - oy, fit_band[1] - band[0] - oy      # the body's band, in local reference rows
+    if not (fit_band[0] > band[0] or fit_band[1] < band[1]):
+        return None
+    grid = ls.Grid(art, step)
+    v = grid.v
+    ok = grid.inside & np.isfinite(med[..., 0])
+    fit = (v >= f0) & (v <= f1)
+    stretch = ok & ~fit
+    if not stretch.any():
+        return None
+    near = binary_dilation(map_coordinates(art.pack[..., 0], [grid.v, grid.u], order=1) > 0.05, iterations=2)
+    bare = ok & ~near
+    ends = np.zeros_like(fit)
+    if fit_band[1] < band[1]:
+        ends |= (v > f1 - float(c["ref_px"])) & fit
+    if fit_band[0] > band[0]:
+        ends |= (v < f0 + float(c["ref_px"])) & fit
+    body = bare & ends
+    if body.sum() < 20:
+        return None
+    lm = np.log(np.maximum(med, 1e-4))
+    ch = np.stack([lm[..., 0] - lm[..., 1], lm[..., 2] - lm[..., 1]], -1)
+    d = np.max(np.abs(ch - np.median(ch[body], 0)), -1)
+    g = (stretch & bare & (d > float(c["dist"]))).astype(float)
+    if not g.any():
+        return None
+    gs, wt = normconv(g, stretch & bare, float(c["spread"]))
+    W = np.where(bare, g, np.where(wt > 0.05, gs, 0.0)) * stretch
+    W = np.clip(gaussian_filter(W, float(c["soft"])), 0, 1) * stretch
+
+    def weight(U, Vv):
+        return map_coordinates(W, [Vv / step, U / step], order=1, mode="constant", cval=0.0)
+    weight.cells = int((W > 0.5).sum())
+    weight.near = int(c["near"])
+    return weight
+
+
+def _fill_print(crop, F, act, roi):
+    """crop with the px in F filled from the surface round them (harmonic, else normalized convolution), blended in
+    over a 0.6 px edge. Only inside the label's area (act), where the surface it fills from is: past it a fill had
+    nothing to borrow from and the convolution's empty sum came out black (V62); px it can't reach keep the frame."""
+    F = F & act
+    if not F.any():
+        return crop
+    D = binary_dilation(F) & ~F & act
+    try:
+        base, _ = fl.harmonic_fill(crop, F, D, offset=(roi[0], roi[1]))
+    except fl.FillError:
+        base = crop.copy()
+        for ch in range(3):
+            v, w = normconv(crop[..., ch], ~F & act, 4.0)
+            base[..., ch] = np.where(F & (w > 1e-3), v, crop[..., ch])
+    Fs = np.clip(gaussian_filter(F.astype(float), 0.6), 0, 1)
+    return crop * (1 - Fs[..., None]) + base * Fs[..., None]
+
+
+def _clear_glass(comp, crop, out, alpha, Wk, P_src, act, sil, a_lab, U, V, roi, glass, info, Wk_src=None):
+    """Over clear glass (glass_map's weight) the frame keeps its own surface: its print (the generator's line, within
+    `near` px of the label's) is filled from the glass round it, and only the label's print goes on, relit as the
+    label's (render.clear_glass, V56). Wk_src: the label's print where the tracking puts it, when the render places
+    it elsewhere (render.body_snap.turn holds it off the generator's print, V59): the frame's print is filled near
+    either."""
+    x0, y0 = roi[0], roi[1]
+    gw = glass(np.nan_to_num(U), np.nan_to_num(V)) * (a_lab > 0.5) * (sil > 0)
+    gw = gw * np.clip(4.0 * alpha, 0, 1)                    # the label's own fades and holes still apply
+    on = (gw > 0.02) & act
+    if not on.any():
+        return comp
+    cov = np.clip(Wk, 0, 1) * sil
+    lab = cov > 0.2
+    if Wk_src is not None:
+        lab = lab | (np.clip(Wk_src, 0, 1) * sil > 0.2)
+    F = (binary_dilation(cov > 0.04, iterations=1) |
+         (P_src & binary_dilation(lab, iterations=int(getattr(glass, "near", 10))))) & on
+    base = _fill_print(crop, F, act, roi)
+    a_ink = np.clip(cov * alpha, 0, 1)
+    comp_g = base * (1 - a_ink[..., None]) + out * a_ink[..., None]
+    info["clear_glass_px"] = int((gw > 0.5).sum())
+    info["clear_glass_fill_px"] = int(F.sum())
+    return comp * (1 - gw[..., None]) + comp_g * gw[..., None]
+
+
+END_STEPS = {"reach": 16, "ref": 64, "dist": 0.3, "run": 15}
+
+
+def end_steps(art, reach=16, ref=64, dist=0.3, run=15):
+    """Cells of the still label within `reach` rows of its top or bottom that are a body step, not print: a hue off the
+    body's (chromaticity, log r/g and log b/g, over `dist` from the median of the bare body in the `ref` rows inside
+    that end) in runs `run` px long and 3 rows tall (a line of print is neutral and thin), with the ink in the end rows
+    that touches it (the step's darker rim). A keyframe that curves its
+    band edge with the body (Auto Draft's bow "print") brought it into the label's straight end, higher at the sides:
+    counted as print, it cut the end fade to 1 px (V60). Cached on the artwork. -> bool mask (local reference px)"""
+    from scipy.ndimage import binary_opening
+    if not hasattr(art, "_end_steps"):
+        T = np.asarray(art.texture, float)
+        T = T / 255.0 if T.max() > 1.5 else T
+        val = art.pack[..., 2] > 0.5
+        ink = art.pack[..., 0] > 0.2
+        lr = np.log(np.maximum(T[..., 0], 1e-3) / np.maximum(T[..., 1], 1e-3))
+        lb = np.log(np.maximum(T[..., 2], 1e-3) / np.maximum(T[..., 1], 1e-3))
+        out = np.zeros(val.shape, bool)
+        h = val.shape[0]
+        rows = np.nonzero(val.any(1))[0]
+        if len(rows):
+            v0, v1 = int(rows[0]), int(rows[-1]) + 1
+            for a, b, ra, rb in ((v0, v0 + reach, v0 + reach, v0 + reach + ref), (v1 - reach, v1, v1 - reach - ref, v1 - reach)):
+                a, b, ra, rb = max(a, 0), min(b, h), max(ra, 0), min(rb, h)
+                body = val[ra:rb] & ~ink[ra:rb]
+                if body.sum() < 50:
+                    continue
+                d = np.hypot(lr[a:b] - np.median(lr[ra:rb][body]), lb[a:b] - np.median(lb[ra:rb][body]))
+                out[a:b] = val[a:b] & (d > dist)
+            raw = out
+            out = binary_opening(raw, structure=np.ones((3, int(run)), bool))
+            for _ in range(4):                               # back over the step's own tips (its thin ends)
+                out = binary_dilation(out) & raw
+            if out.any():
+                # and the step's own rim, darker and less coloured: ink in the end rows touching it
+                ends = np.zeros(val.shape, bool)
+                ends[max(v0, 0):min(v0 + reach, h)] = True
+                ends[max(v1 - reach, 0):min(v1, h)] = True
+                lab, n = ndi.label(ink & val & ends, np.ones((3, 3)))
+                hit = np.unique(lab[binary_dilation(out, iterations=2) & (lab > 0)])
+                out |= np.isin(lab, hit[hit > 0])
+        art._end_steps = out
+    return art._end_steps
+
+
+def print_rows(art, strip=4, line=0.25, min_px=3):
+    """Where the label's own print starts and ends along its rows (local reference px), or None: its coverage over 0.2
+    where the texture is on the product, counted in strips of `strip` rows; a strip is print when it holds `line` x
+    the median printed strip (and min_px) or more, so the odd dark speck in a glass base under the last line (the
+    keyframe's relit refraction) doesn't count. A body step at either end (end_steps, V60) isn't print. Cached on the
+    artwork."""
+    if not hasattr(art, "_print_rows"):
+        p = (art.pack[..., 0] > 0.2) & (art.pack[..., 2] > 0.5)
+        if getattr(art, "texture", None) is not None:
+            p &= ~end_steps(art)
+        n = p.sum(1)
+        k = int(np.ceil(len(n) / strip)) * strip
+        h = np.pad(n, (0, k - len(n))).reshape(-1, strip).sum(1)
+        ok = h > 0
+        dense = np.nonzero(ok & (h >= max(min_px, line * float(np.median(h[ok])) if ok.any() else min_px)))[0]
+        art._print_rows = (float(dense[0] * strip), float(min(dense[-1] * strip + strip, len(n)) - 1)) \
+            if len(dense) else None
+    return art._print_rows
+
+
+def print_fade(art, fv, gap):
+    """The end fade's length at the label's top and bottom (feather.print_gap): at most fv rows, ending gap px before
+    the label's first (last) print row, at least 1 px. -> (top px, bottom px)"""
+    pr = print_rows(art)
+    if pr is None:
+        return fv, fv
+    vlo, vhi = art.polygon[:, 1].min(), art.polygon[:, 1].max()
+    return (float(np.clip(pr[0] - gap - vlo, 1.0, fv)), float(np.clip(vhi - gap - pr[1], 1.0, fv)))
+
+
+SHADE_PRINT = {"size": 61, "contrast": 0.5, "grow": 2, "rim": 0.15}
+
+
+def shade_print(S_lin, T_lin, act, polarity, spec=True, key=None):
+    """Print in the frame or in the label (render.shade_print): px under `contrast` x the body round them (a grey
+    closing `size` px wide; light print: over 1 / contrast x a grey opening), grown `grow` px, away from the product's
+    limbs (`rim` x the matte's half-width in from its edge, `key` the matte). Black print on a light body sits at a
+    tenth of it. The limbs stay in the light's read: a packshot keyframe's darker limb is light the frame corrects
+    (masked, the tube's right limb came out black). -> bool mask"""
+    c = dict(SHADE_PRINT, **(spec if isinstance(spec, dict) else {}))
+    k = int(c["size"])
+    out = np.zeros(act.shape, bool)
+    for img in (S_lin, T_lin):
+        L = np.where(act, im.lum(img), np.nan)
+        Lf = np.nan_to_num(L, nan=float(np.nanmedian(L)) if np.isfinite(L).any() else 0.0)
+        if polarity in ("dark", "both"):
+            out |= Lf < float(c["contrast"]) * ndi.grey_closing(Lf, size=(k, k))
+        if polarity in ("light", "both"):
+            out |= Lf > ndi.grey_opening(Lf, size=(k, k)) / float(c["contrast"])
+    out = binary_dilation(out & act, iterations=int(c["grow"]))
+    if key is not None and key.any():
+        d = distance_transform_edt(key)
+        out &= d > float(c["rim"]) * float(d.max())
+    return out
+
+
 def _shade(img, m, sigma):
     """Low-pass of img (h x w x 3) over the pixels in m, filled into the gaps from further out."""
     out = np.empty_like(img)
@@ -225,24 +428,48 @@ def _shade(img, m, sigma):
     return np.maximum(out, 1e-4)
 
 
-def _ratio_field(S_lin, T, m, block=8, med=5, sigma=10.0):
+def _ratio_field(S_lin, T, m, block=8, med=5, sigma=10.0, local=False):
     """The frame's light over the keyframe's, per channel, as a smooth field: log(S / T) block medians over m, then a
     median across blocks, so print in either image (the frame's garbled, the keyframe's correct one) and small
-    glints are outvoted by the bare surface around them; filled into the gaps, smoothed, back to pixels."""
+    glints are outvoted by the bare surface around them; filled into the gaps, smoothed, back to pixels.
+    local (render.shade_local, V58): the median across blocks takes the bare blocks round each one only, and the
+    smoothing weighs each block by how much of it is bare. Without it the blocks print covers were first filled with
+    the frame's overall median, which near lines of print outvoted the bare blocks round them by an amount that
+    changed as the frame's own lines morphed: the label's body boiled in soft patches round its text."""
     from scipy.ndimage import median_filter, zoom
     h, w = m.shape
     r = np.log(np.maximum(S_lin, 1e-4)) - np.log(np.maximum(T, 1e-4))
     out = np.empty_like(r)
+    sg = max(sigma / block, 0.7)
     for c in range(3):
         g, cnt = _block_stat_nan(r[..., c], m, block)
         ok = np.isfinite(g)
-        gm = np.where(ok, g, np.nanmedian(g) if ok.any() else 0.0)
-        gm = np.where(ok, median_filter(gm, size=med, mode="nearest"), gm)
-        f, wt = normconv(gm, ok, max(sigma / block, 0.7))
-        f2, _ = normconv(gm, ok, 4 * max(sigma / block, 0.7))
-        f = np.where(wt > 0.15, f, f2)
+        if local and ok.any():
+            gl = _nan_median(g, med)
+            wgt = np.where(ok, np.clip(cnt / float(block * block), 0.0, 1.0), 0.0)
+            v = np.where(ok, gl, 0.0)
+            f, wt = gaussian_filter(v * wgt, sg) / np.maximum(gaussian_filter(wgt, sg), 1e-6), gaussian_filter(wgt, sg)
+            f2 = gaussian_filter(v * wgt, 4 * sg) / np.maximum(gaussian_filter(wgt, 4 * sg), 1e-6)
+            f = np.where(wt > 0.1, f, f2)
+        else:
+            gm = np.where(ok, g, np.nanmedian(g) if ok.any() else 0.0)
+            gm = np.where(ok, median_filter(gm, size=med, mode="nearest"), gm)
+            f, wt = normconv(gm, ok, sg)
+            f2, _ = normconv(gm, ok, 4 * sg)
+            f = np.where(wt > 0.15, f, f2)
         out[..., c] = gaussian_filter(zoom(f, block, order=1)[:h, :w], block / 2)
     return np.exp(out)
+
+
+def _nan_median(g, size):
+    """Median of the finite values in a size x size window round each cell (NaN where there are none)."""
+    import warnings
+    k = size // 2
+    p = np.pad(g, k, mode="constant", constant_values=np.nan)
+    win = np.lib.stride_tricks.sliding_window_view(p, (size, size))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        return np.nanmedian(win.reshape(*g.shape, -1), axis=-1)
 
 
 def _block_stat_nan(v, valid, block):
@@ -261,7 +488,7 @@ def _block_stat_nan(v, valid, block):
 
 
 def _render_texture(frame_u8, crop, S_lin, Hl, Hsub, art, R, act, P_src, a_lab, sil, U, V, roi, cfg, info, label_median,
-                    seed, key):
+                    seed, key, glass=None):
     """A corrected keyframe's whole label, relit: out = keyframe texture x (frame's low-pass shading / keyframe's
     low-pass shading), both read on bare surface (print taken out), so the keyframe's own light never travels with
     the label and each frame's light, colour and reflections come from the frame. Where the keyframe never saw the
@@ -276,7 +503,11 @@ def _render_texture(frame_u8, crop, S_lin, Hl, Hsub, art, R, act, P_src, a_lab, 
         Ln, dx, dy = cfg["smear"]
         T = line_blur(T, np.array([dx, dy]), float(Ln))
         info["smear_px"] = float(Ln)
-    Pk = wp.warp(art.pack, Hl, roi, art.refmask, ss=max(2, ss // 2), prefilter=0)[0][..., 0] > 0.2    # keyframe's print
+    Wk = wp.warp(art.pack, Hl, roi, art.refmask, ss=max(2, ss // 2), prefilter=0)[0][..., 0]
+    Pk = Wk > 0.2                                            # keyframe's print
+    # (clear glass, V59) the label's print where the tracking puts it, when the render places it elsewhere
+    Wk_s = wp.warp(art.pack, art.local(cfg["source_H"]), roi, art.refmask, ss=max(2, ss // 2), prefilter=0)[0][..., 0] \
+        if (glass is not None or cfg.get("held_turn")) and cfg.get("source_H") is not None else None
     occ = None
     if cfg.get("occluder_feather"):
         # something in front (a sparkle trail the matte cuts out) leaves a hole inside the label; only holes well
@@ -290,8 +521,17 @@ def _render_texture(frame_u8, crop, S_lin, Hl, Hsub, art, R, act, P_src, a_lab, 
         # the source's own print sits (its tracks), or the misregistered garbled print reads as light
         Ws_, a_s, (Us, Vs) = wp.warp(art.texture, art.local(cfg["source_H"]), roi, art.refmask, ss=ss, prefilter=0)
         Ts, act_s = Ws_, act & (a_s > 0.5)
-    out_lin = T * _ratio_field(S_lin, Ts, act_s, int(cfg.get("shade_block", 8)), int(cfg.get("shade_median", 5)),
-                               float(cfg.get("shade_sigma", 10.0)))
+    act_r = act_s
+    if cfg.get("shade_print"):
+        # the frame's light read on bare surface only (V54): the source's own print and the label's left out, at any
+        # stroke width. The block medians outvote thin print, but a bold logo the generator drew bigger and elsewhere
+        # (a tube's logo letter, 30-40 px strokes) wins its blocks: its darkness travelled with the label as a shadow,
+        # and the label's own letter, over the source's bare body, came out with a halo
+        sp = shade_print(S_lin, Ts, act_s, cfg.get("polarity", "light"), cfg["shade_print"], key[y0:y1, x0:x1])
+        act_r = act_s & ~sp
+        info["shade_print_px"] = int((sp & act_s).sum())
+    out_lin = T * _ratio_field(S_lin, Ts, act_r, int(cfg.get("shade_block", 8)), int(cfg.get("shade_median", 5)),
+                               float(cfg.get("shade_sigma", 10.0)), bool(cfg.get("shade_local")))
     if cfg.get("blur", 0) > 0:
         out_lin = np.stack([gaussian_filter(out_lin[..., c], float(cfg["blur"])) for c in range(3)], -1)
     out = im.lin_to_srgb(gr.rolloff(np.clip(out_lin, 0, None), cfg.get("rolloff", 0.95)))
@@ -331,10 +571,16 @@ def _render_texture(frame_u8, crop, S_lin, Hl, Hsub, art, R, act, P_src, a_lab, 
         vlo, vhi = art.polygon[:, 1].min(), art.polygon[:, 1].max()
         fu = max(float(fe.get("theta_deg", 10.0)) * np.pi / 180.0 * getattr(getattr(Hl, "base", Hl), "Ru", 100.0), 1.0)
         fv = max(float(fe.get("v_px", 20.0)), 1.0)
+        fv0 = fv1 = fv
+        if fe.get("print_gap") is not None:
+            # the end fade stops print_gap px short of the label's own print (V54): faded over a line, the label lets
+            # the frame's own line through beside its own, and the generator's lines drift against the tracked label
+            fv0, fv1 = print_fade(art, fv, float(fe["print_gap"]))
+            info["feather_v_px"] = [round(fv0, 1), round(fv1, 1)]
         def ss(x):
             x = np.clip(x, 0, 1)
             return x * x * (3 - 2 * x)
-        wf = ss((U - ulo) / fu) * ss((uhi - U) / fu) * ss((V - vlo) / fv) * ss((vhi - V) / fv)
+        wf = ss((U - ulo) / fu) * ss((uhi - U) / fu) * ss((V - vlo) / fv0) * ss((vhi - V) / fv1)
         alpha = alpha * wf
         info["feather"] = True
     if occ is not None:
@@ -343,7 +589,17 @@ def _render_texture(frame_u8, crop, S_lin, Hl, Hsub, art, R, act, P_src, a_lab, 
         x = np.clip((distance_transform_edt(~occ) - 1.0) / float(cfg["occluder_feather"]), 0, 1)
         alpha = alpha * x * x * (3 - 2 * x)
         info["occluder_px"] = int(occ.sum())
+    if cfg.get("held_turn") and Wk_s is not None:
+        # (V59) held off its tracks by the body snap's turn, the label fades over the frame's own print a few px off
+        # its letters (a seal's ring near the limb echoed beside the label's): where the label lets the frame
+        # through, the frame's print near the letters where the tracking puts them is filled from the surface
+        # round it; inside the label's area only (past it, a glass base's rim was filled flat, V62)
+        Ff = P_src & binary_dilation(np.clip(Wk_s, 0, 1) * sil > 0.2, iterations=10) & (alpha < 0.98) & act
+        crop = _fill_print(crop, Ff, act, roi)
+        info["held_fill_px"] = int(Ff.sum())
     comp = crop * (1 - alpha[..., None]) + out * alpha[..., None]
+    if glass is not None:
+        comp = _clear_glass(comp, crop, out, alpha, Wk, P_src, act, sil, a_lab, U, V, roi, glass, info, Wk_s)
     if getattr(art, "unroll", False) and hasattr(Hl, "inverse"):
         Yg, Xg = np.mgrid[y0:y1, x0:x1].astype(float)
         uu, vv, okk = Hl.inverse(Xg, Yg)

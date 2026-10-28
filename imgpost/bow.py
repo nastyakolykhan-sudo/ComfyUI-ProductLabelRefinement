@@ -12,12 +12,32 @@ from . import images as im
 
 
 def body_axis(mask):
-    """Centre and unit axis (pointing down the image) of a matte, and its normal (as imgvideo's product_axis)."""
+    """Centre and unit axis (pointing down the image) of a matte, and its normal. The principal axis decides whether
+    the body stands or lies (a near-round matte, eigenvalues within 1.5x, stands); the axis is then the midline of
+    the matte's two sides: the midpoints of its extent across, row by row (column by column lying) over the middle
+    70 % of its length, fitted as a line. A body about as wide as it is tall has no clear principal axis: a jar seen
+    from above came out 1.07 deg off it, and its print ran skewed against the lid (its sides' midline: -0.1 deg)."""
     ys, xs = np.nonzero(mask)
     P = np.c_[xs, ys].astype(float)
     c = P.mean(0)
-    ax = np.linalg.svd(P - c, full_matrices=False)[2][0]
-    ax = ax * (np.sign(ax[1]) or 1.0)
+    _, sv, vt = np.linalg.svd(P - c, full_matrices=False)
+    ax = vt[0] * (np.sign(vt[0][1]) or 1.0)
+    upright = abs(ax[1]) >= abs(ax[0]) or sv[0] < 1.5 * sv[1]
+    along, across = (ys, xs) if upright else (xs, ys)
+    lo, hi = np.percentile(along, [15, 85])
+    keys = np.arange(int(np.ceil(lo)), int(hi) + 1)
+    if len(keys) >= 10:
+        order = np.argsort(along, kind="stable")
+        a_s, x_s = along[order], across[order]
+        i0, i1 = np.searchsorted(a_s, keys, "left"), np.searchsorted(a_s, keys, "right")
+        ok = i1 > i0
+        mid = np.array([(x_s[a:b].min() + x_s[a:b].max()) / 2.0 for a, b in zip(i0[ok], i1[ok])])
+        k1, k0 = np.polyfit(keys[ok].astype(float), mid, 1)
+        d = np.array([k1, 1.0]) if upright else np.array([1.0, k1])
+        ax = d / np.linalg.norm(d)
+        ax = ax * (np.sign(ax[1]) or 1.0)
+        ca = c[1] if upright else c[0]
+        c = np.array([k0 + k1 * ca, ca]) if upright else np.array([ca, k0 + k1 * ca])
     return c, ax, np.array([ax[1], -ax[0]])
 
 
@@ -109,6 +129,157 @@ def parse(text):
     return {"b": sorted(seams)} if given else {"b": "auto", "seams": seams}
 
 
+def matte_ends(mask):
+    """The bow of a round body seen from above or below, from its matte's own two ends (SAM 3's outline is cleaner
+    than any seam inside the body): the top end's outline is the far side of the top face and the base's the near
+    side of the base, both arcs of the same view, so the bow is the base's, at both ends with its sign (+: seen from
+    above). A jar's measured 49 px at its top and 53 at its base, its lid seam about 66: a print registered without
+    them bowed 108 to 120 and ran skewed. -> ([[t_top, b], [t_base, b]], report) or (None, report) when an end
+    can't be read"""
+    c, ax, n = body_axis(mask)
+    hw = np.asarray(half_widths(mask, c, ax, n), float)
+    if len(hw) < 4:
+        return None, {"why": "the matte is too small"}
+    t_top, t_base = float(hw[0, 0]), float(hw[-1, 0])
+    out, rep = [], {}
+    for name, t0 in (("top", t_top + 5.0), ("base", t_base - 5.0)):
+        w = float(np.interp(t0 + (30.0 if name == "top" else -30.0), hw[:, 0], hw[:, 1]))
+        s, t = contour(mask, t0, c, ax, n, w)
+        if len(s) < 6:
+            return None, {"why": f"the matte's {name} end has too few columns"}
+        _, b, info = fit_seam(s, t, w)
+        out.append([t0, b])
+        rep[name] = dict(info, t=round(t0, 1), b=round(b, 2), half_width=round(w, 1))
+    sgn = np.sign(out[1][1]) or 1.0
+    prof = [[out[0][0], round(sgn * abs(out[0][1]), 2)], [out[1][0], round(sgn * abs(out[1][1]), 2)]]
+    return prof, rep
+
+
+def long_lines(L, inside, frame, size=19, span=0.75, rms=1.5, tilt=5.0):
+    """The long, level, smooth lines of dark print across a body (ink.line_bows on its print map: rules, a band's
+    edges, full-width lines of text): at least `span` of the body's width (its median half-width, frame
+    half_widths), rms under `rms` px, tilt under `tilt` deg; one line of text read as two runs a few px apart keeps
+    the longer. L: linear luminance; inside: the body (bool); frame: line_bows's. -> lines, top to bottom"""
+    from . import ink as ik
+    W = float(np.median(np.asarray(frame["half_widths"], float)[:, 1]))
+    P = ik.print_map(L, inside, size, True)[0] * inside
+    out = []
+    for l in sorted((l for l in ik.line_bows(P, inside, frame)
+                     if l["s_span"] >= span * 2 * W and l["rms"] < rms and abs(l["tilt_deg"]) < tilt),
+                    key=lambda l: l["t"]):
+        if out and l["t"] - out[-1]["t"] < 6:
+            if l["n"] > out[-1]["n"]:
+                out[-1] = l
+        else:
+            out.append(l)
+    return out
+
+
+def pair_lines(a, b, reach=40.0, tol=8.0):
+    """Each line of b paired with a's line at its place in the layout: one offset along the axis for all (the one most
+    lines meet within 6 px; the fit follows the outline, the generator drew the print a few px off), then the nearest
+    within `tol` px. -> (offset px, [(line of a, line of b), ...])"""
+    if not a or not b:
+        return 0.0, []
+    ta = np.array([l["t"] for l in a])
+    best = (-1, 0.0, 0.0)
+    for off in sorted({round(float(x - l["t"]), 1) for x in ta for l in b if abs(x - l["t"]) <= reach}):
+        d = [np.abs(ta - (l["t"] + off)).min() for l in b]
+        hits, miss = sum(x <= 6 for x in d), float(np.sum(np.minimum(d, 6)))
+        if hits > best[0] or (hits == best[0] and miss < best[2]):
+            best = (hits, off, miss)
+    off = best[1]
+    pairs = []
+    for l in b:
+        j = int(np.argmin(np.abs(ta - (l["t"] + off))))
+        if abs(ta[j] - (l["t"] + off)) <= tol:
+            pairs.append((a[j], l))
+    return off, pairs
+
+
+def from_print(scene_u8, mask, ref_u8, refmask, H, size=19, span=0.75, rms=1.5, tilt=5.0):
+    """The body's bow as the generated product draws it, for a packshot warped whole (pitfall 101: a squeeze tube seen
+    from above, warped flat by an affine fit: "the label doesn't follow the curved tube's shape"). The long, level,
+    smooth lines across the body (ink.line_bows on its dark print: rules, a band's edges, full-width lines of text; at
+    least `span` of the body's width, rms under `rms` px, tilt under `tilt` deg) in the frame and in the packshot as
+    the fit warps it, both in the frame's body frame. Each packshot line is paired with the frame's line at its place
+    in the layout (one offset for all: the fit follows the outline, the generator drew the print a few px off), so a
+    rule meets the rule and a line of text the same line, its letters' own lean on both sides. A pair's bow less the
+    packshot line's own is what the warp must add there. The matte's ends pair with the warped packshot outline's
+    where they keep the lines' trend (lower parts bow more seen from above): a tube's flat crimp does; a base SAM 3
+    cut flat along the cap's reflection, under a cap whose own bottom curves 25 px, doesn't. Those knots are smoothed:
+    the bow over the body's half-width there, fitted as a monotone run down the body (a round section seen from above
+    bows more the lower it sits, relative to its width), each knot weighted by its lines' length and smoothness.
+    mask: the product's matte (bool, scene-sized); refmask: outline.RefMask; H: the draft's fit (reference -> scene).
+    -> (profile [[t, b], ...] for align.bow, or None; report)"""
+    from . import warp as wp
+    c, ax, n = body_axis(mask)
+    hw = half_widths(mask, c, ax, n)
+    if len(hw) < 4:
+        return None, {"why": "the matte is too small"}
+    ys, xs = np.nonzero(mask)
+    pad = int(size) + 4
+    x0, y0 = max(int(xs.min()) - pad, 0), max(int(ys.min()) - pad, 0)
+    x1, y1 = min(int(xs.max()) + pad + 1, mask.shape[1]), min(int(ys.max()) + pad + 1, mask.shape[0])
+    frame = {"centre": [float(c[0]) - x0, float(c[1]) - y0], "axis": [float(ax[0]), float(ax[1])], "half_widths": hw}
+
+    gen = long_lines(im.lum(im.srgb_to_lin(im.to_float(scene_u8[y0:y1, x0:x1]))), mask[y0:y1, x0:x1], frame, size,
+                     span, rms, tilt)
+    rgb, cov, _ = wp.warp(im.srgb_to_lin(im.to_float(ref_u8)), H, (x0, y0, x1, y1), refmask, ss=2)
+    pk = long_lines(im.lum(rgb), cov > 0.5, frame, size, span, rms, tilt)
+    rep = {"frame_lines": [{"t": l["t"], "b": l["b"], "rms": l["rms"]} for l in gen],
+           "packshot_lines": [{"t": l["t"], "b": l["b"], "rms": l["rms"]} for l in pk]}
+    if not gen or not pk:
+        return None, dict(rep, why="no long level line in the " + ("frame's product" if not gen else "warped packshot"))
+    tg = np.array([l["t"] for l in gen])
+    off, pairs = pair_lines(gen, pk)
+    knots = [[p["t"], g["b"] - p["b"], min(g["n"], p["n"]) / (np.hypot(g["rms"], p["rms"]) + 0.25) ** 2,
+              f"line {g['t']:+.0f}"] for g, p in pairs]   # [t, b, weight, what]
+    rep.update(offset_px=off, pairs=[[k[0], round(k[1], 2), k[3]] for k in knots])
+    # the matte's ends, where they keep the lines' trend (seen from above, lower parts bow more)
+    ends, _ = matte_ends(mask)
+    pends, _ = matte_ends(cov > 0.5)
+    used = []
+    if ends is not None and pends is not None and len(knots) >= 2:
+        fb = [gen[int(np.argmin(np.abs(tg - (k[0] + off))))]["b"] for k in knots]
+        rising = fb[-1] >= fb[0]
+        for i, name in ((0, "top"), (1, "base")):
+            t_end, b_end = ends[i]
+            keeps = (b_end <= min(fb)) if (i == 0) == rising else (b_end >= max(fb))
+            if keeps:
+                knots.append([t_end, b_end - pends[i][1], 40.0 / 0.3 ** 2, f"matte {name}"])
+                used.append(name)
+    rep["matte_ends"] = {"frame": ends, "packshot": pends, "used": used}
+    if not knots:
+        return None, dict(rep, why="no packshot line pairs with one of the frame's")
+    knots.sort(key=lambda k: k[0])
+    t = np.array([k[0] for k in knots]); b = np.array([k[1] for k in knots]); wt = np.array([k[2] for k in knots])
+    # seen from above, a round section's bow over its half-width grows down the body (from below it shrinks): that
+    # ratio, fitted as a monotone run (pooled where a knot breaks it: a line of text's letters lean a few px)
+    hwa = np.asarray(hw, float)
+    half = np.interp(t, hwa[:, 0], hwa[:, 1])
+    r = b / half
+    gr = np.array([l["b"] for l in gen]) / np.interp(tg, hwa[:, 0], hwa[:, 1])
+    rising = len(gr) < 2 or np.polyfit(tg, gr, 1)[0] >= 0
+    fit = _monotone(r if rising else -r, wt) * (1 if rising else -1)
+    prof = [[round(float(tt), 1), round(float(f * h), 2)] for tt, f, h in zip(t, fit, half)]
+    rep.update(knots=[[round(float(k[0]), 1), round(float(k[1]), 2), k[3]] for k in knots], rising=bool(rising),
+               profile=prof)
+    return prof, rep
+
+
+def _monotone(y, w):
+    """Weighted least squares fit of y that never decreases (pool adjacent violators)."""
+    blocks = []                                         # [value, weight, count]
+    for v, ww in zip(np.asarray(y, float), np.asarray(w, float)):
+        blocks.append([v, ww, 1])
+        while len(blocks) > 1 and blocks[-2][0] > blocks[-1][0]:
+            v2, w2, c2 = blocks.pop()
+            v1, w1, c1 = blocks.pop()
+            blocks.append([(v1 * w1 + v2 * w2) / (w1 + w2), w1 + w2, c1 + c2])
+    return np.concatenate([[v] * c for v, _, c in blocks])
+
+
 def contour(mask, t0, c, ax, n, w, reach=0.85, depth=30.0):
     """The matte's own end near t0 (a base or a top seen against the background): per column across the body, the
     matte's last pixel along the axis past t0 - depth (first pixel before t0 + depth for t0 < 0). -> (s, t)"""
@@ -135,7 +306,7 @@ def resolve(bow, img_u8=None, mask=None):
     shoulder (collar w 45) and 16 at its base against the hand's 10 and 15, and 7.7 at a tube's cap seam against 10:
     a start, checked by eye.
     -> (bow with numbers only, report)"""
-    out = {k: v for k, v in bow.items() if k not in ("mask", "seams")}
+    out = {k: v for k, v in bow.items() if k not in ("mask", "seams")}      # "from" ("matte") stays
     rep = {}
     need = [k for k in ("centre", "axis", "half_widths") if out.get(k) is None]
     if need or out.get("b") == "auto":

@@ -26,12 +26,29 @@ runs:
           ${{ inputs.pack }}/.github/workflows/checks.yml
           ${{ inputs.pack }}/.github/actions/setup/action.yml
 
-    - name: ffmpeg (imgvideo decodes and encodes through it)
+    # imgvideo decodes and encodes through the ffmpeg command line, and the engine is built and tested on ffmpeg 5.0.1.
+    # Ubuntu's ffmpeg 6.1 doesn't do: its ffprobe tags an RGB clip's colour space "gbr" (5.0.1 leaves it out), and
+    # imgvideo/vio.py passes that to x264, which refuses it, so video.py --refine fails on the video demo.
+    - name: ffmpeg ${{ env.FFMPEG_VERSION }} (static build), cached
+      id: ffmpeg
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/plr-ffmpeg
+        key: ffmpeg-${{ env.FFMPEG_SHA256 }}
+    - name: Fetch ffmpeg
+      if: steps.ffmpeg.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        sudo apt-get update -qq
-        sudo apt-get install -y -qq --no-install-recommends ffmpeg > /dev/null
-        ffmpeg -hide_banner -version | head -1
+        curl -fsSL -o "$RUNNER_TEMP/ffmpeg.tar.xz" \
+          "https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-$FFMPEG_VERSION-amd64-static.tar.xz"
+        echo "$FFMPEG_SHA256  $RUNNER_TEMP/ffmpeg.tar.xz" | sha256sum -c -
+        mkdir -p ~/.cache/plr-ffmpeg
+        tar -xJf "$RUNNER_TEMP/ffmpeg.tar.xz" -C ~/.cache/plr-ffmpeg --strip-components 1
+    - name: ffmpeg on PATH
+      shell: bash
+      run: |
+        echo "$HOME/.cache/plr-ffmpeg" >> "$GITHUB_PATH"
+        ~/.cache/plr-ffmpeg/ffmpeg -hide_banner -version | head -1
 
     - name: ComfyUI ${{ env.COMFYUI_VERSION }}, CPU
       shell: bash
@@ -102,6 +119,10 @@ runs:
       shell: bash
       run: |
         cd "$COMFY"
+        # The one workflow's packshot loader (node 2) defaults to the ink demo's packshot, and ComfyUI validates it
+        # against the input folder even in a run that gives no packshot (the video case): without the file there,
+        # the outputs that depend on it are dropped and the run has no master.
+        mkdir -p input && cp "$GITHUB_WORKSPACE/${{ inputs.pack }}/examples/ink_demo/inkdemo_packshot.png" input/
         nohup python main.py --cpu --listen 127.0.0.1 --port 8188 --disable-auto-launch > "$RUNNER_TEMP/comfyui.log" 2>&1 &
         for i in $(seq 1 180); do curl -sf http://127.0.0.1:8188/system_stats > /dev/null && break; sleep 1; done
         curl -sf http://127.0.0.1:8188/object_info > "$RUNNER_TEMP/object_info.json" || { tail -50 "$RUNNER_TEMP/comfyui.log"; exit 1; }

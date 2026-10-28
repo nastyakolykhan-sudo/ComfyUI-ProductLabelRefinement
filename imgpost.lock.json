@@ -1,19 +1,19 @@
 {
   "skill": "~/Documents/Claude/product-label-refinement",
-  "imgpost_version": "0.11.0",
-  "synced": "2026-10-16",
+  "imgpost_version": "0.13.1",
+  "synced": "2026-10-25",
   "files": {
-    "__init__.py": "a19b83ecf5fafa96061ab9fced1dbd76a4e883750f689b8e918ec2761c23ffc4",
-    "audit.py": "2f582ca12605addb74cb0b0d880a880764d79152a8d9efd2f9e525d5286189ff",
+    "__init__.py": "b1540af17c11dd7637dc18681df39b2f3eb05f6c553cb5df63ca44c46877aae8",
+    "audit.py": "2e761de246eca7f7b455718d81d4f0a3320e9db24c42fb3048def93e1440a4f8",
     "autofit.py": "92c60d7045eee4be40853a4c35777e739b814044585b7ca343b724c0fdf168e9",
-    "bow.py": "465535d85716b0b9fdff36f5a4756637963890f2865f6131bbb1dfa48ea521e5",
-    "draft.py": "bfbb71d19ef4477e19cf50b4bf1f269547648230de465c01bca1a4c9b16c1f2b",
+    "bow.py": "56f709307bfe94bf9c96f6e30068586d6f33898202f753a81528b6fe1404b456",
+    "draft.py": "b360d429a2736d7b2989654b1b6af83b4ea68e79ad10b3fdc441a5b6f0c67b4e",
     "fill.py": "4267aca68ce18703a25e1bbdd32670de80bcafd5701b2cd7577f46c93722a4af",
     "finish.py": "ddf6fecf4a3246bf1d931fdcb24ae95a8067230523e72a3ac5ba6399848101f0",
     "geometry.py": "2cc8d23c3d2e140d3ec0dab72b72bd0ef1d046cc73ecbe9fc4dd65f405a273b9",
     "grade.py": "fe0c9d16dbc4c9df56f1cd8e69a88e37f5f87cd976089370a0fcd1e21f728d2b",
     "images.py": "7d2e9e6f77b4f70c555bcf35412a11caa7705afbffff83e8636dbac0604d7e3d",
-    "ink.py": "9cafc24ce38b53f00d76eeedb6b064865b4bad63f897c8d314e5c37a232e1ee1",
+    "ink.py": "68e80cc42998c4176968a25c02554804c6f4625e5e8f4aeaf1fd16919198a97c",
     "masks.py": "2f46b382f3b6f0654d603557ed3b2b39f130f7dd825ccacbe0bb725e464b91a9",
     "outline.py": "134de36ca4749f6d58a5d177f2e97f90c6c84400edf6fc30cbd2992d252ad60f",
     "psd.py": "132fdcb5dd9ef88004cdb29c78a5bd67621f395c53b39e47fc8f5b1a0a13f868",
@@ -21,32 +21,32 @@
     "raster.py": "f9dc02da8f3121a741ce1ae906e1f0cea5c65b41c1b963edf032da9742816fd4",
     "warp.py": "b7a19675703d2464867e8c6b7dbd6cb5b3cbbde062aac71403418efec9d6a45e"
   },
-  "run_py": "8af3f49657b8bc3588b1abbdc746a2c8c9f9cac48af27d66a6e01f4ff991f03a",
+  "run_py": "a0c00400b57cc004329b2b0d98f360c977f9b07e9b9243b97ed02e9d0edfeb0b",
   "video_engine": {
-    "synced": "2026-10-18",
-    "imgpost_version": "0.11.0",
+    "synced": "2026-10-27",
+    "imgpost_version": "0.13.1",
     "packages": {
       "imgvideo": {
-        "version": "0.5.0",
+        "version": "0.9.0",
         "files": {
-          "__init__.py": "ea34667593ee79ee2bf5e2de9b6dd8598cd35286d56d8995166a7aa1c11f83bc",
+          "__init__.py": "cde2d59ef2d52363bbbe173dd43773a5dda3890ebed66edc038a96aae1bf6a26",
           "alltracker/LICENSE": "ab740abe5c34e17963fe4d6a1f68a3dcd35bbc05dc520cf08d7a062c0ea13c79",
           "alltracker/__init__.py": "5354c3910da4daa2fe420fb845e2a19204af24d780b57853039c76bbd7be4deb",
           "alltracker/alltracker.py": "417a8d7251cd1e5a38df6787b47508fcd971aaa43ced6f46cfb841b25fe4dee1",
           "alltracker/blocks.py": "0c347f79b53367e0a99fb8d5bbe65346def904940f07dd361349af1da4eb0672",
           "alltracker/misc.py": "4ac64b714891789b21f1776292c7b9bd580031950f8df4398c9718922e7dbe90",
-          "fit.py": "27bf2fe77d4571a0755ff6cc76a735652b1420573ca50536f83e4725fa008938",
+          "fit.py": "d6c7fee69d3076c9940727af2f9a5f1e80f2e1fcf4c97ac3aeba3b055dbfcb3b",
           "glue.py": "3d6dd110bcd26455a363b4ef2e3e5814b7b35c4fcd4035263969696f8e2c86d6",
           "keyframe.py": "8890633354b6c64c320a37f62ba9d71aabb20ffa78261e50b96cfc096dee902c",
           "labelspace.py": "a9307e82842da3c95ccfceb3edd4d9736d81ae3a395833fd9dbdb206e680a948",
-          "level.py": "975db646ef2251851da0fd87bd08e0032359fcc4456d24bd8a9ecfc0f6943e3b",
-          "lookchecks.py": "82cb63a9420827fa9d7e1481cfa43ac60c1aa4559594bdfb85b577c77eace0ae",
+          "level.py": "225a240929b368a328ebffbf729a70dcbe095c190bbd12b3a0b88c58a02ca885",
+          "lookchecks.py": "376d05ef9c687d188b9cf4c011bccdb9b1eaa8077435b60031b48538fd77f8e9",
           "optics.py": "ef19545ae8d457937a1861811fa7f36116dc20d42351348e59ca490852ed3f4f",
-          "pipeline.py": "850125b7e857aa855a41743c4faeb600759e769bafc90cc8b84a1393dbe250c1",
+          "pipeline.py": "525db161adcfbbb337ad799e6a941d31c114173d42e4bae54271f06b2eddb7c3",
           "printalpha.py": "07c5d59dc73cd8fcc6a17a65c77dcef607b2be58bda50e2439d443c12b5861f4",
           "qa.py": "e4425d80628f159806af3964b020ab2b0073dd877041791c3c347c5bc3a6015a",
-          "render.py": "f4f5c72efaec4caa9a313f72e0eb29b4bc8db0a3447a75a71ef1ad0dc28f0ff8",
-          "review.py": "60bd9899092627d88243c963bc5536507bf8779c057dab4a257bf1cb1cf6fadd",
+          "render.py": "e2e90718453896ea61ede8992a81b793e45e96764c1f70e83702e5571b6a23af",
+          "review.py": "99e43721442019aeb288a96c699ef1a2de3f1234f8d5de1eb9f000eb2641d4ca",
           "stitch.py": "07e9c3c29dce64991383c162dc368a41d5615d46c4a90b2cc7d96072a6c6cbe0",
           "surface.py": "480b6065f8883ca94b1b92af474f5f7a29f1f342da864ebc89e7173785445394",
           "track.py": "c1fadd9d7f17437c28a48d6e4302e6b65935323964f7eb27b71ab3bd810bc7c9",
@@ -73,6 +73,6 @@
         }
       }
     },
-    "video_py": "e70b386db99a57413a8def68e1270ae8998f969ff52f068c1e45fa8e37b91368"
+    "video_py": "0ff2c7af75b3a86b02a674daeac7f989decc3011f67169c25eb4138d7126d486"
   }
 }

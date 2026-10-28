@@ -19,8 +19,8 @@ import torch
 JOB = "IMAGEPOST_JOB"
 HOMOGRAPHY = "IMAGEPOST_HOMOGRAPHY"
 COORDS = "IMAGEPOST_COORDS"   # reference coordinates of every work-box pixel, float64 (grade.shading reads them)
-INK = "IMAGEPOST_INK"         # the job's matte 'ink': the grade's white field and ink colour (dark ink), or Fill
-                              # Leftovers' ink colour and matte (polarity light); None otherwise
+INK = "IMAGEPOST_INK"         # the job's matte 'ink': the grade's white field and ink colour (dark ink on paper), or
+                              # Fill Leftovers' ink colour and matte (print on the body, light or dark); None otherwise
 CATEGORY = "image/product-label-refinement"
 
 COLOUR_CHOICES = ["job", "scene", "reference"]
@@ -29,7 +29,7 @@ RELIGHT_CHOICES = ["job", "off"]
 MODEL_CHOICES = ["homography", "affine"]
 LIGHT_CHOICES = ["relight", "cylinder", "off"]
 LABEL_CHOICES = ["off", "cylinder", "flat"]
-INK_CHOICES = ["off", "light"]
+INK_CHOICES = ["off", "light", "dark"]
 
 
 def _stages():
@@ -333,20 +333,25 @@ class ImagePostAutoDraft:
                     "label's 4 corners, outline the label on the packshot, product_mask a mask of the label; light is "
                     "not used (the generated label's paper carries the light).")}),
                 "ink": (INK_CHOICES, {"default": "off", "tooltip": (
-                    "light: print straight on a coloured body, lighter than it (white print on a frosted bottle or tube; "
-                    "no paper). The packshot's print is laid on the frame's own body in the frame's own print colour "
-                    "(job matte ink, polarity light). Run it with the ink template: product_mask also goes into Fill "
-                    "Leftovers' old_silhouette, the matte the print stays inside.")}),
+                    "Print straight on a coloured body, no paper label. light: lighter than the body (white print on a "
+                    "frosted bottle or tube). dark: darker than it (black print on a pink jar or a white bottle, and "
+                    "its coloured bars): the print is also snapped onto where the generator drew it (its place, scale "
+                    "and bow) and sharpened to its edges. The packshot's print is laid on the frame's own body in the "
+                    "frame's own print colour (job matte ink). Run it with the ink template: product_mask also goes "
+                    "into Fill Leftovers' old_silhouette, the matte the print stays inside.")}),
                 "print_box": ("STRING", {"default": "", "tooltip": (
-                    "With ink light: the print's box on the packshot x0,y0,x1,y1 (reference px), from the first to the "
-                    "last line of print, inside the body's frosted rims. Only print inside it is laid on, so the "
-                    "packshot's own highlights (the band under a shoulder, limb rims) don't go on as ink.")}),
+                    "With ink: the print's box on the packshot x0,y0,x1,y1 (reference px), from the first to the "
+                    "last line of print with a few px to spare, inside the body's frosted rims, seams and lid edge. "
+                    "Only print inside it is laid on, so the packshot's own highlights, seams and rims don't go on "
+                    "as ink.")}),
                 "bow": ("STRING", {"default": "", "tooltip": (
                     "A round body seen from above or below: its print bows like its seams (align.bow; needs "
                     "product_mask). t along the product's axis from the mask's centre, px, + down the image: "
                     "t:b given (-150:0 for a squeezed tube's flat crimp); t a seam measured across the body; t/w a "
                     "seam on a narrower ring of half-width w (a collar); t/matte the mask's own end (a base). "
-                    "Example: \"-150:0 146.5\". Empty: no bow (seen from level).")}),
+                    "Example: \"-150:0 146.5\". print: the bow the generated product's own long lines draw (its "
+                    "rules, a band's edges), less the warped packshot's, for a packshot warped whole (a squeeze "
+                    "tube seen from above). Empty: no bow (seen from level).")}),
             },
         }
 
@@ -361,7 +366,7 @@ class ImagePostAutoDraft:
         "snaps the old silhouette and the occluders to edges, and sets the work box, colour and relight. With "
         "product_mask (SAM 3) the outline is fitted to the mask. With label on, the label only: the generated "
         "label's own outline as its shape, its sides as the fit's edges, round the bottle (cylinder) or flat. With ink "
-        "light (and print_box, bow), print straight on a coloured body: the ink template makes a keyframe from the "
+        "light or dark (and print_box, bow), print straight on a coloured body: the ink template makes a keyframe from the "
         "frame, its product mask and the packshot. On a clean scene the draft is close to final; on a cluttered shelf "
         "it is a scaffold to finish by hand. job_json and the saved file are the job to edit and "
         "load into Load Job; draft_points shows each landmark pair (packshot under the fit | scene)."
@@ -385,8 +390,8 @@ class ImagePostAutoDraft:
                                            ink=None if ink == "off" else ink, print_box=pb or None, bow=bow.strip() or None)
         if note:
             text = f"note       {note}\n{text}"
-        if ink == "light":
-            text += ("\nnote       ink light: connect product_mask to Fill Leftovers' old_silhouette (the matte the "
+        if ink in ("light", "dark"):
+            text += (f"\nnote       ink {ink}: connect product_mask to Fill Leftovers' old_silhouette (the matte the "
                      "print stays inside) and Fill Leftovers' ink to Composite Behind")
         job_text = json.dumps(job, indent=2)
         path, name, sub = _output_file(filename_prefix, "json")
@@ -508,9 +513,9 @@ class ImagePostWarpReference:
         "Warps the reference into the work box (supersampled, in linear light) and its real outline into the "
         "product mask. align_overlay: reference at 50% over the scene, real outline in green, occluders in red. "
         "coords: where each work-box pixel samples the reference (for grade.shading), and with shape 'generated' "
-        "the bled label's coverage (for Fill Leftovers and Composite Behind), and with matte ink light the packshot's print "
-        "as coverage (for Fill Leftovers). Warns when the measured outline takes in the packshot's backdrop (a light rim "
-        "in the composite)."
+        "the bled label's coverage (for Fill Leftovers and Composite Behind), and with matte ink on the body the packshot's "
+        "print as coverage (for Fill Leftovers; dark print registered onto the frame's own print and sharpened to it). "
+        "Warns when the measured outline takes in the packshot's backdrop (a light rim in the composite)."
     )
 
     def warp(self, job, homography, scene, reference, reference_mask=None):
@@ -519,16 +524,25 @@ class ImagePostWarpReference:
         refmask = _refmask(job, ru8, ra)
         H = homography if hasattr(homography, "forward") else np.asarray(homography, float)
         W_lin, a_new, (U, V), overlay, info = _stages().warp(job, H, refmask, su8, ru8, box)
-        _fr, warn = _stages().fringe(refmask, ru8, H) if not _stages().ik.light(job.get("matte")) else ([], "")
+        _fr, warn = _stages().fringe(refmask, ru8, H) if not _stages().ik.on_body(job.get("matte")) else ([], "")
         result = (_image_out(_to_layer(W_lin)), _mask_out(a_new), _pil_out(overlay),
                   {"box": box, "u": U, "v": V, "squeeze": info["squeeze"], "bleed": info["bleed"], "cut": info["cut"],
                    "shape": info["shape"], "body": info["body"], "body_raw": info["body_raw"], "ink": info["ink"]})
         lines = [warn or ("outline clear of the packshot's backdrop" if not info["ink"] else
-                          "outline: the band the print is read in (no outline shows with matte ink light)")] + info["warnings"]
+                          "outline: the band the print is read in (no outline shows with matte ink on the body)")] + \
+            info["warnings"]
         if info["ink"]:
             r = info["ink"]["report"]
-            lines.append(f"ink        light: packshot opening {r['open']} px, {r['print_px']:,} print px (coords carry "
-                         "the warped print for Fill Leftovers)")
+            pol = job["matte"].get("polarity", "light")
+            rg = r.get("register")
+            if rg:
+                lines.append("register   " + (f"the print moved {rg['shift_px']} px, scale {rg['scale_xy']}, "
+                                              f"{rg['rotation_deg']} deg" + (f", bow {rg['bow_px'][0]:+} to {rg['bow_px'][1]:+} px (top to bottom)" if "bow_px" in rg
+                                                                             else "") +
+                                              f" onto the frame's print (correlation {rg['ncc_before']} -> "
+                                              f"{rg['ncc_after']})" if rg["kept"] else f"not applied: {rg['why']}"))
+            lines.append(f"ink        {pol}: packshot {'closing' if pol == 'dark' else 'opening'} {r['open']} px, "
+                         f"{r['print_px']:,} print px (coords carry the warped print for Fill Leftovers)")
         q = info["shape"]
         if q:
             lines.append(f"shape      the generated label's own outline: the real label reaches {q['real_past_shape_px']} px "
@@ -631,7 +645,7 @@ class ImagePostFillLeftovers:
         return {"required": {"job": (JOB,), "scene": ("IMAGE",), "product_mask": ("MASK",),
                              "old_silhouette": ("MASK",), "occluder_mask": ("MASK",)},
                 "optional": {"coords": (COORDS, {"tooltip": "Warp Reference's coords: needed when the job sets shape "
-                                                       "'generated' or matte ink light"})}}
+                                                       "'generated' or matte ink on the body"})}}
 
     RETURN_TYPES = ("IMAGE", "MASK", "STRING", INK)
     RETURN_NAMES = ("background", "fill_mask", "report", "ink")
@@ -641,16 +655,17 @@ class ImagePostFillLeftovers:
         "Harmonic (membrane) fill of the background where the generated product showed and the real one doesn't, "
         "with matched grain. Stops with FILL STOPPED when a leftover region has no background around it: extend "
         "reference_outline under the occluder or correct the occluder polyline. "
-        "With matte ink light (print straight on a coloured body): the frame's own garbled print is filled from its "
-        "body near where the true print goes, inside old_silhouette (connect the product's mask: SAM 3, Load Image "
-        "(as Mask)); background is the body without its print and ink, for Composite Behind, the print's colour."
+        "With matte ink on the body (print straight on a coloured body, light or dark): the frame's own garbled print "
+        "is filled from its body near where the true print goes, inside old_silhouette (connect the product's mask: "
+        "SAM 3, Load Image (as Mask)); background is the body without its print and ink, for Composite Behind, the "
+        "print's colour."
     )
 
     def fill(self, job, scene, product_mask, old_silhouette, occluder_mask, coords=None):
         su8, box, hw = _scene(job, scene)
         a_new, old, vis = _box_masks(job, box, hw, product_mask, old_silhouette, occluder_mask)
         S = _stages()
-        if S.ik.light(job.get("matte")):
+        if S.ik.on_body(job.get("matte")):
             if coords is not None and list(coords["box"]) != list(box):
                 raise ValueError(f"coords were computed for work box {coords['box']}, not {box}: re-run Warp Reference")
             filled, F, rep, ink = S.light_fill(job, su8, box, old, vis, None if coords is None else coords.get("ink"))
@@ -668,7 +683,7 @@ class ImagePostCompositeBehind:
         return {"required": {"job": (JOB,), "scene": ("IMAGE",), "background": ("IMAGE",), "product": ("IMAGE",),
                              "product_mask": ("MASK",), "occluder_mask": ("MASK",)},
                 "optional": {"ink": (INK, {"tooltip": "The job's matte 'ink': Grade To Scene's ink (dark ink on paper), "
-                                                     "or Fill Leftovers' ink (polarity light)"}),
+                                                     "or Fill Leftovers' ink (print on the body, light or dark)"}),
                              "coords": (COORDS, {"tooltip": "Warp Reference's coords: needed when the job sets shape 'generated'"})}}
 
     RETURN_TYPES = ("IMAGE", "MASK")
@@ -678,15 +693,15 @@ class ImagePostCompositeBehind:
     DESCRIPTION = (
         "Composites the product over the filled background behind the occluders (matte = product mask softened by "
         "finish.edge_softness, times visibility) and pastes the work box into the scene, quantised to 8 bit like "
-        "the skill's output. Pixels outside the work box are passed through untouched. With matte ink light: the "
-        "packshot's print in Fill Leftovers' ink colour over its background, inside the product's matte only "
+        "the skill's output. Pixels outside the work box are passed through untouched. With matte ink on the body: "
+        "the packshot's print in Fill Leftovers' ink colour over its background, inside the product's matte only "
         "(product isn't read)."
     )
 
     def composite(self, job, scene, background, product, product_mask, occluder_mask, ink=None, coords=None):
         su8, box, hw = _scene(job, scene)
-        if _stages().ik.light(job.get("matte")):
-            # light print on the body: background is Fill Leftovers' body (its print removed); product isn't read
+        if _stages().ik.on_body(job.get("matte")):
+            # print on the body: background is Fill Leftovers' body (its print removed); product isn't read
             out, alpha = _stages().light_composite(su8, box, _from_layer(_layer(background, box, hw, "background")), ink)
             x0, y0, x1, y1 = box
             image = scene[:1].detach().to("cpu", torch.float32).clone()
@@ -714,8 +729,9 @@ class ImagePostQASheet:
                          "finish_report": report, "fill_report": report,
                          "old_silhouette": ("MASK", {"tooltip": "Job Masks' old_silhouette: with it the run audits itself"}),
                          "occluder_mask": ("MASK",), "coords": (COORDS, {"tooltip": "Warp Reference's coords (squeeze check)"}),
-                         "ink": (INK, {"tooltip": "Fill Leftovers' ink (matte ink light): with it the audit also says "
-                                                  "where the keyframe changed pixels away from print"})},
+                         "ink": (INK, {"tooltip": "Fill Leftovers' ink (matte ink on the body): with it the audit also "
+                                                  "says where the keyframe changed pixels away from print, and whether "
+                                                  "the packshot is too small for the frame"})},
         }
 
     RETURN_TYPES = ("IMAGE", "IMAGE", "IMAGE", "STRING", "IMAGE")
@@ -761,14 +777,18 @@ class ImagePostQASheet:
                                             box, rep.get("align"), None if coords is None else coords.get("squeeze"),
                                             None if coords is None else coords.get("cut"), S.ink_mode(job.get("matte")),
                                             job.get("shape") == "generated")
-            if S.ik.light(job.get("matte")):
+            if S.ik.on_body(job.get("matte")):
+                pol = job["matte"].get("polarity", "light")
                 for f in found:
                     if f["check"] == "fill":    # the garbled print is as thick as the generated letters, under the new print
                         f.update(level="INFO", text=f["text"] + " (the garbled print, under the new print: see before_after)")
                     elif f["check"] == "edges":     # no outline is composited: the lines only place the print
-                        f.update(level="INFO", text=f["text"] + " (matte ink light: no outline shows; check the print's "
+                        f.update(level="INFO", text=f["text"] + f" (matte ink {pol}: no outline shows; check the print's "
                                                                 "placement)")
-                if isinstance(ink, dict) and ink.get("polarity") == "light":
+                    elif f["check"] == "leftover" and pol == "dark":   # the new edge is a letter's, and the body
+                        f.update(level="INFO", text=f["text"] + " (matte ink dark: the body round the print is the "
+                                                                "generated one)")
+                if isinstance(ink, dict) and ink.get("polarity") in S.ik.POLARITIES:
                     found += S.light_check(job, res, su8, ink, box)
                 sheet = S.au.sheet(su8[box[1]:box[3], box[0]:box[2]], res[box[1]:box[3], box[0]:box[2]], found,
                                    (box[0], box[1])) if found else None

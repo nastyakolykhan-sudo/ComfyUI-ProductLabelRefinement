@@ -15,9 +15,9 @@
       --label cylinder|flat: the label only (a bottle's or jar's label; flat: a tube's panels). --outline is then the
       label on the packshot, --quad the generated label's 4 corners (TL TR BR BL as on the packshot) and --mask, if
       given, the generated label's mask: its own outline becomes the shape and its sides the fit's edges.
-      [--ink light [--print-box X0,Y0,X1,Y1]] [--bow "t:b | t | t/w | t/matte ..."]: print straight on a coloured
-      body (imgpost/ink.py, the mask is the matte the print stays inside) and the bow of a body seen from above or
-      below (align.bow, measured from the mask); job-spec.md, matte and align.bow.
+      [--ink light|dark [--print-box X0,Y0,X1,Y1]] [--bow "t:b | t | t/w | t/matte ..."]: print straight on a
+      coloured body, lighter or darker than it (imgpost/ink.py, the mask is the matte the print stays inside) and the
+      bow of a body seen from above or below (align.bow, measured from the mask); job-spec.md, matte and align.bow.
   run.py JOB.json [--stage align|grade|all] [--job-dir DIR] [--output PATH] [--scene PATH] [--psd]
       align  fit the warp            -> qa/align_overlay.png, report.json
       grade  + light/colour fit      -> qa/grade_preview.png
@@ -120,7 +120,7 @@ def cmd_draft(a):
                              print_box=[float(v) for v in a.print_box.split(",")] if a.print_box else None, bow=a.bow)
     except dr.DraftError as e:
         sys.exit(str(e))
-    if a.ink == "light" and a.mask:
+    if a.ink in ("light", "dark") and a.mask:
         d["job"]["old_silhouette"] = {"type": "mask", "path": str(im.resolve(a.mask).resolve())}
     body = d["job"]
     job = {"about": body["about"], "scene": str(scene_p), "reference": str(ref_p),
@@ -304,9 +304,9 @@ def cmd_run(a):
               (f"; {q['unreached_px']} px the bleed can't reach (filled)" if q["unreached_px"] else ""))
     from imgpost import autofit as af
     from imgpost import ink as ik
-    if refmask.polygon and af.on_plain_background(ref_u8) and not ik.light(job.get("matte")):
-        # a measured outline that takes in the packshot's anti-aliased backdrop composites as a light rim (a light-ink
-        # matte lays on only print inside its print box: no outline shows)
+    if refmask.polygon and af.on_plain_background(ref_u8) and not ik.on_body(job.get("matte")):
+        # a measured outline that takes in the packshot's anti-aliased backdrop composites as a light rim (print on
+        # the body lays on only print inside its print box: no outline shows)
         fr = [f for f in af.outline_fringe(ref_u8, refmask.polygon, near=0.5) if f["px"] >= 5]
         if hasattr(H, "axis_x"):                  # a cylinder's outline runs past its limb on purpose (wrap): not a rim
             fr = [f for f in fr if min(abs(f["from"][0] - H.axis_x), abs(f["to"][0] - H.axis_x)) < H.r - 1.0]
@@ -319,9 +319,9 @@ def cmd_run(a):
         save_report()
         print(f"qa         {qad / 'align_overlay.png'}")
         return
-    if ik.light(job.get("matte")):
-        return _run_light(a, job, rep, save_report, qad, out_p, scene_u8, scene_a, info, ref_u8, ref_lin, H, refmask,
-                          roi, old, vis, pre)
+    if ik.on_body(job.get("matte")):
+        return _run_on_body(a, job, rep, save_report, qad, out_p, scene_u8, scene_a, info, ref_u8, ref_lin, H, refmask,
+                            roi, old, vis, pre)
 
     # 2. light and colour from the generated product
     gs = job.get("grade", {})
@@ -621,26 +621,29 @@ def _load_mask(p, hw, name):
     return m
 
 
-def _run_light(a, job, rep, save_report, qad, out_p, scene_u8, scene_a, info, ref_u8, ref_lin, H, refmask, roi, old, vis,
-               pre):
-    """Steps 2-6 for light print straight on a coloured body (matte ink, polarity light; imgpost/ink.py): the
-    packshot's print as coverage above its body light, the frame's garbled print filled from its body, the true print
-    laid on in the frame's own print colour. old is the generated product's matte (old_silhouette as a mask)."""
+def _run_on_body(a, job, rep, save_report, qad, out_p, scene_u8, scene_a, info, ref_u8, ref_lin, H, refmask, roi, old,
+                 vis, pre):
+    """Steps 2-6 for print straight on a coloured body (matte ink, polarity light or dark; imgpost/ink.py): the
+    packshot's print as coverage against its body light, the frame's garbled print filled from its body, the true
+    print laid on in the frame's own print colour. old is the generated product's matte (old_silhouette as a mask)."""
     from imgpost import audit as au
     from imgpost import ink as ik
     x0, y0, x1, y1 = roi
     cfg = ik.config(job["matte"])
+    pol = cfg["polarity"]
     crop_u8 = scene_u8[y0:y1, x0:x1]
     try:
-        cov_r, band, crep = ik.ref_cover(ref_u8, refmask, cfg)
-        cov, in_band = ik.warp_cover(cov_r, band, H, roi, ss=job.get("supersample", 4), prefilter=pre,
-                                     blur=float(cfg["blur"]))
-        filled, inkd, frep = ik.garbled(crop_u8, old, cov, in_band, cfg, vis)
+        bow = job["align"].get("bow") or {}
+        prep = ik.prepare(ref_u8, refmask, cfg, H, roi, crop_u8, ss=job.get("supersample", 4), prefilter=pre,
+                          body={k: bow[k] for k in ("centre", "axis", "half_widths")} if bow.get("half_widths") else None,
+                          bow_auto=bow.get("from") == "matte")
+        cov, in_band, crep = prep["cover"], prep["band"], prep["report"]
+        filled, inkd, frep = ik.garbled(crop_u8, old, cov, in_band, cfg, vis, prep["box"], prep["inks"])
     except ik.InkError as e:
         save_report()
         sys.exit(str(e))
     out_box, alpha = ik.composite(filled, crop_u8, inkd)
-    rep["matte"] = dict({"type": "ink", "polarity": "light"}, **crep, **frep)
+    rep["matte"] = dict({"type": "ink", "polarity": pol}, **crep, **frep)
     if a.stage == "grade":
         qa.before_after(crop_u8, out_box).save(qad / "grade_preview.png")
         save_report()
@@ -663,8 +666,12 @@ def _run_light(a, job, rep, save_report, qad, out_p, scene_u8, scene_a, info, re
         if f["check"] == "fill":            # the garbled print is as thick as the generated letters, under the new print
             f.update(level="INFO", text=f["text"] + " (the garbled print, under the new print: see before_after)")
         elif f["check"] == "edges":         # no outline is composited: the lines only place the print
-            f.update(level="INFO", text=f["text"] + " (matte ink light: no outline shows; check the print's placement)")
+            f.update(level="INFO", text=f["text"] + f" (matte ink {pol}: no outline shows; check the print's placement)")
+        elif f["check"] == "leftover" and pol == "dark":   # the new edge is a letter's, and the body beyond it is the
+            f.update(level="INFO", text=f["text"] + " (matte ink dark: the body round the print is the generated one)")
     findings += ik.check(crop_u8, out_box, inkd, cov, cfg, (x0, y0))
+    findings += ik.soft_check(crep, cov, prep["ref_sum"], alpha, (x0, y0))
+    findings += ik.dark_checks(crop_u8, out_box, inkd, (x0, y0))
     rep["audit"] = findings
     if findings:
         asheet = au.sheet(crop_u8, out_box, findings, (x0, y0))
@@ -687,8 +694,16 @@ def _run_light(a, job, rep, save_report, qad, out_p, scene_u8, scene_a, info, re
     print(f"saved      {out_p}")
     print(f"changed    {c['changed_px']:,} px ({c['pct_of_frame']}% of frame), bbox {c['bbox']}, outside the matte: "
           f"{rep['outside_matte_changed']}")
-    print(f"ink        light: packshot opening {m['open']} px, {m['print_px']:,} print px; garbled print "
-          f"{m['garbled_px']:,} px filled over {m['filled_px']:,} px; ink = body x {m['ink_k']}")
+    rg = m.get("register")
+    if rg:
+        print(f"register   " + (f"the print moved {rg['shift_px']} px, scale {rg['scale_xy']}, {rg['rotation_deg']} deg" +
+                                (f", bow {rg['bow_px'][0]:+} to {rg['bow_px'][1]:+} px (top to bottom)" if "bow_px" in rg else "") + " onto the frame's print "
+                                f"(correlation {rg['ncc_before']} -> {rg['ncc_after']})" if rg["kept"]
+                                else f"not applied: {rg['why']}"))
+    print(f"ink        {pol}: packshot {'closing' if pol == 'dark' else 'opening'} {m['open']} px, {m['print_px']:,} "
+          f"print px; garbled print {m['garbled_px']:,} px filled over {m['filled_px']:,} px" +
+          (f" (frame closing {m['frame_open_auto']['size']} px)" if "frame_open_auto" in m else "") +
+          f"; ink = body x {m['ink_k']}")
     for f in findings:
         if f["level"] != "INFO":
             print(f"audit      {f['level']:4s} {f['check']}: {f['text']}" + (f" at {f['box']}" if f.get("box") else ""))
@@ -720,11 +735,11 @@ def main():
         ap.add_argument("--no-relight", action="store_true")
         ap.add_argument("--label", choices=("cylinder", "flat"), help="the label only: on a bottle or jar (cylinder), "
                         "or on a flat face (a tube's panels); --quad is then the generated label's 4 corners")
-        ap.add_argument("--ink", choices=("light",), help="print straight on a coloured body, lighter than it: matte "
-                        "ink with polarity light (the packshot's print on the frame's own body); with --mask, the "
-                        "mask is the matte it stays inside")
-        ap.add_argument("--print-box", help="X0,Y0,X1,Y1: the print's rows on the packshot, inside its frosted rims "
-                        "(--ink light)")
+        ap.add_argument("--ink", choices=("light", "dark"), help="print straight on a coloured body, lighter or darker "
+                        "than it: matte ink with that polarity (the packshot's print on the frame's own body); with "
+                        "--mask, the mask is the matte it stays inside")
+        ap.add_argument("--print-box", help="X0,Y0,X1,Y1: the print's rows on the packshot, inside its frosted rims, "
+                        "seams and lid edge (--ink)")
         ap.add_argument("--bow", help="a round body seen from above or below (needs --mask): \"t:b ...\" given, or "
                         "seams to measure: t, t/w (a ring of half-width w), t/matte (the matte's end); t along the "
                         "product's axis from its mask's centre, e.g. \"-150:0 146.5\"")

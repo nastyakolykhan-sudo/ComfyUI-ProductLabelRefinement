@@ -133,7 +133,7 @@ def main():
     ap.add_argument("--scene", help="default: the job's scene")
     ap.add_argument("--reference", help="default: the job's reference")
     ap.add_argument("--workflow", help="default: workflows/product-label-refinement.api.json (with --draft: "
-                    "product-label-refinement-draft.api.json; a job with matte ink, polarity light: "
+                    "product-label-refinement-draft.api.json; a job with matte ink on the body, light or dark: "
                     "product-label-refinement-ink.api.json, its old_silhouette mask file into the template's mask loader)")
     ap.add_argument("--psd", action="store_true", help="also write and compare the layered PSDs")
     ap.add_argument("--server", help="run the pack on this ComfyUI server instead of in-process")
@@ -161,7 +161,7 @@ def main():
     job_p = Path(a.job).expanduser().resolve() if a.job else PACK / "examples" / "demo" / "job.json"
     job = json.loads(job_p.read_text())
     m = job.get("matte")
-    light = isinstance(m, dict) and m.get("type") == "ink" and m.get("polarity") == "light"
+    light = isinstance(m, dict) and m.get("type") == "ink" and m.get("polarity") in ("light", "dark")
     a.workflow = a.workflow or str(PACK / "workflows" / ("product-label-refinement-draft.api.json" if a.draft else
                                                          "product-label-refinement-ink.api.json" if light else
                                                          "product-label-refinement.api.json"))
