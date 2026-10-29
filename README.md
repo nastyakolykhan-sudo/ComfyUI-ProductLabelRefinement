@@ -695,7 +695,7 @@ Each engine sync or pack change is made on its own branch, in its own worktree, 
    ```
    Work and commit there. An engine sync is a change like any other: in its worktree, run `tools/sync_imgpost.py --update` (and `--mark-ported` once `run.py` is ported into `stages.py`) or `tools/sync_video_engine.py --update`, and commit everything they change: the vendored packages, `tools/skill_cli/` and `imgpost.lock.json`.
 2. **Pull request.** Push the branch (`git push -u origin TOPIC`) and open a pull request against `main`. Without the gh CLI, the REST API opens it: `POST /repos/nastyakolykhan-sudo/ComfyUI-ProductLabelRefinement/pulls` with `head`, `base`, `title` and `body`.
-3. **Checks.** GitHub Actions runs `.github/workflows/checks.yml` on the pull request, on CPU, in parallel jobs (CI_MINUTES):
+3. **Checks.** GitHub Actions runs `.github/workflows/checks.yml` on the pull request, on CPU, in parallel jobs (about 12 minutes; the longest is the one workflow's video case):
 
    | Job | Runs |
    |---|---|
