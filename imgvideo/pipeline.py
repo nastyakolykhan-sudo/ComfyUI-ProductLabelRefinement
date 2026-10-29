@@ -783,7 +783,8 @@ FEATHER_PRINT_GAP = 2.0
 def print_gap_default(render, given=None):
     """Whole-band compositing (render.alpha "label") from a measured job (V54): the label's end fade stops
     feather.print_gap px short of its own print, the frame's light is read off the print (render.shade_print) from the
-    bare surface round each patch (render.shade_local, V58), over clear glass in the rows the band was stretched over
+    bare surface round each patch (render.shade_local, V58) and held steady over a few frames (render.steady_light,
+    V63), over clear glass in the rows the band was stretched over
     the frame keeps its own surface (render.clear_glass, V56), and the limb snap keeps the print facing the camera on
     its tracks (render.limb_snap.front "track", V57), unless `given` (the settings as written) sets them. Logged in
     render._defaults. Not render.body_snap.turn (V59): a product that really turns on its axis turns its print with
@@ -801,6 +802,9 @@ def print_gap_default(render, given=None):
     if "shade_local" not in (given or {}) and "shade_local" not in render:
         out["shade_local"] = True
         added["shade_local"] = {"value": True, "by": "the measured job (the frame's light read off the bare surface round each patch)"}
+    if "steady_light" not in (given or {}) and "steady_light" not in render:
+        out["steady_light"] = True
+        added["steady_light"] = {"value": True, "by": "the measured job (the label's light held steady over a few frames)"}
     if "clear_glass" not in (given or {}) and "clear_glass" not in render:
         out["clear_glass"] = True
         added["clear_glass"] = {"value": True, "by": "the measured job (the frame's own glass past the body's band)"}
@@ -948,6 +952,15 @@ def _render_one(C, J, t, frame, extras=None):
     if t in res.get("morph_source", {}):
         rct["source_H"] = res["morph_source"][t]
     H, H0_, sh, bs, snap_rep = _place(C, J, t)
+    ex0 = extras or {}
+    if ex0.get("light_read") or ex0.get("light") is not None:
+        # render.steady_light (V63): the read pass, or the light steadied over the frames round this one
+        sl_ = dict(rct["steady_light"]) if isinstance(rct.get("steady_light"), dict) else {}
+        if ex0.get("light_read"):
+            sl_["read"] = True
+        else:
+            sl_["grid"] = ex0["light"]
+        rct["steady_light"] = sl_
     if sh is not None:
         rct["axial_shift"] = sh
     if bs is not None and len(bs) > 4 and bs[4]:
@@ -962,6 +975,8 @@ def _render_one(C, J, t, frame, extras=None):
         rct["sparkles"] = t + J.s0 in C["sparkles"]
     out, info, _ = rd.render(frame, H, Hs, art, J.key(t, H), rct, label_median=C["still"], seed=t + J.s0,
                              glass=C.get("glass"))
+    if ex0.get("light_read"):
+        return info.get("light_grid")
     pr = C["print"]
     if pr is not None:
         # render.alpha "print" (V40): only the print changes, carried onto the source's own body
@@ -1172,6 +1187,35 @@ def render_workers(n=None):
     return n if n > 0 else max(1, min(8, (os.cpu_count() or 2) - 2))
 
 
+STEADY_LIGHT = {"frames": 5, "sigma": 1.0, "step": 4}
+
+
+def steady_light(raw, ts, frames=5, sigma=1.0):
+    """render.steady_light (V63): {frame: the relight's log field in label cells (render.light_bin)} -> {frame: the
+    same, steadied}: each cell's light against its frame's overall level, a median over `frames` frames round it, then
+    a Gaussian of `sigma` frames; the frame's own overall level added back (a scene's real flicker, which the frame round
+    the label shows too, carries on). Cells a frame didn't see stay its own."""
+    from scipy.ndimage import gaussian_filter1d
+    import warnings
+    ts = [t for t in ts if raw.get(t) is not None]
+    if len(ts) < 3:
+        return {}
+    G = np.stack([raw[t] for t in ts]).astype(np.float32)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        lvl = np.nanmedian(G.reshape(len(ts), -1, 3), axis=1)
+        R = G - lvl[:, None, None, :]
+        k = max(int(frames) // 2, 0)
+        Rp = np.pad(R, ((k, k), (0, 0), (0, 0), (0, 0)), mode="edge")
+        Rm = np.nanmedian(np.lib.stride_tricks.sliding_window_view(Rp, 2 * k + 1, axis=0), axis=-1)
+    w = np.isfinite(Rm).astype(np.float32)
+    z = gaussian_filter1d(np.nan_to_num(Rm), sigma, axis=0, mode="nearest") if sigma > 0 else np.nan_to_num(Rm)
+    ws = gaussian_filter1d(w, sigma, axis=0, mode="nearest") if sigma > 0 else w
+    S = np.where(ws > 0.3, z / np.maximum(ws, 1e-6), np.nan) + lvl[:, None, None, :]
+    S = np.where(np.isfinite(G), S, np.nan)
+    return {t: S[i].astype(np.float32) for i, t in enumerate(ts)}
+
+
 def stage_render(J, rng=None, workers=None):
     fr = J.frames()
     res = _fit(J)
@@ -1325,14 +1369,29 @@ def stage_render(J, rng=None, workers=None):
         gains = pa.presence_gains(raw, [t + J.s0 for t in todo], pc)
         print_rep["presence_measured"] = len(raw)
 
+    light, light_rep = {}, None
+    if rc.get("steady_light") and rc.get("alpha", "label") == "label":
+        # the light held steady over the frames round each one (V63): its per-frame read let the generator's print,
+        # redrawn every frame, blink in blobs round the label's text. A read pass of its own, binned on the label
+        slc = dict(STEADY_LIGHT, **(rc["steady_light"] if isinstance(rc["steady_light"], dict) else {}))
+        raw = {t: v for t, v in frames_out(todo, lambda t: {"light_read": True}) if v is not None}
+        light = steady_light(raw, todo, int(slc["frames"]), float(slc["sigma"]))
+        light_rep = {"frames": len(light), "window": int(slc["frames"]), "sigma": float(slc["sigma"])}
+        if light:
+            print(f"light      the label's light held steady over {int(slc['frames'])} frames (sigma {slc['sigma']}) on "
+                  f"{len(light)} frames, each frame's own overall level kept")
+
     def extras_for(t):
+        ex = {}
+        if t in light:
+            ex["light"] = light[t]
         if print_rep is None:
-            return None
+            return ex or None
         T_ = t + J.s0
         bl = None
         if float(pc["shutter"]) > 0 and T_ in mot:
             bl = pa.motion_blur(mot[T_], ssharp.get(T_) if ssharp is not None else False, pc)
-        return {"gain": gains.get(T_, 1.0), "blur": bl}
+        return dict(ex, gain=gains.get(T_, 1.0), blur=bl)
     rendered = frames_out(todo, extras_for)
 
     def one(t):
@@ -1404,6 +1463,7 @@ def stage_render(J, rng=None, workers=None):
          **tune, "frames": infos, **({"anchor": anchor_info} if anchor_info else {}),
          **({"body_snap": body_rep} if body_rep else {}), **({"glue": glue_rep} if glue_rep else {}),
          **({"level": level_rep} if level_rep else {}), **({"print_alpha": print_rep} if print_rep else {}),
+         **({"steady_light": light_rep} if light_rep else {}),
          **({"defaults": rc["_defaults"]} if rc.get("_defaults") else {})}, indent=0))
     n = len(infos)
     print(f"render     {n} frames refined, {hi - lo - n} left as they are, in {time.time() - t0:.0f} s on {nw if pool else 1} "
@@ -1661,6 +1721,7 @@ def _review(J, parts, ll_path, arrays=None):
                                                  excess=float(cf["glitter_excess"]),
                                                  shimmer_levels=float(cf["shimmer_levels"]),
                                                  shimmer_block=int(cf["shimmer_block"])))
+            ctx[id(P)]["glitter"].exclude(glass)
             ctx[id(P)]["body"] = _body_reference(P, ctx[id(P)], lambda T: src[T - lo] if lo <= T < hi else
                                                  P.media.frames(T, T + 1)[0])
             rj = json.loads((P.work / "render.json").read_text()) if (P.work / "render.json").exists() else {}
@@ -2197,7 +2258,7 @@ def _staged(J, stamps, k_track, k_fit, still_key, f, cfg):
 SETTINGS_SECTIONS = ("track", "fit", "render", "qa", "review", "artwork", "key")
 # render settings the still label doesn't depend on
 RENDER_ONLY = ("body_snap", "sparkles", "spark_glow", "alpha", "print_alpha", "soft_cap", "smear", "_sparkles_asked",
-               "glue", "level", "_defaults", "shade_print", "shade_local", "clear_glass")
+               "glue", "level", "_defaults", "shade_print", "shade_local", "clear_glass", "steady_light")
 
 
 def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24.0, work=None, workers=None):
