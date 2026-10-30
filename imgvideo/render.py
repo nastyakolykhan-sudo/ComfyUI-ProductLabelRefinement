@@ -428,7 +428,7 @@ def _shade(img, m, sigma):
     return np.maximum(out, 1e-4)
 
 
-def _ratio_field(S_lin, T, m, block=8, med=5, sigma=10.0, local=False):
+def _ratio_field(S_lin, T, m, block=8, med=5, sigma=10.0, local=False, log=False):
     """The frame's light over the keyframe's, per channel, as a smooth field: log(S / T) block medians over m, then a
     median across blocks, so print in either image (the frame's garbled, the keyframe's correct one) and small
     glints are outvoted by the bare surface around them; filled into the gaps, smoothed, back to pixels.
@@ -458,7 +458,44 @@ def _ratio_field(S_lin, T, m, block=8, med=5, sigma=10.0, local=False):
             f2, _ = normconv(gm, ok, 4 * sg)
             f = np.where(wt > 0.15, f, f2)
         out[..., c] = gaussian_filter(zoom(f, block, order=1)[:h, :w], block / 2)
-    return np.exp(out)
+    return out if log else np.exp(out)
+
+
+def light_bin(lf, U, V, a_lab, shape, step=4):
+    """The relight's log field (h x w x 3, ROI px) binned into label cells of `step` reference px (render.steady_light's
+    read): -> (gh x gw x 3) float32, NaN where no px of the label falls."""
+    gh, gw = -(-int(shape[0]) // step), -(-int(shape[1]) // step)
+    ok = (a_lab > 0.5) & np.isfinite(U) & np.isfinite(V)
+    iu = np.clip((np.nan_to_num(U[ok]) // step).astype(int), 0, gw - 1)
+    iv = np.clip((np.nan_to_num(V[ok]) // step).astype(int), 0, gh - 1)
+    k = iv * gw + iu
+    cnt = np.bincount(k, minlength=gh * gw).astype(np.float64)
+    out = np.full((gh * gw, 3), np.nan, np.float32)
+    for c in range(3):
+        s = np.bincount(k, weights=lf[..., c][ok], minlength=gh * gw)
+        out[:, c] = np.where(cnt > 0, s / np.maximum(cnt, 1), np.nan)
+    return out.reshape(gh, gw, 3)
+
+
+def light_apply(lf, grid, U, V, a_lab, step=4):
+    """The label's log light from a steadied grid (light_bin's cells, smoothed over frames), at each px's label point;
+    the frame's own field where the grid has no cell. -> (log field, px taken from the grid)"""
+    from scipy.ndimage import map_coordinates as mc
+    ok = (a_lab > 0.5) & np.isfinite(U) & np.isfinite(V)
+    if not ok.any():
+        return lf, 0
+    cu, cv = np.nan_to_num(U[ok]) / step - 0.5, np.nan_to_num(V[ok]) / step - 0.5
+    fin = np.isfinite(grid).all(-1).astype(np.float32)
+    w = mc(fin, [cv, cu], order=1, mode="nearest")
+    out = lf.copy()
+    sub = out[ok]
+    for c in range(3):
+        z = mc(np.where(fin > 0, grid[..., c], 0.0).astype(np.float32), [cv, cu], order=1, mode="nearest")
+        val = z / np.maximum(w, 1e-6)
+        wt = np.clip((w - 0.5) * 2.0, 0.0, 1.0)
+        sub[:, c] = sub[:, c] * (1.0 - wt) + val * wt
+    out[ok] = sub
+    return out, int((w > 0.5).sum())
 
 
 def _nan_median(g, size):
@@ -530,8 +567,16 @@ def _render_texture(frame_u8, crop, S_lin, Hl, Hsub, art, R, act, P_src, a_lab, 
         sp = shade_print(S_lin, Ts, act_s, cfg.get("polarity", "light"), cfg["shade_print"], key[y0:y1, x0:x1])
         act_r = act_s & ~sp
         info["shade_print_px"] = int((sp & act_s).sum())
-    out_lin = T * _ratio_field(S_lin, Ts, act_r, int(cfg.get("shade_block", 8)), int(cfg.get("shade_median", 5)),
-                               float(cfg.get("shade_sigma", 10.0)), bool(cfg.get("shade_local")))
+    lf = _ratio_field(S_lin, Ts, act_r, int(cfg.get("shade_block", 8)), int(cfg.get("shade_median", 5)),
+                      float(cfg.get("shade_sigma", 10.0)), bool(cfg.get("shade_local")), log=True)
+    sl = cfg.get("steady_light")
+    if isinstance(sl, dict) and sl.get("read"):
+        # (render.steady_light, V63) the light read only, binned on the label: the pipeline steadies it over frames
+        info["light_grid"] = light_bin(lf, U, V, a_lab, art.pack.shape[:2], int(sl.get("step", 4)))
+        return frame_u8, info, {}
+    if isinstance(sl, dict) and sl.get("grid") is not None:
+        lf, info["steady_light_px"] = light_apply(lf, sl["grid"], U, V, a_lab, int(sl.get("step", 4)))
+    out_lin = T * np.exp(lf)
     if cfg.get("blur", 0) > 0:
         out_lin = np.stack([gaussian_filter(out_lin[..., c], float(cfg["blur"])) for c in range(3)], -1)
     out = im.lin_to_srgb(gr.rolloff(np.clip(out_lin, 0, None), cfg.get("rolloff", 0.95)))

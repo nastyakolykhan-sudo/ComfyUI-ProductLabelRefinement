@@ -78,11 +78,11 @@ DEFAULTS = {
     "glitter_density": 3.0,      # specks are at most this many times denser than those (else: the surface shimmers)
     "glitter_pad": 2,            # sparkles_frames: the flagged runs padded by this many frames, and merged across
     "glitter_gap": 4,            # gaps up to this, within a shot
-    "shimmer_levels": 3.0,       # shimmer: the light on the label's body (off its print) blinking from frame to frame
-    "shimmer_block": 9,          # this many levels more than the source's at the same label points (temporal 2nd
-    "shimmer_frac": 0.005,       # difference, block means over this many px), on this share of the body ...
-    "shimmer_run": 3,            # ... for this many frames in a row: the tube's body boiled in soft patches round its
-                                 # text (0.6% of it a frame, median), 0.06% with render.shade_local (V58)
+    "shimmer_levels": 2.0,       # shimmer: the light on the label's body (off its print) blinking from frame to frame
+    "shimmer_block": 9,          # this many levels more than the frame's own bare light does (temporal 2nd difference,
+    "shimmer_frac": 0.002,       # block means over this many px), on this share of the body ...
+    "shimmer_run": 3,            # ... for this many frames in a row. v4's tube: blobs round its text on 0.33 % of the
+                                 # body a frame (median), a perfect render 0 (V58, V63)
     "step_share": 0.15,          # step: the product's step shown twice at the label's end on this share of its columns
     "step_run": 3,               # ... for this many frames in a row: the tube's curved keyframe 38-49% on every frame,
                                  # 0 with render.end_steps; v3's tube and the jar 0-1% (V60)
@@ -549,9 +549,11 @@ class Glitter:
     and only 5 frames are kept (a large label is a million points a frame). Dark print (polarity "dark" or "both"):
     only off the frame's own dark print too (a 7 px black top-hat over `levels`, dilated 3 px): the gaps between the
     strokes of a garbled seal the generator morphs from frame to frame, beside the truth's, read as specks (V56).
-    The same rows give the shimmer measure (V58): the light on the label's body blinking from frame to frame against
-    the source's at the same points (each one's temporal 2nd difference, block means over `shimmer_block` px; the
-    body px where the output's is `shimmer_levels` above the source's). For it the output is read through the mapping
+    The same rows give the shimmer measure (V58, V63): the light on the label's body blinking from frame to frame
+    against the frame's own bare light (each one's temporal 2nd difference, block means over `shimmer_block` px; the
+    body px where the output's is `shimmer_levels` above it). The reference is the source's at the same points where
+    the source is bare there; where its own print sits (redrawn every frame, it blinks far more than any light) it is
+    the frame's bare-source p90: against the source's own, v4's tube blinked in blobs round its text unflagged. For it the output is read through the mapping
     it was rendered with (add()'s H_out): where the render holds the label off the tracks (body_snap.turn, V59), its
     print read through the source's mapping moves across the body and reads as blinking light. -> {frame: measures}"""
 
@@ -562,6 +564,13 @@ class Glitter:
         self.inside = binary_erosion(self.grid.inside, iterations=int(inset)) & \
             ~(binary_dilation(prt, iterations=int(print_px)) if print_px > 0 else prt)
         self.rows, self.out, self.kw = {}, {}, measure_kw
+        self.no_shimmer = None
+
+    def exclude(self, glass):
+        """Leave the frame's own glass the render keeps (render.clear_glass) out of the shimmer measure: its reflections
+        move as they do in the source, beside the frame's print, where the reference is the frame's bare light (V63)."""
+        if glass is not None:
+            self.no_shimmer = glass(np.nan_to_num(self.grid.u), np.nan_to_num(self.grid.v)) > 0.5
 
     def _flush(self, upto):
         for T in sorted(self.rows):
@@ -584,6 +593,10 @@ class Glitter:
         rs, vs = self.grid.unwarp(src_u8, Hl, matte)
         ro, _ = self.grid.unwarp(out_u8, Hl, matte)
         rr, vr = self.grid.unwarp(out_u8, self.art.local(H_out), matte) if H_out is not None else (None, None)
+        Lsrc = self._levels(rs)
+        # the frame's own print, either polarity: where the source isn't bare (V63)
+        sp = binary_dilation((ndi.grey_closing(Lsrc, size=(15, 15)) - Lsrc > 12) |
+                             (Lsrc - ndi.grey_opening(Lsrc, size=(15, 15)) > 12), iterations=3)
         # specks around the product: a ring outside its matte (no frame-to-frame reference: the background moves)
         ys, xs = np.nonzero(matte)
         n_ring = a_ring = 0
@@ -597,13 +610,13 @@ class Glitter:
             n_ring = sum((a.stop - a.start) <= max_px and (b.stop - b.start) <= max_px for a, b in ndi.find_objects(lab))
             a_ring = int(rg.sum())
         Lo = self._levels(ro)
-        self.rows[T] = (shot, self._levels(rs), Lo, vs & self.inside, int(n_ring), a_ring,
-                        Lo if rr is None else self._levels(rr), vs & self.inside if vr is None else vr & vs & self.inside)
+        self.rows[T] = (shot, Lsrc, Lo, vs & self.inside, int(n_ring), a_ring,
+                        Lo if rr is None else self._levels(rr), vs & self.inside if vr is None else vr & vs & self.inside, sp)
         self._flush(T - 2)
 
     def measures(self, T, tophat=5, levels=25.0, max_px=6, excess=12.0, reach=3, shimmer_levels=3.0, shimmer_block=9):
         import warnings
-        shot, Ls, Lo, v, n_ring, a_ring, Lr, vr = self.rows[T]
+        shot, Ls, Lo, v, n_ring, a_ring, Lr, vr, sp = self.rows[T]
         nb = [self.rows[u] for u in (T - 2, T - 1, T + 1, T + 2) if u in self.rows and self.rows[u][0] == shot]
         if len(nb) < 2 or v.sum() < 50:
             return None
@@ -611,6 +624,8 @@ class Glitter:
         p, q = self.rows.get(T - 1), self.rows.get(T + 1)
         if p is not None and q is not None and p[0] == shot and q[0] == shot:
             okk = vr & p[7] & q[7]
+            if self.no_shimmer is not None:
+                okk = okk & ~self.no_shimmer
             if okk.sum() >= 500:
                 B = int(shimmer_block)
                 wsum = ndi.uniform_filter(okk.astype(np.float32), B)
@@ -619,8 +634,11 @@ class Glitter:
                     d2 = np.where(okk, np.abs(L - 0.5 * (Lp + Lq)), 0.0).astype(np.float32)
                     return ndi.uniform_filter(d2, B) / np.maximum(wsum, 1e-6)
                 good = okk & (wsum > 0.5)
-                ex = blk(Lr, p[6], q[6]) - blk(Ls, p[1], q[1])
-                shim = {"area": int(good.sum()), "px": int((good & (ex > shimmer_levels)).sum())}
+                ds = blk(Ls, p[1], q[1])
+                bare = ndi.uniform_filter((~(sp | p[8] | q[8])).astype(np.float32), B) > 0.9
+                ref_g = float(np.percentile(ds[good & bare], 90)) if (good & bare).sum() > 200 else 0.5
+                ex = blk(Lr, p[6], q[6]) - np.where(bare, ds, ref_g)
+                shim = {"area": int(good.sum()), "px": int((good & (ex > shimmer_levels)).sum()), "ref": round(ref_g, 3)}
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
             ref = np.nanmedian(np.stack([np.where(n[3], n[1], np.nan) for n in nb]), 0)
@@ -928,9 +946,9 @@ def evaluate(F, fps=24.0, cfg=None):
     for a, b in _runs([t for t in refined if shim(t) > c["shimmer_frac"]]):
         if b - a + 1 >= c["shimmer_run"]:
             for t in range(a, b + 1):
-                flags[t].append(("shimmer", f"the light on {100 * shim(t):.1f}% of the label's body blinks "
-                                            f"{c['shimmer_levels']:g}+ levels more than the source's from frame to frame "
-                                            f"(render.shade_local reads it round each patch)"))
+                flags[t].append(("shimmer", f"the light on {100 * shim(t):.2f}% of the label's body blinks "
+                                            f"{c['shimmer_levels']:g}+ levels more than the frame's own light from frame "
+                                            f"to frame (render.steady_light holds it steady)"))
     # step: the product's step (a band's edge) shown twice at the label's end (V60)
     def stp(t):
         e = F[t].get("endstep") or {}

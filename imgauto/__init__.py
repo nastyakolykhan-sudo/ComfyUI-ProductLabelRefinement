@@ -36,5 +36,7 @@ signatures don't).
 along the axis nearest the vertical, brought to the frame's width and shown whole, frame and packshot at one scale;
 the axis's second pass keeps the first's (V53). measure/sheet/combine keep their signatures; axis and straighten take
 an optional prior. Tall products' sheets are unchanged, byte for byte.
+0.4.4: media.read_small sends imgvideo 0.10.1's vio.passthrough() (-fps_mode passthrough from ffmpeg 5.1, -vsync 0
+below; ffmpeg 9 removed -vsync) where it sent -vsync 0. Output unchanged.
 """
-__version__ = "0.4.3"
+__version__ = "0.4.4"
