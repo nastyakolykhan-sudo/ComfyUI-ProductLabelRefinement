@@ -702,7 +702,7 @@ Each engine sync or pack change is made on its own branch, in its own worktree, 
    |---|---|
    | checks | `tools/brand_check.py` on the change; the pins (`tools/sync_imgpost.py`, `tools/sync_video_engine.py`); `tools/regress.py --psd` on the demo |
    | one workflow, CASE (5 jobs) | `tools/regress_all.py --only CASE` on a ComfyUI 0.41.0 started in the job: ink-draft, ink-job, paper-draft, paper-job, video |
-   | video node | `tools/regress_video.py` on the video demo |
+   | video node (2 jobs) | `tools/regress_video.py` on the video demo: on ffmpeg 5.0.1, and on Ubuntu's own ffmpeg 6.1 |
 
    A red job names the step that failed; its runs are kept as an artifact for 7 days. The same checks run on `main` after each merge.
 4. **Merge.** The user merges the pull request with one click once the checks are green.
@@ -715,7 +715,7 @@ If `main` moves while a pull request is open and both touch the same lines, GitH
 
 **Brand names.** `tools/brand_check.py` scans the lines a branch adds, the names of the files it adds and its commit messages against a private list of terms (regular expressions, one per line, case-insensitive). The list is the repository secret `BRAND_TERMS` (Settings › Secrets and variables › Actions), never a file here: the check prints where a term matched and its number in the list, not the term, since the logs of a public repository are public. Locally: `python3 -P tools/brand_check.py --terms FILE` (`--all`: every tracked file). A pull request from a fork doesn't get the secret, so its check fails.
 
-**Models in the checks.** AllTracker (MIT, huggingface.co/aharley/alltracker) and SAM 3.1 (SAM License, huggingface.co/Comfy-Org/sam3.1) are fetched at pinned revisions, checked against their sha256 and cached between runs. The one workflow's triage runs SAM 3 on the packshot in every case (the demo packshots have no alpha); the given product masks keep it off the frames. Changing the ComfyUI version, torch or a model is a change to the env block at the top of `checks.yml`, made on a branch like any other.
+**Models and ffmpeg in the checks.** AllTracker (MIT, huggingface.co/aharley/alltracker) and SAM 3.1 (SAM License, huggingface.co/Comfy-Org/sam3.1) are fetched at pinned revisions, checked against their sha256 and cached between runs. The one workflow's triage runs SAM 3 on the packshot in every case (the demo packshots have no alpha); the given product masks keep it off the frames. The jobs run on ffmpeg 5.0.1 (a static build, pinned by sha256 and cached), the build the fixtures and templates are made on; the engine runs on ffmpeg 6 to 9 too (imgvideo 0.10.1), so the second video node job runs on Ubuntu's own ffmpeg 6.1. Changing the ComfyUI version, torch, ffmpeg or a model is a change to the env block at the top of `checks.yml`, made on a branch like any other.
 
 ### Tools
 

@@ -13,6 +13,11 @@ inputs:
   server:
     description: start ComfyUI and check that the nodes the workflows use are there
     default: "false"
+  ffmpeg:
+    description: >-
+      pinned: the static FFMPEG_VERSION build the fixtures and templates are made on, cached; ubuntu: the runner's own
+      (apt, 6.1 on ubuntu-24.04)
+    default: pinned
 runs:
   using: composite
   steps:
@@ -26,17 +31,18 @@ runs:
           ${{ inputs.pack }}/.github/workflows/checks.yml
           ${{ inputs.pack }}/.github/actions/setup/action.yml
 
-    # imgvideo decodes and encodes through the ffmpeg command line, and the engine is built and tested on ffmpeg 5.0.1.
-    # Ubuntu's ffmpeg 6.1 doesn't do: its ffprobe tags an RGB clip's colour space "gbr" (5.0.1 leaves it out), and
-    # imgvideo/vio.py passes that to x264, which refuses it, so video.py --refine fails on the video demo.
+    # imgvideo decodes and encodes through the ffmpeg command line. The checks run on the build the Mac makes the
+    # fixtures and templates on, 5.0.1. Since imgvideo 0.10.1 the engine runs on ffmpeg 6 to 9 too, and the video node
+    # job checks that on Ubuntu's own (its ffprobe tags an RGB clip "gbr", which 0.10.0 passed on to x264).
     - name: ffmpeg ${{ env.FFMPEG_VERSION }} (static build), cached
       id: ffmpeg
+      if: inputs.ffmpeg == 'pinned'
       uses: actions/cache@v4
       with:
         path: ~/.cache/plr-ffmpeg
         key: ffmpeg-${{ env.FFMPEG_SHA256 }}
     - name: Fetch ffmpeg
-      if: steps.ffmpeg.outputs.cache-hit != 'true'
+      if: inputs.ffmpeg == 'pinned' && steps.ffmpeg.outputs.cache-hit != 'true'
       shell: bash
       run: |
         curl -fsSL -o "$RUNNER_TEMP/ffmpeg.tar.xz" \
@@ -45,10 +51,20 @@ runs:
         mkdir -p ~/.cache/plr-ffmpeg
         tar -xJf "$RUNNER_TEMP/ffmpeg.tar.xz" -C ~/.cache/plr-ffmpeg --strip-components 1
     - name: ffmpeg on PATH
+      if: inputs.ffmpeg == 'pinned'
+      shell: bash
+      run: echo "$HOME/.cache/plr-ffmpeg" >> "$GITHUB_PATH"
+    - name: Ubuntu's ffmpeg
+      if: inputs.ffmpeg == 'ubuntu'
       shell: bash
       run: |
-        echo "$HOME/.cache/plr-ffmpeg" >> "$GITHUB_PATH"
-        ~/.cache/plr-ffmpeg/ffmpeg -hide_banner -version | head -1
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq --no-install-recommends ffmpeg > /dev/null
+    - name: ffmpeg in use
+      shell: bash
+      run: |
+        command -v ffmpeg ffprobe
+        ffmpeg -hide_banner -version | head -1
 
     - name: ComfyUI ${{ env.COMFYUI_VERSION }}, CPU
       shell: bash

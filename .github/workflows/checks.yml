@@ -1,7 +1,8 @@
 # The pack's checks on every pull request (and on main after a merge), on CPU, in parallel jobs:
 #   checks          brand names in the change, the pins, tools/regress.py --psd on the demo against the skill's run.py
 #   one workflow    tools/regress_all.py, one case per job: the one workflow against each template, 0 px
-#   video node      tools/regress_video.py on the video demo: Refine (Video) against the skill's video.py, bit for bit
+#   video node      tools/regress_video.py on the video demo: Refine (Video) against the skill's video.py, bit for bit,
+#                   on ffmpeg 5.0.1 and on Ubuntu's own (6.1)
 # README.md "Maintaining" has the routine: a branch per change, these checks, a one-click merge, Swordfish pulls main.
 name: checks
 
@@ -103,14 +104,24 @@ jobs:
             ${{ runner.temp }}/regress_all
 
   video-node:
-    name: video node against video.py
+    name: video node against video.py${{ matrix.label }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ffmpeg: pinned
+            label: ""
+          - ffmpeg: ubuntu
+            label: ", Ubuntu's ffmpeg 6.1"
     steps:
       - uses: actions/checkout@v4
         with:
           path: pack
       - uses: ./pack/.github/actions/setup
+        with:
+          ffmpeg: ${{ matrix.ffmpeg }}
 
       - name: Refine (Video) against video.py --refine (the video demo, bit for bit)
         working-directory: pack
@@ -122,6 +133,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: video-node
+          name: video-node-${{ matrix.ffmpeg }}
           retention-days: 7
           path: ${{ runner.temp }}/regress_video
