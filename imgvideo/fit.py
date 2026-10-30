@@ -627,11 +627,13 @@ def body_offsets(m, ref):
 
 
 def body_corrections(meas, ref, v_range, median=5, outlier_k=4.0, stretch=(0.9, 1.1), roll_max=4.0, shift_max=0.15,
-                     turn=False, turn_max=None):
+                     turn=False, turn_max=None, orbit=None):
     """Per frame, the tube correction that puts the label back at the reference frame's proportion of the body and its
     print at the reference's angle to the body's centreline: {t: (f, p, roll_deg, du)} for Tube v -> p + f v (label
     px), a turn by roll_deg about the label's middle, and (turn) a turn round the axis by du label px that keeps the
-    label point under the body's centreline the reference's (body_snapped).
+    label point under the body's centreline the reference's (body_snapped), or, with `orbit` ({t: label px}, the
+    scene's turn about the product's axis since the reference frame, imgvideo.orbit), the reference's turned by the
+    orbit: the label turns with the camera's real orbit and only the print's own slide is taken out (V65).
     meas: {t: body_measure}. Each series is cleared of outliers (a sparkle trail splitting the matte) against a
     `median`-frame running median, then median-filtered, then clamped (stretch, roll_max deg, shift_max of the
     label's length). A frame measured as None takes its neighbours' correction."""
@@ -649,7 +651,8 @@ def body_corrections(meas, ref, v_range, median=5, outlier_k=4.0, stretch=(0.9, 
         vt = v0 - o["top_px"] / sig                      # where the label's top should go, in the old label v
         vb = v1 + o["bottom_px"] / sig
         f = (vb - vt) / (v1 - v0)
-        raw.append([f, vt - f * v0, o["roll_deg"], -o["turn_px"] if turn else 0.0])   # (+roll: onto the body's axis)
+        du = -(o["turn_px"] - (orbit.get(t, 0.0) if orbit else 0.0)) if turn else 0.0
+        raw.append([f, vt - f * v0, o["roll_deg"], du])   # (+roll: onto the body's axis)
     arr = np.array(raw, float).reshape(-1, 4)
     if not len(arr):
         return {}

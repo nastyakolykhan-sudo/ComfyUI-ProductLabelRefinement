@@ -915,22 +915,31 @@ def evaluate(F, fps=24.0, cfg=None):
                                              f"{med['bottom_px'][i]:+.1f} px off the keyframe's proportion, axis "
                                              f"{med['roll_deg'][i]:+.2f} deg off the body's centreline"))
         # slide: the label turned round the product off the keyframe's place on the body (the print it follows sliding
-        # across the body, V59)
+        # across the body, V59), or, where the render measured the scene's orbit (the ground round the product's base),
+        # off its place turned with the orbit (V65: held at the keyframe's place, the label ignored the camera orbiting)
         x = np.array([F[t]["body"].get("turn_px") if F[t]["body"].get("turn_px") is not None else np.nan for t in ts], float)
+        orb_ = np.array([F[t]["body"].get("orbit_px", np.nan) for t in ts], float)
+        has_orb = bool(np.isfinite(orb_).any())
+        if has_orb:
+            x = x - np.where(np.isfinite(orb_), orb_, 0.0)
         med["turn_px"] = ndi.median_filter(np.where(np.isfinite(x), x, np.nanmedian(x) if np.isfinite(x).any() else 0.0),
                                            5, mode="nearest") if len(x) else x
         for a, b in _runs([t for i, t in enumerate(ts) if np.isfinite(x).any() and abs(med["turn_px"][i]) > c["slide_px"]]):
             if b - a + 1 >= body_run:
                 for t in range(a, b + 1):
                     i = ts.index(t)
-                    flags[t].append(("slide", f"the label turned {med['turn_px'][i]:+.1f} px round the product off the "
+                    flags[t].append(("slide", f"the label turned {med['turn_px'][i]:+.1f} px round the product off its "
+                                              f"place turned with the scene's orbit (the ground round its base): "
+                                              f"render.body_snap.turn true holds it there" if has_orb else
+                                              f"the label turned {med['turn_px'][i]:+.1f} px round the product off the "
                                               f"keyframe's place on its body: if the product doesn't turn on its axis "
                                               f"there, render.body_snap.turn holds it"))
         for i, t in enumerate(ts):
             geometry[t] = dict(F[t]["body"], top_px_med=round(float(med["top_px"][i]), 2),
                                bottom_px_med=round(float(med["bottom_px"][i]), 2),
                                roll_deg_med=round(float(med["roll_deg"][i]), 3),
-                               **({"turn_px_med": round(float(med["turn_px"][i]), 2)} if np.isfinite(x).any() else {}))
+                               **({"turn_px_med": round(float(med["turn_px"][i]), 2)} if np.isfinite(x).any() else {}),
+                               **({"turn_vs_orbit": True} if has_orb else {}))
     # glitter: specks in front of the label in the source that the output lost (V37)
     for t in refined:
         g = F[t].get("glitter")
