@@ -25,6 +25,7 @@ from . import labelspace as ls
 from . import level as lvl
 from . import lookchecks as lk
 from . import optics as op
+from . import orbit as orb
 from . import printalpha as pa
 from . import render as rd
 from . import track as tk
@@ -1010,6 +1011,30 @@ def _render_one(C, J, t, frame, extras=None):
     return out, info, span, len(Hs), placed
 
 
+def _scene_orbit(J, fr, a):
+    """The scene's orbit about the product's axis (imgvideo.orbit, V65), measured once per shot on the ground round its
+    base and kept in the work folder (orbit.json). -> the measure, or {"skipped": why}"""
+    p = J.work / "orbit.json"
+    oc = (J.v.get("render") or {}).get("body_snap") or {}
+    oc = oc.get("orbit") if isinstance(oc, dict) and isinstance(oc.get("orbit"), dict) else {}
+    key = {"anchor": int(a), "frames": len(fr), "cfg": oc}
+    if p.exists():
+        d = json.loads(p.read_text())
+        if d.get("key") == key:
+            return d["orbit"]
+    if not J.has_masks:
+        o = {"skipped": "no mattes"}
+    else:
+        tc = J.v.get("track") or {}
+        t0 = time.time()
+        o = orb.scene_orbit(fr, J.masks(), a, oc,
+                            track=lambda f, q, an, cr, res=None: tk.track_points(f, q, an, cr, res=res,
+                                                                                  backend=tc.get("backend", "alltracker")))
+        o["seconds"] = round(time.time() - t0, 1)
+    p.write_text(json.dumps({"key": key, "orbit": o}))
+    return o
+
+
 def _body_snap(J, C, fr, frames):
     """render.body_snap (V39): per frame, the correction that keeps the label at the reference frame's (the keyframe's)
     proportion of the product's body along its axis and on the body's centreline, measured on the mapping the render
@@ -1045,8 +1070,30 @@ def _body_snap(J, C, fr, frames):
                     "edges": kinds}
     # every other frame round the gaps the reference's proportion predicts for it (None: its neighbours' correction)
     meas = {t: (ref if t == a else measure(t, kinds["top"], kinds["bottom"], ref)) for t in sorted(frames)}
+    # the turn hold (V59) holds the label to the scene's orbit where the ground round the product's base shows it
+    # (V65; "hold": to the reference frame's place, as before)
+    orbit_px, orbit_rep = None, None
+    if bc.get("turn"):
+        o = C.get("orbit") or {}
+        if o.get("phi") and bc.get("turn") == "hold":
+            orbit_rep = {"measured": True, "followed": False,
+                         "deg": [round(float(np.degrees(o["phi"][0] - o["phi"][a])), 2),
+                                 round(float(np.degrees(o["phi"][-1] - o["phi"][a])), 2)]}
+        elif o.get("phi"):
+            Hb = placed(a)[0]
+            while hasattr(Hb, "base"):
+                Hb = Hb.base
+            Ru = float(getattr(Hb, "Ru", 0.0))
+            orbit_px = {t: Ru * (o["phi"][t] - o["phi"][a]) for t in meas if t < len(o["phi"])}
+            orbit_rep = {"deg": [round(float(np.degrees(o["phi"][0] - o["phi"][a])), 2),
+                                 round(float(np.degrees(o["phi"][-1] - o["phi"][a])), 2)],
+                         "px": [round(min(orbit_px.values()), 2), round(max(orbit_px.values()), 2)],
+                         "points": int(np.median(o["points"])), "seconds": o.get("seconds")}
+        else:
+            orbit_rep = {"skipped": o.get("skipped", "not measured"), "fallback": "hold"}
     corr = vf.body_corrections(meas, ref, vr, bc["median"], bc["outlier_k"], bc["stretch"], bc["roll_max"],
-                               bc["shift_max"], turn=bool(bc.get("turn")), turn_max=float(bc["turn_max"]) * float(u1 - u0))
+                               bc["shift_max"], turn=bool(bc.get("turn")), turn_max=float(bc["turn_max"]) * float(u1 - u0),
+                               orbit=orbit_px)
     corr[a] = (1.0, 0.0, 0.0, 0.0)                         # the keyframe's frame is the truth
     only = frame_set(bc["frames"]) if bc.get("frames") else None
 
@@ -1069,13 +1116,21 @@ def _body_snap(J, C, fr, frames):
            "stretch": [round(min(c[0] for c in corr.values()), 4), round(max(c[0] for c in corr.values()), 4)],
            "roll_deg": [round(min(c[2] for c in corr.values()), 3), round(max(c[2] for c in corr.values()), 3)],
            **({"turn_px": [round(min(c[3] for c in corr.values()), 2), round(max(c[3] for c in corr.values()), 2)]}
-              if bc.get("turn") else {})}
+              if bc.get("turn") else {}), **({"orbit": orbit_rep} if orbit_rep else {})}
     print(f"body snap  {len(body)} of {len(frames)} frames placed by the body (reference frame {a + J.s0}, edges "
           f"{kinds['top']} above / {kinds['bottom']} below): before, the label's top {rep['before']['top_px']} px and "
           f"bottom {rep['before']['bottom_px']} px off the keyframe's proportion, roll {rep['before']['roll_deg']} deg; "
           f"stretch {rep['stretch']}, roll {rep['roll_deg']} deg" +
           (f"; turned round the axis {rep['turn_px']} label px (the label point under the body's centreline held at the "
-           f"keyframe's; before, it slid {rep['before']['turn_px']} px)" if bc.get("turn") else ""))
+           f"keyframe's{' turned with the scene' if orbit_px else ''}; before, it slid {rep['before']['turn_px']} px)"
+           if bc.get("turn") else ""))
+    if orbit_rep:
+        print(f"orbit      " + (f"the scene turned {orbit_rep['deg'][0]:+.2f} to {orbit_rep['deg'][1]:+.2f} deg about the "
+                                f"product's axis (the ground round its base, {orbit_rep['points']} points): the label turns "
+                                f"with it, {orbit_rep['px']} label px" if "px" in orbit_rep else
+                                f"the scene turned {orbit_rep['deg'][0]:+.2f} to {orbit_rep['deg'][1]:+.2f} deg; "
+                                f"body_snap.turn \"hold\" keeps the keyframe frame's place" if "deg" in orbit_rep else
+                                f"not measured ({orbit_rep['skipped']}): the turn held at the keyframe frame's place"))
     return body, rep
 
 
@@ -1109,8 +1164,29 @@ def _level(J, C, fr, res):
     maps = {t: (_place(C, J, t)[0] if t in V else H) for t, H in enumerate(res["smooth"])}
     anc = J.v["anchor"]
     kf = J.kf if anc.get("keyframe") and not anc.get("texture_job") else None
+    read = None
+    art = C.get("art")
+    if rc.get("alpha", "label") == "label" and getattr(art, "texture_mode", False):
+        # the label's own lines as each mapping renders them (the keyframe warped onto the frame, no relight), read as
+        # the review reads them (V65)
+        from imgpost import warp as wp_
+
+        def read(t, H):
+            Hl = art.local(H)
+            x0, y0, x1, y1 = roi = rd.work_box(Hl, art, fr[t].shape[:2], pad=4)
+            if x1 - x0 < 8 or y1 - y0 < 8:
+                return None
+            Tw, al, _ = wp_.warp(art.texture, Hl, roi, art.refmask, ss=2, prefilter=0)
+            f = fr[t].astype(np.float32) / 255.0
+            a_ = np.clip(al, 0, 1)[..., None]
+            f[y0:y1, x0:x1] = f[y0:y1, x0:x1] * (1 - a_) + im.lin_to_srgb(np.clip(Tw, 0, 1)) * a_
+            try:
+                r = lvl.measure(np.clip(f * 255 + 0.5, 0, 255).astype(np.uint8), J.key(t, H), rc.get("polarity", "light"))
+            except (ValueError, np.linalg.LinAlgError):
+                return None
+            return None if r is None else r["text_deg"]
     lev, rep = lvl.level(maps, lambda t: J.key(t, maps[t]), J.outline(), J.anchor - J.s0, rc["level"], kf_img=kf,
-                         polarity=rc.get("polarity", "light"))
+                         polarity=rc.get("polarity", "light"), read=read)
     lev = {t: H for t, H in lev.items() if t in V}
     rep = dict(rep, keyframe=J.anchor, moved=len(lev))
     if "per_frame" in rep:
@@ -1300,6 +1376,10 @@ def stage_render(J, rng=None, workers=None):
 
     C = _render_context(J, rc, optics, shutter, ax_ref, res=res, art=art)
     body_rep = None
+    bsc = rc.get("body_snap")
+    if isinstance(bsc, dict) and bsc.get("turn"):
+        # the scene's orbit, for the turn hold to follow and the review's slide to judge against (V65)
+        C["orbit"] = _scene_orbit(J, fr, int(bsc.get("ref_frame", J.anchor)) - J.s0)
     if rc.get("body_snap"):
         # measured over every frame the tracks hold (not only a test range or a patch job's frames), so a range renders
         # as the full shot does
@@ -1724,6 +1804,13 @@ def _review(J, parts, ll_path, arrays=None):
             ctx[id(P)]["glitter"].exclude(glass)
             ctx[id(P)]["body"] = _body_reference(P, ctx[id(P)], lambda T: src[T - lo] if lo <= T < hi else
                                                  P.media.frames(T, T + 1)[0])
+            # the scene's orbit (V65), where the render measured it: the label's turn is judged against it
+            ctx[id(P)]["orbit_px"] = None
+            if (P.work / "orbit.json").exists():
+                o_ = json.loads((P.work / "orbit.json").read_text()).get("orbit") or {}
+                if o_.get("phi"):
+                    a_ = int(o_.get("anchor", P.anchor - P.s0))
+                    ctx[id(P)]["orbit_px"] = {t_: Ru * (ph - o_["phi"][a_]) for t_, ph in enumerate(o_["phi"])}
             rj = json.loads((P.work / "render.json").read_text()) if (P.work / "render.json").exists() else {}
             ctx[id(P)]["rinfo"], ctx[id(P)]["rlevel"] = rj.get("frames", {}), rj.get("level")
         return ctx[id(P)]
@@ -1753,6 +1840,8 @@ def _review(J, parts, ll_path, arrays=None):
                                      ref=None if T == b["frame"] else b["ref"], window=b["window"])
                 if mb is not None:
                     r["body"] = _body_row(mb, b["ref"])
+                    if c.get("orbit_px") and t in c["orbit_px"]:
+                        r["body"]["orbit_px"] = round(float(c["orbit_px"][t]), 2)
             if looks_cfg is not False:
                 # the look checks' per-frame measures (the user's notes from the first real run, V42-V45)
                 pol = (P.v.get("render") or {}).get("polarity", "light")

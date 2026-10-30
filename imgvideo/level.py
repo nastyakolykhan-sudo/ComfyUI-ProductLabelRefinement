@@ -255,10 +255,25 @@ def measure(F, M, polarity="light"):
             "block_px": int(c_hi - c_lo)}
 
 
-def mapping_level(H, d, uv, du):
-    """The label's horizontal at uv (label px) against the body's level, degrees (+: falls toward the body's right)."""
+def mapping_level(H, d, uv, du, c=None, reach=None):
+    """The label's horizontal at uv (label px) against the body's level, degrees (+: falls toward the body's right).
+    c (a point on the body's axis): read where uv's row crosses the axis instead, within `reach` label px of uv (3 du):
+    a label turned off the keyframe frame's place (with the camera's orbit, V65) no longer has its copy block's centre
+    at the axis. (The rows read alike either way on the one workflow's jar; level()'s `read` of the rendered print is
+    what levels a turned label.)"""
     n = np.array([d[1], -d[0]])
-    v = (geo.apply_H(H, uv + [[du, 0]]) - geo.apply_H(H, uv - [[du, 0]]))[0]
+    p = np.asarray(uv, float).reshape(1, 2)
+    if c is not None:
+        r = float(reach if reach is not None else 3 * du)
+        us = np.arange(-r, r + 0.5, 1.0)
+        P = geo.apply_H(H, np.c_[p[0, 0] + us, np.full_like(us, p[0, 1])])
+        s = (P - np.asarray(c, float)) @ n
+        k = np.nonzero(np.sign(s[:-1]) * np.sign(s[1:]) <= 0)[0]
+        if len(k):
+            i = k[np.argmin(np.abs(us[k]))]
+            f = s[i] / (s[i] - s[i + 1]) if s[i] != s[i + 1] else 0.0
+            p = np.array([[p[0, 0] + us[i] + f * (us[i + 1] - us[i]), p[0, 1]]])
+    v = (geo.apply_H(H, p + [[du, 0]]) - geo.apply_H(H, p - [[du, 0]]))[0]
     return float(np.degrees(np.arctan2(v @ d, v @ n)))
 
 
@@ -302,9 +317,13 @@ def keyframe_level(kf_img, mattes, k, window, polarity="light"):
                                   "level_deg": round(m["text_deg"] - base, 2)}
 
 
-def level(maps, matte, LP, k, cfg=None, kf_img=None, polarity="light"):
+def level(maps, matte, LP, k, cfg=None, kf_img=None, polarity="light", read=None):
     """maps {frame: the mapping (label px -> frame px), glued or placed}; matte(t) the product's matte on frame t; LP
-    the label's outline (label px); k the keyframe's frame (in maps); kf_img the keyframe image (offset "base").
+    the label's outline (label px); k the keyframe's frame (in maps); kf_img the keyframe image (offset "base");
+    read(t, H): the label's lines as that mapping renders them on frame t (degrees, measure's text_deg) or None. With it
+    the label's own print is read, not the mapping's rows: a keyframe's lines carry its bow in the label (the jar's
+    sag 40-50 px), so a label turned off the keyframe frame's place puts a sloped stretch of them at the axis, which
+    the rows don't show (V65). Frames it can't read take the rows' read, offset to the frames it can.
     -> ({frame: levelled mapping} for the frames it moves, report)"""
     c = settings(cfg)
     ts = sorted(t for t in maps if matte(t).any())
@@ -322,7 +341,15 @@ def level(maps, matte, LP, k, cfg=None, kf_img=None, polarity="light"):
                                      f"{'?' if sc is None else round(sc, 2)} deg frame to frame (base_mad_max "
                                      f"{c['base_mad_max']})")
     uv, du = copy_point(LP, c)
-    lv = np.array([mapping_level(maps[t], ax[t][1], uv, du) for t in ts])
+    lv = np.array([mapping_level(maps[t], ax[t][1], uv, du, c=ax[t][0]) for t in ts])
+    if read is not None:
+        rd_ = np.array([np.nan if (x := read(t, maps[t])) is None else float(x) for t in ts])
+        ok = np.isfinite(rd_)
+        if ok.sum() >= max(3, len(ts) // 2) and any(ok[i] for i, t in enumerate(ts) if abs(t - k) <= int(c["window"])):
+            lv = np.where(ok, rd_, lv + float(np.median(rd_[ok] - lv[ok])))
+            rep["read"] = {"from": "the label's print as rendered", "frames": int(ok.sum())}
+        else:
+            rep["read"] = {"from": "the mapping's rows", "why": f"the print read on {int(ok.sum())} of {len(ts)} frames"}
     ref = float(np.median([lv[i] for i, t in enumerate(ts) if abs(t - k) <= int(c["window"])]))
     off, kfm = c["offset"], None
     if off == "base":
