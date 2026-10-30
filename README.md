@@ -23,7 +23,7 @@ git clone https://github.com/nastyakolykhan-sudo/ComfyUI-ProductLabelRefinement
 
 It needs no extra dependencies: numpy, scipy and Pillow (10.1 or later) ship with ComfyUI. Restart ComfyUI. The nodes are under **image › product-label-refinement**.
 
-The video nodes also need AllTracker's weights in `ComfyUI/models/trackers/` and, optionally, matplotlib for their QA plot. See the [Swordfish checklist](#swordfish-checklist).
+The video nodes also need AllTracker's weights in `ComfyUI/models/trackers/` and, optionally, matplotlib for their QA plot. See the [server checklist](#server-checklist).
 
 ## Try the demo
 
@@ -214,17 +214,19 @@ Correct one frame of a clip, by hand or with an image model given the real produ
 
 The text is right on every frame, the timing is the source's, and the pixels outside the changed area come back exactly as they went in. It's the product-label-refinement skill's video engine (`imgvideo` 0.5.0), and the skill's own `video.py --refine` gives the same pixels (see Regression).
 
-### Swordfish checklist
+### Server checklist
+
+For any ComfyUI server, local or hosted. On a hosted build, declare the packs and models below in the build's definition.
 
 1. **ComfyUI 0.19.3 or newer.**
    - The video nodes themselves run on 0.18.2.
    - SAM 3 (`SAM3_Detect`, `SAM3_VideoTrack`) and the SAM 3 helper below need 0.19.3, as does a label-fix workflow that segments with SAM 3.
 2. **AllTracker's weights:** `ComfyUI/models/trackers/alltracker.pth`.
-   - That's the `models/trackers` folder, or a `trackers` folder beside the standard model folders wherever they're mounted from: a volume that `extra_model_paths.yaml` maps for `checkpoints`, `sams` and the rest is searched too, so `trackers/alltracker.pth` at that volume's top level is found without editing the yaml. On Swordfish, add it from the Models page with the HuggingFace button (repo `aharley/alltracker`, file `alltracker.pth`, custom path `trackers`), then restart ComfyUI and reload the page.
+   - That's the `models/trackers` folder, or a `trackers` folder beside the standard model folders wherever they're mounted from: a volume that `extra_model_paths.yaml` maps for `checkpoints`, `sams` and the rest is searched too, so `trackers/alltracker.pth` at that volume's top level is found without editing the yaml. On a hosted build, declare it as a model fetched from the URL below, with its sha256, in the `trackers` folder.
    - Get them from `https://huggingface.co/aharley/alltracker/resolve/main/alltracker.pth`: 66,005,722 bytes, sha256 `ffd9ebcfb6d206d594b646999a150540f92c049cf9b2bf940facf7123f62aa1d`, MIT.
    - The node lists what's in that folder under `tracker` and never downloads anything.
 3. **SAM 3.1:** `ComfyUI/models/checkpoints/sam3.1_multiplex_fp16.safetensors`, the checkpoint the label-fix workflow already loads. Its licence is Meta's SAM License.
-   - The one workflow (`product-label-refinement-all`) also needs ComfyUI-MaskAspectCrop (Crop & Rotate) installed.
+   - The one workflow (`product-label-refinement-all`) also needs ComfyUI-MaskAspectCrop (Image Reframe) installed.
 4. **pip:**
    - `matplotlib` (optional): without it the QA plot is skipped and everything else runs.
    - `torchvision`, `einops` and `av` ship with ComfyUI.
@@ -257,7 +259,7 @@ The text is right on every frame, the timing is the source's, and the pixels out
 |---|---|---|
 | **Product Label: Refine (Video)** | `frames` (IMAGE batch), `mask` (MASK batch), `keyframes` (IMAGE, one per shot), `tracker`; optional `keyframe_index`, `keyframe_frames`, `keyframe_bbox`, `product` (context only), `settings` (JSON), `fps`, `processes`, `model` (tube, or flat: experimental), `compositing` (settings, print or label: `render.alpha`), `soft_cap` (px, -1 = the engine's default: `render.soft_cap`) | `frames` (same count, size and order; outside the changed pixels the input itself), `matte` (the mask plus patched frames), `changed`, `report` (JSON), `qa_image` |
 | **Product Label: Save Lossless (Video)** | `images`, `fps`, `filename_prefix`, `format` (QuickTime PNG: exact; PNG sequence; ProRes 4444: for editors, not exact), `audio`? | the file in `output/` (never H.264) |
-| **Product Label: SAM 3 Track From Keyframe** | `images`, `model` (SAM 3), `keyframe_mask`, `keyframe_index`; optional `conditioning`, `detection_threshold`, `max_objects`, `detect_interval` | `masks`: the keyframe's mask propagated forward from it and backward on the reversed frames, one per frame. ComfyUI core's `SAM3_VideoTrack` seeds only the first frame. **First test on Swordfish** (it needs 0.19.3 and the SAM 3.1 checkpoint) |
+| **Product Label: SAM 3 Track From Keyframe** | `images`, `model` (SAM 3), `keyframe_mask`, `keyframe_index`; optional `conditioning`, `detection_threshold`, `max_objects`, `detect_interval` | `masks`: the keyframe's mask propagated forward from it and backward on the reversed frames, one per frame. ComfyUI core's `SAM3_VideoTrack` seeds only the first frame. **Not yet tested on a GPU server** (it needs 0.19.3 and the SAM 3.1 checkpoint) |
 
 **What Refine measures by itself:**
 - shots and cuts;
@@ -375,7 +377,7 @@ Typical overrides after a first look at the report: `{"render": {"spark_glow": [
 
 An image never reaches the video nodes, a job with print on the body never runs Grade To Scene or Match Finish, and nothing in a skipped branch runs or fails.
 
-**What it needs** (on top of the pack): ComfyUI 0.19.3 or newer (core SAM 3 nodes; tested on 0.41.0 with frontend 1.55.17), [ComfyUI-MaskAspectCrop](https://github.com/nastyakolykhan-sudo/ComfyUI-MaskAspectCrop) for Crop & Rotate, the SAM 3.1 checkpoint `models/checkpoints/sam3.1_multiplex_fp16.safetensors`, and AllTracker's weights for clips (see the [Swordfish checklist](#swordfish-checklist)).
+**What it needs** (on top of the pack): ComfyUI 0.19.3 or newer (core SAM 3 nodes; tested on 0.41.0 with frontend 1.55.17), [ComfyUI-MaskAspectCrop](https://github.com/nastyakolykhan-sudo/ComfyUI-MaskAspectCrop) for Image Reframe, the SAM 3.1 checkpoint `models/checkpoints/sam3.1_multiplex_fp16.safetensors`, and AllTracker's weights for clips (see the [server checklist](#server-checklist)).
 
 **Same pixels as the separate templates.** Run with the same inputs, each case gives what its template gives, 0 px apart, with the same reports (`tools/regress_all.py`, see [Regression](#regression)):
 - the ink demo: Auto Draft (= `product-label-refinement-ink-draft`) and its job (= `product-label-refinement-ink`);
@@ -385,7 +387,7 @@ An image never reaches the video nodes, a job with print on the body never runs 
 
 In these checks the product mask was given, so SAM 3 itself didn't run; its part of the graph is the label-fix workflow's (SAM3 Detect on the keyframe frame, then SAM 3 Track From Keyframe).
 
-**Straightening** resamples what it changes: the crop is turned out of the frame and the changed pixels back into it (bicubic, as Crop & Rotate does), with a 2 px rim round them. On the ink demo turned upright by 3°, the print landed within 3 levels of the unturned run (median; 7 at the 95th percentile), and 39 px of the bottle's rim outside its mask changed. Leave it off unless the stills fix needs the label upright.
+**Straightening** resamples what it changes: the crop is turned out of the frame and the changed pixels back into it (bicubic, as Image Reframe does), with a 2 px rim round them. On the ink demo turned upright by 3°, the print landed within 3 levels of the unturned run (median; 7 at the 95th percentile), and 39 px of the bottle's rim outside its mask changed. Leave it off unless the stills fix needs the label upright.
 
 ### Its inputs
 
@@ -411,7 +413,7 @@ The ids are the API file's (`workflows/product-label-refinement-all.api.json`), 
 | 11 SAM 3 prompt (CLIP Text Encode) | `text` | what the product is, e.g. `pump bottle`. Comma-separated prompts are joined into one mask; `name:N` takes N objects of a kind (1 by default) |
 | 13 SAM 3 on the keyframe frame | `threshold`, `refine_iterations` | 0.33 and 2, as the label-fix workflow |
 | 14 SAM 3 through the shot | `detection_threshold`, `max_objects`, `detect_interval` | 0.33, 1, 1 |
-| 21 Straighten (Crop & Rotate) | `center_x`, `center_y`, `crop_width`, `crop_height`, `rotation` | a frame round the product and the turn that puts its label upright (degrees, + turns the image clockwise behind the frame). All 0: off, the whole frame, and nothing is resampled. When on, the stills branch works on the crop (Auto Draft's `quad`, `pairs`, `occluders` and the job are in the crop's px) and only the pixels it changed go back into the frame |
+| 21 Straighten (Image Reframe) | `center_x`, `center_y`, `frame_width`, `frame_height`, `rotation` | a frame round the product and the turn that puts its label upright (degrees, + turns the image clockwise behind the frame). All 0: off, the whole frame, and nothing is resampled. Its image picker stays empty: the frame comes in from the stills branch, and the editor shows it after a first run. Where a turned frame reaches past the image, node 88 (Frame Mask) keeps that padding out of Auto Draft's product mask. When on, the stills branch works on the crop (Auto Draft's `quad`, `pairs`, `occluders` and the job are in the crop's px) and only the pixels it changed go back into the frame |
 | 24 Auto Draft | `ink` | the print type: `off` for a paper label or print on paper or a flat panel; `light` or `dark` for print straight on a round body with no paper, lighter or darker than it (white print on a frosted bottle; black print on a jar or a white bottle). With `ink` set, give `print_box` |
 | 24 Auto Draft | `quad`, `model`, `light`, `label`, `outline`, `pairs`, `occluders`, `mask_skip`, `print_box`, `bow`, `suggest` | as on the node ([Starting from rough input](#starting-from-rough-input-auto-draft), [Print straight on a body](#print-straight-on-a-body-the-ink-templates)). The template holds the ink demo's |
 | 62 Refine (Video) | `processes`, `model`, `compositing`, `soft_cap`, `glue`, `keyframe_frames`, `tracker` | as on the node ([Video nodes](#video-nodes-image--product-label-refinement--video)); `processes` 8 on a server |
@@ -451,7 +453,8 @@ The ids are the API file's (`workflows/product-label-refinement-all.api.json`), 
 | **Mask Overlay** | `images`, `masks`, `opacity` | the masks on their frames, tinted green with a red edge |
 | **Packshot Matte** | `reference`, `mask`, `use`; `sam_mask`? (lazy) | the packshot's outline as Load Image's MASK: its alpha; else SAM 3's mask of it (computed only then) with `alpha, else SAM 3`; else Load Image's mask as it is (the engine traces the backdrop); and its `source` |
 | **Splice Shot Back** | `frames`, `shot_frames`, `start`; `shot`? | the clip with the shot replaced at `start` (the shot itself when it is the whole clip); shows `shot` |
-| **Paste-Back Mask** | `before`, `after`, `crop_rotate`, `grow` | where a straightened crop changed (8 bit), grown by `grow` px, for Crop & Rotate Composite; `straightened` false when the crop is the whole frame unturned |
+| **Paste-Back Mask** | `before`, `after`, `crop_data`, `grow` | where a straightened crop changed (8 bit), grown by `grow` px, for Image Reframe Composite; `straightened` false when the crop is the whole frame unturned |
+| **Frame Mask** | `mask`, `crop_data` | Image Reframe's mask with its padding taken out: the product mask in a straightened frame (a turned frame's corners past the image are 0, not 1) |
 | **Video Settings** | `settings`, `product_copy` | the settings JSON with the copy as `words`, and the copy |
 | **Label Triage** | `frame`, `mask`, `reference`; `reference_mask`?, `product_copy`?, `ocr`, `glyph` | `sheet` (the print on the frame next to the packshot's, straightened, same size), `measures` (JSON; an error there never stops the run) |
 
