@@ -3,12 +3,14 @@
 
   python3 -P tools/sync_imgpost.py                 # check (default); exit 1 when anything moved
   python3 -P tools/sync_imgpost.py --update        # copy the skill's imgpost/ here and re-pin it
-  python3 -P tools/sync_imgpost.py --mark-ported   # after porting a run.py change into stages.py
+  python3 -P tools/sync_imgpost.py --mark-ported   # after porting a run.py change into stages.py (copies it too)
 
 The pack vendors a byte-identical copy of the skill's scripts/imgpost (a ComfyUI server, local or cloud, doesn't
 have the skill folder). imgpost.lock.json pins the sha256 of every vendored file and of the run.py version that
 stages.py ports. --check reports: files edited here (never edit imgpost/ in the pack), skill changes not synced
 yet, and run.py changes not yet ported into stages.py. After --update or a port: run tools/regress.py, commit.
+tools/skill_cli/run.py is that ported run.py: the pull request checks run tools/regress.py against it, since GitHub has
+no skill folder; --mark-ported copies it, and the check fails when it isn't the pinned one.
 """
 import argparse
 import datetime
@@ -21,6 +23,7 @@ from pathlib import Path
 
 PACK = Path(__file__).resolve().parent.parent
 LOCK = PACK / "imgpost.lock.json"
+CLI = PACK / "tools" / "skill_cli"
 
 
 def sha(p):
@@ -64,7 +67,8 @@ def main():
                 print("run.py differs from the version stages.py ports: port the diff, then --mark-ported")
         else:
             lock["run_py"] = sha(run_py)
-            print("recorded the current run.py as ported")
+            shutil.copy2(run_py, CLI / "run.py")
+            print("recorded the current run.py as ported (and copied it to tools/skill_cli/)")
         LOCK.write_text(json.dumps(lock, indent=2) + "\n")
         return
 
@@ -73,6 +77,8 @@ def main():
     edited = sorted(n for n in set(here) | set(lock["files"]) if here.get(n) != lock["files"].get(n))
     if edited:
         problems.append("vendored imgpost/ differs from the lock (edited here?): " + ", ".join(edited))
+    if not (CLI / "run.py").exists() or sha(CLI / "run.py") != lock["run_py"]:
+        problems.append("tools/skill_cli/run.py isn't the run.py stages.py ports -> --mark-ported copies it")
     if src.is_dir():
         there = tree(src)
         moved = sorted(n for n in set(there) | set(lock["files"]) if there.get(n) != lock["files"].get(n))

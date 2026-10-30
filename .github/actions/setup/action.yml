@@ -1,0 +1,153 @@
+name: Pack checks setup
+description: >-
+  A CPU ComfyUI 0.41.0 with this pack and ComfyUI-MaskAspectCrop in custom_nodes, the AllTracker weights and (for the one
+  workflow) SAM 3.1, both cached, and the skill's layout rebuilt from the pack's pinned copies, so the tools that
+  compare against the skill run unchanged. With server, ComfyUI is started on 127.0.0.1:8188.
+inputs:
+  pack:
+    description: the pack's checkout
+    default: pack
+  sam3:
+    description: fetch SAM 3.1 (the one workflow's triage runs it on the packshot in every case)
+    default: "false"
+  server:
+    description: start ComfyUI and check that the nodes the workflows use are there
+    default: "false"
+  ffmpeg:
+    description: >-
+      pinned: the static FFMPEG_VERSION build the fixtures and templates are made on, cached; ubuntu: the runner's own
+      (apt, 6.1 on ubuntu-24.04)
+    default: pinned
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@v6
+      with:
+        python-version: "3.11"
+        activate-environment: true
+        enable-cache: true
+        cache-dependency-glob: |
+          ${{ inputs.pack }}/requirements.txt
+          ${{ inputs.pack }}/.github/workflows/checks.yml
+          ${{ inputs.pack }}/.github/actions/setup/action.yml
+
+    # imgvideo decodes and encodes through the ffmpeg command line. The checks run on the build the Mac makes the
+    # fixtures and templates on, 5.0.1. Since imgvideo 0.10.1 the engine runs on ffmpeg 6 to 9 too, and the video node
+    # job checks that on Ubuntu's own (its ffprobe tags an RGB clip "gbr", which 0.10.0 passed on to x264).
+    - name: ffmpeg ${{ env.FFMPEG_VERSION }} (static build), cached
+      id: ffmpeg
+      if: inputs.ffmpeg == 'pinned'
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/plr-ffmpeg
+        key: ffmpeg-${{ env.FFMPEG_SHA256 }}
+    - name: Fetch ffmpeg
+      if: inputs.ffmpeg == 'pinned' && steps.ffmpeg.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        curl -fsSL -o "$RUNNER_TEMP/ffmpeg.tar.xz" \
+          "https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-$FFMPEG_VERSION-amd64-static.tar.xz"
+        echo "$FFMPEG_SHA256  $RUNNER_TEMP/ffmpeg.tar.xz" | sha256sum -c -
+        mkdir -p ~/.cache/plr-ffmpeg
+        tar -xJf "$RUNNER_TEMP/ffmpeg.tar.xz" -C ~/.cache/plr-ffmpeg --strip-components 1
+    - name: ffmpeg on PATH
+      if: inputs.ffmpeg == 'pinned'
+      shell: bash
+      run: echo "$HOME/.cache/plr-ffmpeg" >> "$GITHUB_PATH"
+    - name: Ubuntu's ffmpeg
+      if: inputs.ffmpeg == 'ubuntu'
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq --no-install-recommends ffmpeg > /dev/null
+    - name: ffmpeg in use
+      shell: bash
+      run: |
+        command -v ffmpeg ffprobe
+        ffmpeg -hide_banner -version | head -1
+
+    - name: ComfyUI ${{ env.COMFYUI_VERSION }}, CPU
+      shell: bash
+      run: |
+        git clone -q --depth 1 --branch "$COMFYUI_VERSION" https://github.com/Comfy-Org/ComfyUI "$COMFY"
+        git clone -q https://github.com/nastyakolykhan-sudo/ComfyUI-MaskAspectCrop "$COMFY/custom_nodes/ComfyUI-MaskAspectCrop"
+        git -C "$COMFY/custom_nodes/ComfyUI-MaskAspectCrop" checkout -q "$MASKASPECTCROP_REF"
+        ln -s "$GITHUB_WORKSPACE/${{ inputs.pack }}" "$COMFY/custom_nodes/ComfyUI-ProductLabelRefinement"
+        uv pip install -q "torch==$TORCH_VERSION" "torchvision==$TORCHVISION_VERSION" --index-url https://download.pytorch.org/whl/cpu
+        uv pip install -q -r "$COMFY/requirements.txt" -r "${{ inputs.pack }}/requirements.txt"
+        python -c "import torch; print('torch', torch.__version__, 'threads', torch.get_num_threads())"
+
+    - name: AllTracker weights (MIT, huggingface.co/aharley/alltracker), cached
+      id: alltracker
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/plr-models/alltracker.pth
+        key: alltracker-${{ env.ALLTRACKER_SHA256 }}
+    - name: Fetch AllTracker
+      if: steps.alltracker.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        mkdir -p ~/.cache/plr-models
+        curl -fsSL -o ~/.cache/plr-models/alltracker.pth \
+          "https://huggingface.co/aharley/alltracker/resolve/$ALLTRACKER_REV/alltracker.pth"
+
+    - name: SAM 3.1 (SAM License, huggingface.co/Comfy-Org/sam3.1), cached
+      id: sam3
+      if: inputs.sam3 == 'true'
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/plr-models/sam3.1_multiplex_fp16.safetensors
+        key: sam3.1-${{ env.SAM3_SHA256 }}
+    - name: Fetch SAM 3.1
+      if: inputs.sam3 == 'true' && steps.sam3.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        mkdir -p ~/.cache/plr-models
+        curl -fsSL -o ~/.cache/plr-models/sam3.1_multiplex_fp16.safetensors \
+          "https://huggingface.co/Comfy-Org/sam3.1/resolve/$SAM3_REV/checkpoints/sam3.1_multiplex_fp16.safetensors"
+
+    - name: Models folder
+      shell: bash
+      run: |
+        M=~/.cache/plr-models
+        echo "$ALLTRACKER_SHA256  $M/alltracker.pth" | sha256sum -c -
+        mkdir -p "$COMFY/models/trackers" "$COMFY/models/checkpoints"
+        ln -sf "$M/alltracker.pth" "$COMFY/models/trackers/alltracker.pth"
+        if [ "${{ inputs.sam3 }}" = true ]; then
+          echo "$SAM3_SHA256  $M/sam3.1_multiplex_fp16.safetensors" | sha256sum -c -
+          ln -sf "$M/sam3.1_multiplex_fp16.safetensors" "$COMFY/models/checkpoints/sam3.1_multiplex_fp16.safetensors"
+        fi
+
+    - name: The skill's layout, from the pack's pinned copies
+      shell: bash
+      run: |
+        # tools/regress.py runs the skill's run.py, tools/regress_video.py its video.py, and the sync checks look at the
+        # skill folder (imgpost.lock.json's "skill"). GitHub has no skill folder, so it is rebuilt here from what the
+        # pins cover: imgpost/, imgvideo/, imgauto/ and tools/skill_cli/{run.py,video.py}. The sync checks then compare
+        # the vendored copies with the lock; whether the pack has fallen behind the skill is checked locally.
+        S="$HOME/Documents/Claude/product-label-refinement/scripts"
+        mkdir -p "$S"
+        cp -R "${{ inputs.pack }}/imgpost" "${{ inputs.pack }}/imgvideo" "${{ inputs.pack }}/imgauto" "$S/"
+        cp "${{ inputs.pack }}/tools/skill_cli/run.py" "${{ inputs.pack }}/tools/skill_cli/video.py" "$S/"
+
+    - name: Start ComfyUI
+      if: inputs.server == 'true'
+      shell: bash
+      run: |
+        cd "$COMFY"
+        # The one workflow's packshot loader (node 2) defaults to the ink demo's packshot, and ComfyUI validates it
+        # against the input folder even in a run that gives no packshot (the video case): without the file there,
+        # the outputs that depend on it are dropped and the run has no master.
+        mkdir -p input && cp "$GITHUB_WORKSPACE/${{ inputs.pack }}/examples/ink_demo/inkdemo_packshot.png" input/
+        nohup python main.py --cpu --listen 127.0.0.1 --port 8188 --disable-auto-launch > "$RUNNER_TEMP/comfyui.log" 2>&1 &
+        for i in $(seq 1 180); do curl -sf http://127.0.0.1:8188/system_stats > /dev/null && break; sleep 1; done
+        curl -sf http://127.0.0.1:8188/object_info > "$RUNNER_TEMP/object_info.json" || { tail -50 "$RUNNER_TEMP/comfyui.log"; exit 1; }
+        # this pack's, Crop & Rotate's and core SAM 3's nodes (a failed import of a core extra, e.g. the GL nodes on a
+        # runner without OpenGL, doesn't matter)
+        python - "$RUNNER_TEMP/object_info.json" <<'EOF'
+        import json, sys
+        o = json.load(open(sys.argv[1]))
+        miss = [n for n in ("ImagePostAutoDraft", "ProductLabelVideoRefine", "ProductLabelTriage", "CropRotate", "SAM3_Detect")
+                if n not in o]
+        sys.exit("missing nodes: " + ", ".join(miss) if miss else 0)
+        EOF
