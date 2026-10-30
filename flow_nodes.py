@@ -19,6 +19,7 @@ Images and videos are decoded by ComfyUI's own loaders (Load Image, and Load Vid
 the ones the separate templates get from the same files.
 """
 import json
+import math
 import os
 
 import torch
@@ -439,9 +440,9 @@ class ProductLabelSAM3Points:
 class ProductLabelPasteBackMask:
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"before": ("IMAGE", {"tooltip": "The crop as it went in (Crop & Rotate's image)"}),
+        return {"required": {"before": ("IMAGE", {"tooltip": "The crop as it went in (Image Reframe's image)"}),
                              "after": ("IMAGE", {"tooltip": "The crop as it came out (Composite Behind's image)"}),
-                             "crop_rotate": ("CROP_ROTATE",),
+                             "crop_data": ("CROP_DATA",),
                              "grow": ("INT", {"default": 2, "min": 0, "max": 64, "tooltip": "px added round the change"})}}
 
     RETURN_TYPES = ("MASK", "BOOLEAN")
@@ -449,11 +450,11 @@ class ProductLabelPasteBackMask:
     FUNCTION = "mask"
     CATEGORY = CATEGORY
     DESCRIPTION = ("Where a straightened crop goes back into its frame: 1 where the run changed it (8 bit, any channel), "
-                   "grown by `grow` px, for Crop & Rotate Composite's mask, so nothing else is resampled. straightened "
+                   "grown by `grow` px, for Image Reframe Composite's mask, so nothing else is resampled. straightened "
                    "is false when the crop is the whole frame, unturned: then the result is the frame itself and no "
                    "paste-back is needed.")
 
-    def mask(self, before, after, crop_rotate, grow):
+    def mask(self, before, after, crop_data, grow):
         if before.shape[:3] != after.shape[:3]:
             raise ValueError(f"before is {tuple(before.shape[:3])}, after {tuple(after.shape[:3])}: the same size needed")
         b = torch.round(before[..., :3].float().clamp(0, 1) * 255)
@@ -461,10 +462,53 @@ class ProductLabelPasteBackMask:
         m = (a != b).any(-1).float()
         if grow > 0:
             m = torch.nn.functional.max_pool2d(m[:, None], 2 * grow + 1, stride=1, padding=grow)[:, 0]
-        c = crop_rotate
+        c = crop_data
         whole = (c["width"] == c["source_width"] and c["height"] == c["source_height"]
                  and c["center_x"] * 2 == c["source_width"] and c["center_y"] * 2 == c["source_height"])
         return (m, not (whole and c["angle"] % 360 == 0))
+
+
+class ProductLabelFrameMask:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"mask": ("MASK", {"tooltip": "Image Reframe's mask: 1 in the padding, else the mask it cropped"}),
+                             "crop_data": ("CROP_DATA",)}}
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("mask",)
+    FUNCTION = "frame_mask"
+    CATEGORY = CATEGORY
+    DESCRIPTION = ("The product mask in a straightened frame: Image Reframe's mask with its padding taken out. A turned "
+                   "frame reaches past the image at its corners, and Image Reframe marks that padding 1; the product "
+                   "isn't there, so Auto Draft must see 0. The padding is recomputed from crop_data the way Image Reframe "
+                   "computes it (an exact pixel copy when the frame is unturned on whole px, else bilinear coverage).")
+
+    def frame_mask(self, mask, crop_data):
+        c = crop_data
+        cx, cy, w, h = c["center_x"], c["center_y"], c["width"], c["height"]
+        src_w, src_h = c["source_width"], c["source_height"]
+        m = mask.float()
+        if m.dim() == 2:
+            m = m[None]
+        x0, y0 = cx - w / 2, cy - h / 2
+        if c["angle"] % 360 == 0 and float(x0).is_integer() and float(y0).is_integer():
+            x0, y0 = int(x0), int(y0)
+            cover = torch.zeros((h, w), device=m.device)
+            ix0, iy0, ix1, iy1 = max(0, x0), max(0, y0), min(src_w, x0 + w), min(src_h, y0 + h)
+            if ix1 > ix0 and iy1 > iy0:
+                cover[iy0 - y0:iy1 - y0, ix0 - x0:ix1 - x0] = 1
+        else:
+            a = math.radians(c["angle"])
+            cos_a, sin_a = math.cos(a), math.sin(a)
+            xs = torch.arange(w, device=m.device, dtype=torch.float32) + 0.5 - w / 2
+            ys = torch.arange(h, device=m.device, dtype=torch.float32) + 0.5 - h / 2
+            dy, dx = torch.meshgrid(ys, xs, indexing="ij")
+            sx, sy = cx + cos_a * dx + sin_a * dy, cy - sin_a * dx + cos_a * dy
+            grid = torch.stack((sx / src_w * 2 - 1, sy / src_h * 2 - 1), dim=-1).unsqueeze(0)
+            ones = torch.ones((1, 1, src_h, src_w), device=m.device)
+            cover = torch.nn.functional.grid_sample(ones, grid, mode="bilinear", padding_mode="zeros",
+                                                    align_corners=False)[0, 0]
+        return ((m - (1 - cover)).clamp(0, 1),)
 
 
 class ProductLabelVideoSettings:
@@ -577,6 +621,7 @@ NODE_CLASS_MAPPINGS = {
     "ProductLabelPackshotMatte": ProductLabelPackshotMatte,
     "ProductLabelSAM3Points": ProductLabelSAM3Points,
     "ProductLabelPasteBackMask": ProductLabelPasteBackMask,
+    "ProductLabelFrameMask": ProductLabelFrameMask,
     "ProductLabelVideoSettings": ProductLabelVideoSettings,
     "ProductLabelTriage": ProductLabelTriage,
 }
@@ -593,6 +638,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ProductLabelPackshotMatte": "Product Label: Packshot Matte",
     "ProductLabelSAM3Points": "Product Label: SAM 3 Points",
     "ProductLabelPasteBackMask": "Product Label: Paste-Back Mask",
+    "ProductLabelFrameMask": "Product Label: Frame Mask",
     "ProductLabelVideoSettings": "Product Label: Video Settings",
     "ProductLabelTriage": "Product Label: Label Triage",
 }

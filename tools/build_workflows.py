@@ -10,7 +10,7 @@ and -ink-draft.{api.json,json}, the ink graph (print straight on a coloured body
 dark): a keyframe from a frame, its product mask and the packshot, with the ink demo's measured job in Load Job, or
 started by Auto Draft from the frame, the mask and the packshot alone; and workflows/product-label-refinement-all.
 {api.json,json}, the one workflow for every case (an image or a clip; flow_nodes.py switches the branches), with
-ComfyUI's core and SAM 3 nodes and Crop & Rotate (ComfyUI-MaskAspectCrop) as the frontend 1.55 stores them. Each UI
+ComfyUI's core and SAM 3 nodes and Image Reframe (ComfyUI-MaskAspectCrop) as the frontend 1.55 stores them. Each UI
 file is converted back the way the frontend does (links by slot, widgets by position) and checked to give its API
 file again. Re-run it after changing a
 node's inputs or outputs. Needs a Python with torch (the pack imports it), like tools/offline_run.py.
@@ -231,12 +231,14 @@ def definition_all():
         # stills: the image, or the clip's keyframe frame; Auto Draft, or the given job
         20: (RUN, "Stills branch: only without a given keyframe", {"value": L(72, 0), "when": L(4, 2),
                                                                   "run_when": "false"}, (960, 0)),
-        21: ("CropRotate", "Straighten: crop and turn (optional; all 0 = the whole frame)", {
-            "image": L(20, 0), "center_x": 0.0, "center_y": 0.0, "crop_width": 0, "crop_height": 0, "rotation": 0.0,
-            "aspect_ratio": "free", "mask": L(17, 1)}, (960, 140)),
+        21: ("ImageReframe", "Straighten: frame and turn (optional; all 0 = the whole frame)", {
+            "input_image": L(20, 0), "image": "", "center_x": 0.0, "center_y": 0.0, "frame_width": 0, "frame_height": 0,
+            "rotation": 0.0, "aspect_ratio": "free", "padding_color": "grey", "mask": L(17, 1)}, (960, 140)),
+        88: ("ProductLabelFrameMask", "Straightened product mask (the frame's padding left out)", {
+            "mask": L(21, 1), "crop_data": L(21, 2)}, (960, 680)),
         22: (RUN, "Auto Draft: only without a given job", {"value": L(21, 0), "when": L(5, 0), "run_when": "false"},
              (960, 700)),
-        23: (SW, "Auto Draft's product mask (on, off)", {"when": L(8, 0), "if_true": L(21, 1)}, (960, 840)),
+        23: (SW, "Auto Draft's product mask (on, off)", {"when": L(8, 0), "if_true": L(88, 0)}, (960, 840)),
         24: ("ImagePostAutoDraft", "Auto Draft", {
             "scene": L(22, 0), "reference": L(2, 0), "quad": "", "model": "affine", "light": "off", "suggest": False,
             "filename_prefix": "product-label-refinement/draft", "product_mask": L(23, 0), "reference_mask": L(83, 0),
@@ -277,9 +279,10 @@ def definition_all():
             "finish_report": L(39, 0), "fill_report": L(34, 2), "old_silhouette": L(33, 0), "occluder_mask": L(28, 1),
             "coords": L(30, 3), "ink": L(34, 3)}, (2460, 0)),
         41: ("ProductLabelPasteBackMask", "Paste-back mask (straightened crops)", {
-            "before": L(21, 0), "after": L(37, 0), "crop_rotate": L(21, 2), "grow": 2}, (2460, 560)),
-        42: ("CropRotateComposite", "Straightened crop back into its frame", {
-            "destination": L(20, 0), "source": L(37, 0), "crop_rotate": L(21, 2), "feather": 0, "mask": L(41, 0)},
+            "before": L(21, 0), "after": L(37, 0), "crop_data": L(21, 2), "grow": 2}, (2460, 560)),
+        42: ("ImageReframeComposite", "Straightened crop back into its frame", {
+            "frame_image": L(37, 0), "crop_data": L(21, 2), "paste": "crop onto original", "feather": 0,
+            "resize_source": True, "mask": L(41, 0)},
             (2460, 760)),
         43: (SW, "Refined frame: pasted back (straightened), else as it is", {
             "when": L(41, 1), "if_true": L(42, 0), "if_false": L(37, 0)}, (2460, 980)),
@@ -341,10 +344,10 @@ def definition_all():
 
 # the one workflow's layout: columns left to right, nodes top to bottom (heights as the frontend draws them)
 ALL_COLUMNS = [[1, 2, 3, 4, 5, 6, 7, 8, 9, 84], [19, 10, 11, 86, 87, 12, 13, 18, 17, 14, 15, 16], [81, 82, 83, 70, 71, 76, 77, 72, 73, 85, 74],
-               [20, 21, 22, 23, 24], [25, 26, 27, 29, 28, 30],
+               [20, 21, 88, 22, 23, 24], [25, 26, 27, 29, 28, 30],
                [31, 32, 33, 34, 35, 36], [37, 38, 39, 40], [41, 42, 43, 44], [45, 46, 47, 48], [49, 50, 51, 52, 53, 54],
                [55, 56, 57, 58], [60, 61, 62], [75, 63, 64, 65], [66, 67, 78, 79, 80]]
-ALL_HEIGHTS = {1: 374, 21: 520, 24: 852, 31: 246, 70: 300}
+ALL_HEIGHTS = {1: 374, 21: 720, 24: 852, 31: 246, 70: 300}
 ALL_WIDTHS = {4: 510, 6: 439, 11: 504, 33: 416, 35: 397, 43: 400}
 
 
@@ -380,7 +383,7 @@ ALL_NOTES = {
         "Keyframe frame (clips): the frame the stills branch fixes, from 0.\n"
         "Refine settings JSON and product copy (clips).\n"
         "SAM 3 prompt: the product, e.g. 'pump bottle'.\n"
-        "Straighten: Crop & Rotate's frame and rotation (all 0: off).\n"
+        "Straighten: Image Reframe's frame and rotation (all 0: off).\n"
         "Print type: Auto Draft's ink (off: a paper label, or print on paper or a flat panel; light or dark: print "
         "straight on a round body, lighter or darker than it, with no paper; dark also snaps the print onto the "
         "generated print).\n\n"
@@ -396,7 +399,7 @@ ALL_GROUPS = [
     ("Triage: does the product need fixing? (the agent sets Fix this product); the mask check; the packshot's outline",
      [81, 82, 83, 70, 71, 76, 77, 72, 73, 85, 74], "#2a7"),
     ("Stills: the image, or the clip's keyframe frame (Auto Draft, or the given job)",
-     [20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32], "#b58b2a"),
+     [20, 21, 88, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32], "#b58b2a"),
     ("Paper or print on the body, composite and QA", [33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43], "#a1309b"),
     ("Stills outputs", [44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58], "#444"),
     ("Video: Refine (Video) through the shot, spliced back into the clip (clips only)",
@@ -412,7 +415,7 @@ SIZE = {"LoadImage": (400, 360), "LoadImageMask": (400, 360), "SaveImage": (400,
         "ProductLabelPackshotMatte": (400, 140), "ProductLabelSAM3Points": (400, 100),
         "PrimitiveStringMultiline": (400, 240), "PrimitiveInt": (400, 100), "PrimitiveBoolean": (400, 80),
         "ProductLabelVideoSettings": (400, 320), "CLIPTextEncode": (400, 200), "CheckpointLoaderSimple": (400, 120),
-        "SAM3_Detect": (400, 240), "ProductLabelVideoSAM3BothWays": (400, 260), "CropRotate": (440, 520),
+        "SAM3_Detect": (400, 240), "ProductLabelVideoSAM3BothWays": (400, 260), "ImageReframe": (440, 720), "ProductLabelFrameMask": (380, 80),
         "ProductLabelVideoRefine": (420, 440), "PreviewAny": (420, 300), "CreateVideo": (380, 180), "SaveVideo": (400, 300)}
 
 # Nodes of ComfyUI core and other packs, as the frontend (1.55) serializes them: (slot inputs, widgets in
@@ -426,11 +429,12 @@ FOREIGN = {
     "SAM3_Detect": ([("model", "MODEL"), ("image", "IMAGE"), ("conditioning", "CONDITIONING"),
                      ("bboxes", "BOUNDING_BOX"), ("positive_coords", "STRING"), ("negative_coords", "STRING")],
                     ["threshold", "refine_iterations", "individual_masks"], ("MASK", "BOUNDING_BOX"), ("masks", "bboxes")),
-    "CropRotate": ([("image", "IMAGE"), ("mask", "MASK")],
-                   ["center_x", "center_y", "crop_width", "crop_height", "rotation", "aspect_ratio", "crop_rotate_editor"],
-                   ("IMAGE", "MASK", "CROP_ROTATE"), ("image", "mask", "crop_rotate")),
-    "CropRotateComposite": ([("destination", "IMAGE"), ("source", "IMAGE"), ("crop_rotate", "CROP_ROTATE"),
-                             ("mask", "MASK")], ["feather"], ("IMAGE",), ("image",)),
+    "ImageReframe": ([("input_image", "IMAGE"), ("mask", "MASK")],
+                     ["image", "upload", "center_x", "center_y", "frame_width", "frame_height", "rotation", "aspect_ratio",
+                      "padding_color", "image_reframe_editor"],
+                     ("IMAGE", "MASK", "CROP_DATA"), ("image", "mask", "crop_data")),
+    "ImageReframeComposite": ([("frame_image", "IMAGE"), ("crop_data", "CROP_DATA"), ("original", "IMAGE"),
+                               ("mask", "MASK")], ["paste", "feather", "resize_source"], ("IMAGE",), ("image",)),
     "PrimitiveStringMultiline": ([], ["value"], ("STRING",), ("STRING",)),
     "PrimitiveInt": ([], ["value", "control_after_generate"], ("INT",), ("INT",)),
     "PrimitiveBoolean": ([], ["value"], ("BOOLEAN",), ("BOOLEAN",)),
@@ -439,7 +443,7 @@ FOREIGN = {
     "SaveVideo": ([("video", "VIDEO")], ["filename_prefix", "format", "format.codec", "codec"], ("VIDEO",), ("video",)),
     "PreviewAny": ([("source", "*")], [], ("STRING",), ("STRING",)),
 }
-FRONTEND_ONLY = {"upload": "image", "control_after_generate": "fixed", "crop_rotate_editor": ""}
+FRONTEND_ONLY = {"upload": "image", "control_after_generate": "fixed", "image_reframe_editor": ""}
 UI_ONLY = {"Note"}
 WIDGET_PLACEHOLDER = {"INT": 0, "FLOAT": 0.0, "STRING": "", "BOOLEAN": False}
 

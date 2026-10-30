@@ -538,24 +538,42 @@
   },
   "21": {
     "inputs": {
-      "image": [
+      "input_image": [
         "20",
         0
       ],
+      "image": "",
       "center_x": 0.0,
       "center_y": 0.0,
-      "crop_width": 0,
-      "crop_height": 0,
+      "frame_width": 0,
+      "frame_height": 0,
       "rotation": 0.0,
       "aspect_ratio": "free",
+      "padding_color": "grey",
       "mask": [
         "17",
         1
       ]
     },
-    "class_type": "CropRotate",
+    "class_type": "ImageReframe",
     "_meta": {
-      "title": "Straighten: crop and turn (optional; all 0 = the whole frame)"
+      "title": "Straighten: frame and turn (optional; all 0 = the whole frame)"
+    }
+  },
+  "88": {
+    "inputs": {
+      "mask": [
+        "21",
+        1
+      ],
+      "crop_data": [
+        "21",
+        2
+      ]
+    },
+    "class_type": "ProductLabelFrameMask",
+    "_meta": {
+      "title": "Straightened product mask (the frame's padding left out)"
     }
   },
   "22": {
@@ -582,8 +600,8 @@
         0
       ],
       "if_true": [
-        "21",
-        1
+        "88",
+        0
       ]
     },
     "class_type": "ProductLabelSwitch",
@@ -1054,7 +1072,7 @@
         "37",
         0
       ],
-      "crop_rotate": [
+      "crop_data": [
         "21",
         2
       ],
@@ -1067,25 +1085,23 @@
   },
   "42": {
     "inputs": {
-      "destination": [
-        "20",
-        0
-      ],
-      "source": [
+      "frame_image": [
         "37",
         0
       ],
-      "crop_rotate": [
+      "crop_data": [
         "21",
         2
       ],
+      "paste": "crop onto original",
       "feather": 0,
+      "resize_source": true,
       "mask": [
         "41",
         0
       ]
     },
-    "class_type": "CropRotateComposite",
+    "class_type": "ImageReframeComposite",
     "_meta": {
       "title": "Straightened crop back into its frame"
     }
