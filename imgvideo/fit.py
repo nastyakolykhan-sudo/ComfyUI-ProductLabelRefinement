@@ -469,7 +469,7 @@ def axis_ends(H, matte, v_mid, reach=600.0):
 
 BODY_SNAP = {"top": "auto", "bottom": "auto", "reach": [0.37, 0.42], "across": 0.65, "inside": 0.05, "window": 0.5,
              "median": 5, "outlier_k": 4.0, "stretch": [0.9, 1.1], "roll_max": 4.0, "shift_max": 0.15, "turn": False,
-             "turn_max": 0.08}
+             "turn_max": 0.08, "orbit_gain": [0.9, 1.3]}
 
 
 def _edge_profile(p, ax, lum, reach):
@@ -671,6 +671,28 @@ def body_corrections(meas, ref, v_range, median=5, outlier_k=4.0, stretch=(0.9, 
     if turn_max is not None:
         arr[:, 3] = np.clip(arr[:, 3], -turn_max, turn_max)
     return {t: (float(a[0]), float(a[1]), float(a[2]), float(a[3])) for t, a in zip(ts, arr)}
+
+
+def orbit_gain(turn, orbit, bounds=(0.9, 1.3), min_px=3.0, share=0.25):
+    """How fast the frame's print turns round the product against the scene's orbit (V66): the median of their ratio,
+    weighted by the orbit squared, over the frames the orbit has turned at least `share` of its reach (and min_px)
+    from the reference frame, where both are 0; clamped to bounds. The orbit gives the label's turn its timing (a
+    camera move: smooth, and blind to the print sliding), the print its rate: the label's model projects the body
+    orthographically, so a turn moves its front slower than the real body's in perspective (about 8 % on the one
+    workflow's jar, 13 radii from the camera), and the ground's fit reads its turn a little low. On that jar the
+    print turned 1.12 times the orbit, within 1.9 label px of it on every frame.
+    turn, orbit: {t: label px}. -> (gain, the rate measured, or None where the orbit turns too little to read it)"""
+    ts = [t for t in orbit if turn.get(t) is not None and np.isfinite(turn[t]) and np.isfinite(orbit[t])]
+    o = np.array([orbit[t] for t in ts], float)
+    p = np.array([turn[t] for t in ts], float)
+    reach = float(np.abs(o).max()) if len(o) else 0.0
+    k = np.abs(o) >= max(min_px, share * reach)
+    if reach < min_px or k.sum() < 3:
+        return 1.0, None
+    r, w = p[k] / o[k], o[k] ** 2
+    i = np.argsort(r)
+    r = float(r[i][np.searchsorted(np.cumsum(w[i]) / w.sum(), 0.5)])
+    return float(np.clip(r, *bounds)), r
 
 
 def body_snapped(H, p, f, roll_deg, pivot, du=0.0):

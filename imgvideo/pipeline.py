@@ -1060,6 +1060,12 @@ def _body_snap(J, C, fr, frames):
         return vf.body_measure(H, fr[t].astype(float).mean(-1), J.key(t, H).astype(float), vr, uc, top, bottom,
                                bc["reach"], bc["across"], bc["inside"], H_print=Hp, ref=ref, window=bc["window"])
     kinds = {"top": bc["top"], "bottom": bc["bottom"]}
+    o = C.get("orbit") or {}
+    if bc.get("turn") and bc["turn"] != "hold" and o.get("phi"):
+        # standing on the ground, seen from above (V66): the matte's top is the far rim of the product's top face, which
+        # moves down the body as the camera comes closer or lower, and its base's front reads through the ground's
+        # reflections; the label keeps the print's place along the body (explicit edges still hold it)
+        kinds = {k: "none" if v == "auto" else v for k, v in kinds.items()}
     if "auto" in kinds.values():                           # decided once, on the reference frame
         Hk = placed(a)[0]
         auto = vf.body_edges(Hk, fr[a].astype(float).mean(-1), J.key(a, Hk).astype(float), vr, uc, bc["reach"])
@@ -1070,11 +1076,11 @@ def _body_snap(J, C, fr, frames):
                     "edges": kinds}
     # every other frame round the gaps the reference's proportion predicts for it (None: its neighbours' correction)
     meas = {t: (ref if t == a else measure(t, kinds["top"], kinds["bottom"], ref)) for t in sorted(frames)}
+    off = {t: vf.body_offsets(m, ref) for t, m in meas.items() if m is not None}
     # the turn hold (V59) holds the label to the scene's orbit where the ground round the product's base shows it
     # (V65; "hold": to the reference frame's place, as before)
     orbit_px, orbit_rep = None, None
     if bc.get("turn"):
-        o = C.get("orbit") or {}
         if o.get("phi") and bc.get("turn") == "hold":
             orbit_rep = {"measured": True, "followed": False,
                          "deg": [round(float(np.degrees(o["phi"][0] - o["phi"][a])), 2),
@@ -1085,9 +1091,15 @@ def _body_snap(J, C, fr, frames):
                 Hb = Hb.base
             Ru = float(getattr(Hb, "Ru", 0.0))
             orbit_px = {t: Ru * (o["phi"][t] - o["phi"][a]) for t in meas if t < len(o["phi"])}
+            # the orbit's timing at the frame's print's rate (V66): a number in orbit_gain pins the rate
+            gb = bc.get("orbit_gain", vf.BODY_SNAP["orbit_gain"])
+            gain, rate = (float(gb), None) if isinstance(gb, (int, float)) else \
+                vf.orbit_gain({t: v["turn_px"] for t, v in off.items()}, orbit_px, gb)
+            orbit_px = {t: gain * v for t, v in orbit_px.items()}
             orbit_rep = {"deg": [round(float(np.degrees(o["phi"][0] - o["phi"][a])), 2),
                                  round(float(np.degrees(o["phi"][-1] - o["phi"][a])), 2)],
                          "px": [round(min(orbit_px.values()), 2), round(max(orbit_px.values()), 2)],
+                         "gain": round(gain, 3), "print_rate": None if rate is None else round(rate, 3),
                          "points": int(np.median(o["points"])), "seconds": o.get("seconds")}
         else:
             orbit_rep = {"skipped": o.get("skipped", "not measured"), "fallback": "hold"}
@@ -1102,7 +1114,6 @@ def _body_snap(J, C, fr, frames):
             geo.apply_H(placed(t)[0], np.array([[uc, 0.5 * (vr[0] + vr[1])]]))[0].tolist()
     body = {t: (f, p, r, pivot(t), du) for t, (f, p, r, du) in corr.items()
             if (f, p, r, du) != (1.0, 0.0, 0.0, 0.0) and (only is None or t + J.s0 in only)}
-    off = {t: vf.body_offsets(m, ref) for t, m in meas.items() if m is not None}
     meas_n = sum(m is not None for m in meas.values())
 
     def rng(k):
@@ -1127,7 +1138,9 @@ def _body_snap(J, C, fr, frames):
     if orbit_rep:
         print(f"orbit      " + (f"the scene turned {orbit_rep['deg'][0]:+.2f} to {orbit_rep['deg'][1]:+.2f} deg about the "
                                 f"product's axis (the ground round its base, {orbit_rep['points']} points): the label turns "
-                                f"with it, {orbit_rep['px']} label px" if "px" in orbit_rep else
+                                f"with it at the print's rate (x{orbit_rep['gain']:.3f}"
+                                f"{'' if orbit_rep['print_rate'] is None else ', measured %.3f' % orbit_rep['print_rate']}), "
+                                f"{orbit_rep['px']} label px" if "px" in orbit_rep else
                                 f"the scene turned {orbit_rep['deg'][0]:+.2f} to {orbit_rep['deg'][1]:+.2f} deg; "
                                 f"body_snap.turn \"hold\" keeps the keyframe frame's place" if "deg" in orbit_rep else
                                 f"not measured ({orbit_rep['skipped']}): the turn held at the keyframe frame's place"))
@@ -1842,6 +1855,12 @@ def _review(J, parts, ll_path, arrays=None):
                     r["body"] = _body_row(mb, b["ref"])
                     if c.get("orbit_px") and t in c["orbit_px"]:
                         r["body"]["orbit_px"] = round(float(c["orbit_px"][t]), 2)
+                        # the frame's own print (its tracked mapping): the orbit's rate for the slide check (V66)
+                        mp = vf.body_measure(H, src[i].astype(float).mean(-1), m.astype(float), c["v"], c["uc"],
+                                             b["edges"]["top"], b["edges"]["bottom"], b["reach"], b["across"],
+                                             b["inside"], ref=None if T == b["frame"] else b["ref"], window=b["window"])
+                        if mp is not None:
+                            r["body"]["print_px"] = _body_row(mp, b["ref"])["turn_px"]
             if looks_cfg is not False:
                 # the look checks' per-frame measures (the user's notes from the first real run, V42-V45)
                 pol = (P.v.get("render") or {}).get("polarity", "light")
@@ -1922,6 +1941,11 @@ def _body_reference(P, c, frame_at):
     H = c["maps"].get(a, res["smooth"][a - P.s0])
     lum, mt = frame_at(a).astype(float).mean(-1), P.key(a - P.s0, H).astype(float)
     edges = {"top": bc["top"], "bottom": bc["bottom"]}
+    po = P.work / "orbit.json"
+    if bc.get("turn") and bc["turn"] != "hold" and po.exists() and \
+            (json.loads(po.read_text()).get("orbit") or {}).get("phi"):
+        # as the render: a product standing on the ground, seen from above, has no body ends to hold (V66)
+        edges = {k: "none" if v == "auto" else v for k, v in edges.items()}
     if "auto" in edges.values():
         auto = vf.body_edges(H, lum, mt, c["v"], c["uc"], bc["reach"])
         edges = {k: auto[k] if v == "auto" else v for k, v in edges.items()}

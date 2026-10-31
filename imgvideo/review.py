@@ -67,6 +67,8 @@ DEFAULTS = {
     "slide_px": 4.0,             # the label turned round the product this far off the keyframe's place on the body (label
                                  # px at its middle, 5-frame median, held body_run_s): the jar's label slid 13 px with its
                                  # generated print across the camera move (V59)
+    "slide_orbit_px": 2.0,       # ... or this far off its place turned with the scene's orbit at the print's rate, where
+                                 # the render measured the orbit (V66: v7's jar label, 2-4 px off over 140-160, slid)
     "glitter_tophat": 5,         # specks: a white top-hat this wide (px) ...
     "glitter_levels": 25.0,      # ... above this (sRGB levels), at most glitter_px across,
     "glitter_px": 6,
@@ -920,17 +922,23 @@ def evaluate(F, fps=24.0, cfg=None):
         x = np.array([F[t]["body"].get("turn_px") if F[t]["body"].get("turn_px") is not None else np.nan for t in ts], float)
         orb_ = np.array([F[t]["body"].get("orbit_px", np.nan) for t in ts], float)
         has_orb = bool(np.isfinite(orb_).any())
+        gain = rate = None
         if has_orb:
-            x = x - np.where(np.isfinite(orb_), orb_, 0.0)
+            # the orbit's timing at the frame's own print's rate (V66), whatever rate the render took
+            gain, rate = vf.orbit_gain({t: F[t]["body"].get("print_px") for t in ts},
+                                       {t: o for t, o in zip(ts, orb_) if np.isfinite(o)}, vf.BODY_SNAP["orbit_gain"])
+            x = x - gain * np.where(np.isfinite(orb_), orb_, 0.0)
         med["turn_px"] = ndi.median_filter(np.where(np.isfinite(x), x, np.nanmedian(x) if np.isfinite(x).any() else 0.0),
                                            5, mode="nearest") if len(x) else x
-        for a, b in _runs([t for i, t in enumerate(ts) if np.isfinite(x).any() and abs(med["turn_px"][i]) > c["slide_px"]]):
+        lim_s = c["slide_orbit_px"] if has_orb else c["slide_px"]
+        for a, b in _runs([t for i, t in enumerate(ts) if np.isfinite(x).any() and abs(med["turn_px"][i]) > lim_s]):
             if b - a + 1 >= body_run:
                 for t in range(a, b + 1):
                     i = ts.index(t)
                     flags[t].append(("slide", f"the label turned {med['turn_px'][i]:+.1f} px round the product off its "
-                                              f"place turned with the scene's orbit (the ground round its base): "
-                                              f"render.body_snap.turn true holds it there" if has_orb else
+                                              f"place turned with the scene's orbit (the ground round its base) at its "
+                                              f"print's rate (x{gain:.3f}): render.body_snap.turn true holds it there"
+                                              if has_orb else
                                               f"the label turned {med['turn_px'][i]:+.1f} px round the product off the "
                                               f"keyframe's place on its body: if the product doesn't turn on its axis "
                                               f"there, render.body_snap.turn holds it"))
@@ -939,7 +947,7 @@ def evaluate(F, fps=24.0, cfg=None):
                                bottom_px_med=round(float(med["bottom_px"][i]), 2),
                                roll_deg_med=round(float(med["roll_deg"][i]), 3),
                                **({"turn_px_med": round(float(med["turn_px"][i]), 2)} if np.isfinite(x).any() else {}),
-                               **({"turn_vs_orbit": True} if has_orb else {}))
+                               **({"turn_vs_orbit": True, "orbit_gain": round(gain, 3)} if has_orb else {}))
     # glitter: specks in front of the label in the source that the output lost (V37)
     for t in refined:
         g = F[t].get("glitter")
