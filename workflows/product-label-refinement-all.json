@@ -2,7 +2,7 @@
  "id": "0dc5c267-8982-5325-ba1f-da25c82e8753",
  "revision": 0,
  "last_node_id": 90,
- "last_link_id": 203,
+ "last_link_id": 204,
  "nodes": [
   {
    "id": 1,
@@ -25,8 +25,8 @@
      "type": "IMAGE",
      "links": [
       2,
-      173,
-      177
+      174,
+      178
      ],
      "slot_index": 0
     },
@@ -34,10 +34,10 @@
      "name": "fps",
      "type": "FLOAT",
      "links": [
-      155,
-      158,
-      161,
-      187
+      156,
+      159,
+      162,
+      188
      ],
      "slot_index": 1
     },
@@ -45,8 +45,8 @@
      "name": "audio",
      "type": "AUDIO",
      "links": [
-      157,
-      160
+      158,
+      161
      ],
      "slot_index": 2
     },
@@ -55,7 +55,7 @@
      "type": "BOOLEAN",
      "links": [
       14,
-      146
+      147
      ],
      "slot_index": 3
     },
@@ -99,10 +99,10 @@
       52,
       60,
       99,
-      167,
-      190,
-      192,
-      195
+      168,
+      191,
+      193,
+      196
      ],
      "slot_index": 0
     },
@@ -110,8 +110,8 @@
      "name": "MASK",
      "type": "MASK",
      "links": [
-      193,
-      196
+      194,
+      197
      ],
      "slot_index": 1
     }
@@ -195,7 +195,7 @@
      "name": "image",
      "type": "IMAGE",
      "links": [
-      148
+      149
      ],
      "slot_index": 0
     },
@@ -210,7 +210,7 @@
      "type": "BOOLEAN",
      "links": [
       29,
-      147
+      148
      ],
      "slot_index": 2
     }
@@ -315,7 +315,7 @@
      "name": "settings",
      "type": "STRING",
      "links": [
-      154
+      155
      ],
      "slot_index": 0
     },
@@ -323,7 +323,7 @@
      "name": "product_copy",
      "type": "STRING",
      "links": [
-      169
+      170
      ],
      "slot_index": 1
     }
@@ -390,8 +390,8 @@
      "name": "BOOLEAN",
      "type": "BOOLEAN",
      "links": [
-      172,
-      174
+      173,
+      175
      ],
      "slot_index": 0
     }
@@ -426,7 +426,7 @@
      "links": [
       4,
       10,
-      189
+      190
      ],
      "slot_index": 0
     },
@@ -479,8 +479,8 @@
      "name": "CONDITIONING",
      "type": "CONDITIONING",
      "links": [
-      191,
-      201
+      192,
+      202
      ],
      "slot_index": 0
     }
@@ -533,9 +533,9 @@
      "type": "IMAGE",
      "links": [
       5,
-      165,
-      171,
-      181
+      166,
+      172,
+      182
      ],
      "slot_index": 0
     },
@@ -782,7 +782,7 @@
      "name": "value",
      "type": "*",
      "links": [
-      175
+      176
      ],
      "slot_index": 0
     }
@@ -839,8 +839,8 @@
      "type": "MASK",
      "links": [
       31,
-      166,
-      182
+      167,
+      183
      ],
      "slot_index": 1
     },
@@ -946,7 +946,7 @@
      "type": "IMAGE",
      "links": [
       9,
-      145
+      146
      ],
      "slot_index": 0
     },
@@ -962,7 +962,7 @@
      "name": "start",
      "type": "INT",
      "links": [
-      180
+      181
      ],
      "slot_index": 2
     },
@@ -971,7 +971,7 @@
      "type": "INT",
      "links": [
       13,
-      153
+      154
      ],
      "slot_index": 3
     },
@@ -979,7 +979,7 @@
      "name": "shot",
      "type": "STRING",
      "links": [
-      179
+      180
      ],
      "slot_index": 4
     }
@@ -1066,7 +1066,15 @@
    ],
    "outputs": [
     {
-     "name": "image",
+     "name": "original_image",
+     "type": "IMAGE",
+     "links": [
+      115
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "cropped_image",
      "type": "IMAGE",
      "links": [
       32,
@@ -1078,28 +1086,27 @@
       85,
       97,
       111,
-      139
+      140
      ],
-     "slot_index": 0
+     "slot_index": 1
     },
     {
      "name": "mask",
      "type": "MASK",
      "links": [
-      70,
-      202
+      203
      ],
-     "slot_index": 1
+     "slot_index": 2
     },
     {
      "name": "crop_data",
      "type": "CROP_DATA",
      "links": [
       113,
-      115,
-      203
+      117,
+      204
      ],
-     "slot_index": 2
+     "slot_index": 3
     }
    ],
    "title": "Straighten: frame and turn (optional; all 0 = the whole frame)",
@@ -1265,7 +1272,7 @@
      "name": "draft_points",
      "type": "IMAGE",
      "links": [
-      126
+      127
      ],
      "slot_index": 2
     },
@@ -1384,7 +1391,7 @@
       72,
       84,
       96,
-      138
+      139
      ],
      "slot_index": 0
     }
@@ -1426,10 +1433,10 @@
       81,
       92,
       94,
-      128,
-      131,
-      134,
-      137
+      129,
+      132,
+      135,
+      138
      ],
      "slot_index": 0
     },
@@ -1619,7 +1626,7 @@
      "name": "align_overlay",
      "type": "IMAGE",
      "links": [
-      125
+      126
      ],
      "slot_index": 2
     },
@@ -1711,7 +1718,7 @@
      "name": "grade_preview",
      "type": "IMAGE",
      "links": [
-      127
+      128
      ],
      "slot_index": 1
     },
@@ -1727,7 +1734,7 @@
      "name": "relight_map",
      "type": "IMAGE",
      "links": [
-      130
+      131
      ],
      "slot_index": 3
     },
@@ -1807,7 +1814,7 @@
      "type": "IMAGE",
      "links": [
       80,
-      136
+      137
      ],
      "slot_index": 0
     },
@@ -1926,8 +1933,8 @@
      "type": "IMAGE",
      "links": [
       86,
-      133,
-      141
+      134,
+      142
      ],
      "slot_index": 0
     },
@@ -1936,7 +1943,7 @@
      "type": "MASK",
      "links": [
       101,
-      142
+      143
      ],
      "slot_index": 1
     },
@@ -2122,8 +2129,8 @@
       98,
       112,
       114,
-      119,
-      140
+      120,
+      141
      ],
      "slot_index": 0
     },
@@ -2132,7 +2139,7 @@
      "type": "MASK",
      "links": [
       100,
-      144
+      145
      ],
      "slot_index": 1
     }
@@ -2333,7 +2340,7 @@
      "name": "compare",
      "type": "IMAGE",
      "links": [
-      121
+      122
      ],
      "slot_index": 0
     },
@@ -2341,7 +2348,7 @@
      "name": "edges",
      "type": "IMAGE",
      "links": [
-      122
+      123
      ],
      "slot_index": 1
     },
@@ -2349,7 +2356,7 @@
      "name": "before_after",
      "type": "IMAGE",
      "links": [
-      123
+      124
      ],
      "slot_index": 2
     },
@@ -2363,7 +2370,7 @@
      "name": "audit",
      "type": "IMAGE",
      "links": [
-      124
+      125
      ],
      "slot_index": 4
     }
@@ -2418,7 +2425,7 @@
      "name": "straightened",
      "type": "BOOLEAN",
      "links": [
-      117
+      118
      ],
      "slot_index": 1
     }
@@ -2452,19 +2459,19 @@
      "link": 114
     },
     {
-     "name": "crop_data",
-     "type": "CROP_DATA",
-     "link": 115
-    },
-    {
-     "name": "original",
+     "name": "original_image",
      "type": "IMAGE",
-     "link": null
+     "link": 115
     },
     {
      "name": "mask",
      "type": "MASK",
      "link": 116
+    },
+    {
+     "name": "crop_data",
+     "type": "CROP_DATA",
+     "link": 117
     }
    ],
    "outputs": [
@@ -2472,7 +2479,7 @@
      "name": "image",
      "type": "IMAGE",
      "links": [
-      118
+      119
      ],
      "slot_index": 0
     }
@@ -2505,17 +2512,17 @@
     {
      "name": "when",
      "type": "*",
-     "link": 117
+     "link": 118
     },
     {
      "name": "if_true",
      "type": "*",
-     "link": 118
+     "link": 119
     },
     {
      "name": "if_false",
      "type": "*",
-     "link": 119
+     "link": 120
     }
    ],
    "outputs": [
@@ -2523,8 +2530,8 @@
      "name": "value",
      "type": "*",
      "links": [
-      120,
-      149
+      121,
+      150
      ],
      "slot_index": 0
     }
@@ -2553,7 +2560,7 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 120
+     "link": 121
     }
    ],
    "outputs": [],
@@ -2583,7 +2590,7 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 121
+     "link": 122
     }
    ],
    "outputs": [],
@@ -2613,7 +2620,7 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 122
+     "link": 123
     }
    ],
    "outputs": [],
@@ -2643,7 +2650,7 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 123
+     "link": 124
     }
    ],
    "outputs": [],
@@ -2673,7 +2680,7 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 124
+     "link": 125
     }
    ],
    "outputs": [],
@@ -2703,7 +2710,7 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 125
+     "link": 126
     }
    ],
    "outputs": [],
@@ -2733,7 +2740,7 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 126
+     "link": 127
     }
    ],
    "outputs": [],
@@ -2763,12 +2770,12 @@
     {
      "name": "value",
      "type": "*",
-     "link": 127
+     "link": 128
     },
     {
      "name": "when",
      "type": "*",
-     "link": 128
+     "link": 129
     }
    ],
    "outputs": [
@@ -2776,7 +2783,7 @@
      "name": "value",
      "type": "*",
      "links": [
-      129
+      130
      ],
      "slot_index": 0
     }
@@ -2807,7 +2814,7 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 129
+     "link": 130
     }
    ],
    "outputs": [],
@@ -2837,12 +2844,12 @@
     {
      "name": "value",
      "type": "*",
-     "link": 130
+     "link": 131
     },
     {
      "name": "when",
      "type": "*",
-     "link": 131
+     "link": 132
     }
    ],
    "outputs": [
@@ -2850,7 +2857,7 @@
      "name": "value",
      "type": "*",
      "links": [
-      132
+      133
      ],
      "slot_index": 0
     }
@@ -2881,7 +2888,7 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 132
+     "link": 133
     }
    ],
    "outputs": [],
@@ -2911,12 +2918,12 @@
     {
      "name": "value",
      "type": "*",
-     "link": 133
+     "link": 134
     },
     {
      "name": "when",
      "type": "*",
-     "link": 134
+     "link": 135
     }
    ],
    "outputs": [
@@ -2924,7 +2931,7 @@
      "name": "value",
      "type": "*",
      "links": [
-      135
+      136
      ],
      "slot_index": 0
     }
@@ -2955,7 +2962,7 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 135
+     "link": 136
     }
    ],
    "outputs": [],
@@ -2985,12 +2992,12 @@
     {
      "name": "value",
      "type": "*",
-     "link": 136
+     "link": 137
     },
     {
      "name": "when",
      "type": "*",
-     "link": 137
+     "link": 138
     }
    ],
    "outputs": [
@@ -2998,7 +3005,7 @@
      "name": "value",
      "type": "*",
      "links": [
-      143
+      144
      ],
      "slot_index": 0
     }
@@ -3029,37 +3036,37 @@
     {
      "name": "job",
      "type": "IMAGEPOST_JOB",
-     "link": 138
+     "link": 139
     },
     {
      "name": "scene",
      "type": "IMAGE",
-     "link": 139
+     "link": 140
     },
     {
      "name": "image",
      "type": "IMAGE",
-     "link": 140
+     "link": 141
     },
     {
      "name": "background",
      "type": "IMAGE",
-     "link": 141
+     "link": 142
     },
     {
      "name": "fill_mask",
      "type": "MASK",
-     "link": 142
+     "link": 143
     },
     {
      "name": "product",
      "type": "IMAGE",
-     "link": 143
+     "link": 144
     },
     {
      "name": "matte",
      "type": "MASK",
-     "link": 144
+     "link": 145
     }
    ],
    "outputs": [],
@@ -3089,12 +3096,12 @@
     {
      "name": "value",
      "type": "*",
-     "link": 145
+     "link": 146
     },
     {
      "name": "when",
      "type": "*",
-     "link": 146
+     "link": 147
     }
    ],
    "outputs": [
@@ -3102,8 +3109,8 @@
      "name": "value",
      "type": "*",
      "links": [
-      150,
-      184
+      151,
+      185
      ],
      "slot_index": 0
     }
@@ -3134,17 +3141,17 @@
     {
      "name": "when",
      "type": "*",
-     "link": 147
+     "link": 148
     },
     {
      "name": "if_true",
      "type": "*",
-     "link": 148
+     "link": 149
     },
     {
      "name": "if_false",
      "type": "*",
-     "link": 149
+     "link": 150
     }
    ],
    "outputs": [
@@ -3152,7 +3159,7 @@
      "name": "value",
      "type": "*",
      "links": [
-      152
+      153
      ],
      "slot_index": 0
     }
@@ -3181,17 +3188,17 @@
     {
      "name": "frames",
      "type": "IMAGE",
-     "link": 150
+     "link": 151
     },
     {
      "name": "mask",
      "type": "MASK",
-     "link": 151
+     "link": 152
     },
     {
      "name": "keyframes",
      "type": "IMAGE",
-     "link": 152
+     "link": 153
     },
     {
      "name": "keyframe_bbox",
@@ -3209,7 +3216,7 @@
      "widget": {
       "name": "keyframe_index"
      },
-     "link": 153
+     "link": 154
     },
     {
      "name": "settings",
@@ -3217,7 +3224,7 @@
      "widget": {
       "name": "settings"
      },
-     "link": 154
+     "link": 155
     },
     {
      "name": "fps",
@@ -3225,7 +3232,7 @@
      "widget": {
       "name": "fps"
      },
-     "link": 155
+     "link": 156
     }
    ],
    "outputs": [
@@ -3233,7 +3240,7 @@
      "name": "frames",
      "type": "IMAGE",
      "links": [
-      178
+      179
      ],
      "slot_index": 0
     },
@@ -3253,7 +3260,7 @@
      "name": "report",
      "type": "STRING",
      "links": [
-      164
+      165
      ],
      "slot_index": 3
     },
@@ -3261,7 +3268,7 @@
      "name": "qa_image",
      "type": "IMAGE",
      "links": [
-      163
+      164
      ],
      "slot_index": 4
     }
@@ -3301,12 +3308,12 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 156
+     "link": 157
     },
     {
      "name": "audio",
      "type": "AUDIO",
-     "link": 157
+     "link": 158
     },
     {
      "name": "fps",
@@ -3314,7 +3321,7 @@
      "widget": {
       "name": "fps"
      },
-     "link": 158
+     "link": 159
     }
    ],
    "outputs": [],
@@ -3346,12 +3353,12 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 159
+     "link": 160
     },
     {
      "name": "audio",
      "type": "AUDIO",
-     "link": 160
+     "link": 161
     },
     {
      "name": "fps",
@@ -3359,7 +3366,7 @@
      "widget": {
       "name": "fps"
      },
-     "link": 161
+     "link": 162
     }
    ],
    "outputs": [
@@ -3367,7 +3374,7 @@
      "name": "VIDEO",
      "type": "VIDEO",
      "links": [
-      162
+      163
      ],
      "slot_index": 0
     }
@@ -3401,7 +3408,7 @@
     {
      "name": "video",
      "type": "VIDEO",
-     "link": 162
+     "link": 163
     }
    ],
    "outputs": [
@@ -3441,7 +3448,7 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 163
+     "link": 164
     }
    ],
    "outputs": [],
@@ -3471,7 +3478,7 @@
     {
      "name": "source",
      "type": "*",
-     "link": 164
+     "link": 165
     }
    ],
    "outputs": [
@@ -3506,22 +3513,22 @@
     {
      "name": "frame",
      "type": "IMAGE",
-     "link": 165
+     "link": 166
     },
     {
      "name": "mask",
      "type": "MASK",
-     "link": 166
+     "link": 167
     },
     {
      "name": "reference",
      "type": "IMAGE",
-     "link": 167
+     "link": 168
     },
     {
      "name": "reference_mask",
      "type": "MASK",
-     "link": 168
+     "link": 169
     },
     {
      "name": "product_copy",
@@ -3529,7 +3536,7 @@
      "widget": {
       "name": "product_copy"
      },
-     "link": 169
+     "link": 170
     }
    ],
    "outputs": [
@@ -3537,7 +3544,7 @@
      "name": "sheet",
      "type": "IMAGE",
      "links": [
-      170
+      171
      ],
      "slot_index": 0
     },
@@ -3576,7 +3583,7 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 170
+     "link": 171
     }
    ],
    "outputs": [],
@@ -3606,12 +3613,12 @@
     {
      "name": "value",
      "type": "*",
-     "link": 171
+     "link": 172
     },
     {
      "name": "when",
      "type": "*",
-     "link": 172
+     "link": 173
     }
    ],
    "outputs": [
@@ -3650,12 +3657,12 @@
     {
      "name": "value",
      "type": "*",
-     "link": 173
+     "link": 174
     },
     {
      "name": "when",
      "type": "*",
-     "link": 174
+     "link": 175
     }
    ],
    "outputs": [
@@ -3663,7 +3670,7 @@
      "name": "value",
      "type": "*",
      "links": [
-      198
+      199
      ],
      "slot_index": 0
     }
@@ -3694,12 +3701,12 @@
     {
      "name": "value",
      "type": "*",
-     "link": 175
+     "link": 176
     },
     {
      "name": "when",
      "type": "*",
-     "link": 176
+     "link": 177
     }
    ],
    "outputs": [
@@ -3707,8 +3714,8 @@
      "name": "value",
      "type": "*",
      "links": [
-      151,
-      185
+      152,
+      186
      ],
      "slot_index": 0
     }
@@ -3739,17 +3746,17 @@
     {
      "name": "frames",
      "type": "IMAGE",
-     "link": 177
+     "link": 178
     },
     {
      "name": "shot_frames",
      "type": "IMAGE",
-     "link": 178
+     "link": 179
     },
     {
      "name": "shot",
      "type": "STRING",
-     "link": 179
+     "link": 180
     },
     {
      "name": "start",
@@ -3757,7 +3764,7 @@
      "widget": {
       "name": "start"
      },
-     "link": 180
+     "link": 181
     }
    ],
    "outputs": [
@@ -3765,8 +3772,8 @@
      "name": "frames",
      "type": "IMAGE",
      "links": [
-      156,
-      159
+      157,
+      160
      ],
      "slot_index": 0
     },
@@ -3803,12 +3810,12 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 181
+     "link": 182
     },
     {
      "name": "masks",
      "type": "MASK",
-     "link": 182
+     "link": 183
     }
    ],
    "outputs": [
@@ -3816,7 +3823,7 @@
      "name": "overlay",
      "type": "IMAGE",
      "links": [
-      183
+      184
      ],
      "slot_index": 0
     }
@@ -3847,7 +3854,7 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 183
+     "link": 184
     }
    ],
    "outputs": [],
@@ -3877,12 +3884,12 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 184
+     "link": 185
     },
     {
      "name": "masks",
      "type": "MASK",
-     "link": 185
+     "link": 186
     }
    ],
    "outputs": [
@@ -3890,7 +3897,7 @@
      "name": "overlay",
      "type": "IMAGE",
      "links": [
-      186
+      187
      ],
      "slot_index": 0
     }
@@ -3921,7 +3928,7 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 186
+     "link": 187
     },
     {
      "name": "audio",
@@ -3934,7 +3941,7 @@
      "widget": {
       "name": "fps"
      },
-     "link": 187
+     "link": 188
     }
    ],
    "outputs": [
@@ -3942,7 +3949,7 @@
      "name": "VIDEO",
      "type": "VIDEO",
      "links": [
-      188
+      189
      ],
      "slot_index": 0
     }
@@ -3976,7 +3983,7 @@
     {
      "name": "video",
      "type": "VIDEO",
-     "link": 188
+     "link": 189
     }
    ],
    "outputs": [
@@ -4016,17 +4023,17 @@
     {
      "name": "model",
      "type": "MODEL",
-     "link": 189
+     "link": 190
     },
     {
      "name": "image",
      "type": "IMAGE",
-     "link": 190
+     "link": 191
     },
     {
      "name": "conditioning",
      "type": "CONDITIONING",
-     "link": 191
+     "link": 192
     },
     {
      "name": "bboxes",
@@ -4049,8 +4056,8 @@
      "name": "masks",
      "type": "MASK",
      "links": [
-      194,
-      197
+      195,
+      198
      ],
      "slot_index": 0
     },
@@ -4089,17 +4096,17 @@
     {
      "name": "reference",
      "type": "IMAGE",
-     "link": 192
+     "link": 193
     },
     {
      "name": "mask",
      "type": "MASK",
-     "link": 193
+     "link": 194
     },
     {
      "name": "sam_mask",
      "type": "MASK",
-     "link": 194
+     "link": 195
     }
    ],
    "outputs": [
@@ -4107,7 +4114,7 @@
      "name": "mask",
      "type": "MASK",
      "links": [
-      168
+      169
      ],
      "slot_index": 0
     },
@@ -4144,17 +4151,17 @@
     {
      "name": "reference",
      "type": "IMAGE",
-     "link": 195
+     "link": 196
     },
     {
      "name": "mask",
      "type": "MASK",
-     "link": 196
+     "link": 197
     },
     {
      "name": "sam_mask",
      "type": "MASK",
-     "link": 197
+     "link": 198
     }
    ],
    "outputs": [
@@ -4203,7 +4210,7 @@
      "name": "BOOLEAN",
      "type": "BOOLEAN",
      "links": [
-      199
+      200
      ],
      "slot_index": 0
     }
@@ -4234,12 +4241,12 @@
     {
      "name": "value",
      "type": "*",
-     "link": 198
+     "link": 199
     },
     {
      "name": "when",
      "type": "*",
-     "link": 199
+     "link": 200
     }
    ],
    "outputs": [
@@ -4248,7 +4255,7 @@
      "type": "*",
      "links": [
       25,
-      176
+      177
      ],
      "slot_index": 0
     }
@@ -4297,7 +4304,7 @@
      "name": "given",
      "type": "BOOLEAN",
      "links": [
-      200
+      201
      ],
      "slot_index": 2
     }
@@ -4328,7 +4335,7 @@
     {
      "name": "when",
      "type": "*",
-     "link": 200
+     "link": 201
     },
     {
      "name": "if_true",
@@ -4338,7 +4345,7 @@
     {
      "name": "if_false",
      "type": "*",
-     "link": 201
+     "link": 202
     }
    ],
    "outputs": [
@@ -4376,12 +4383,12 @@
     {
      "name": "mask",
      "type": "MASK",
-     "link": 202
+     "link": 203
     },
     {
      "name": "crop_data",
      "type": "CROP_DATA",
-     "link": 203
+     "link": 204
     }
    ],
    "outputs": [
@@ -4389,7 +4396,8 @@
      "name": "mask",
      "type": "MASK",
      "links": [
-      35
+      35,
+      70
      ],
      "slot_index": 0
     }
@@ -4677,7 +4685,7 @@
   [
    32,
    21,
-   0,
+   1,
    22,
    0,
    "*"
@@ -4789,7 +4797,7 @@
   [
    46,
    21,
-   0,
+   1,
    28,
    1,
    "IMAGE"
@@ -4829,7 +4837,7 @@
   [
    51,
    21,
-   0,
+   1,
    30,
    2,
    "IMAGE"
@@ -4861,7 +4869,7 @@
   [
    55,
    21,
-   0,
+   1,
    31,
    1,
    "IMAGE"
@@ -4925,7 +4933,7 @@
   [
    63,
    21,
-   0,
+   1,
    32,
    1,
    "IMAGE"
@@ -4980,8 +4988,8 @@
   ],
   [
    70,
-   21,
-   1,
+   88,
+   0,
    33,
    1,
    "*"
@@ -5005,7 +5013,7 @@
   [
    73,
    21,
-   0,
+   1,
    34,
    1,
    "IMAGE"
@@ -5101,7 +5109,7 @@
   [
    85,
    21,
-   0,
+   1,
    37,
    1,
    "IMAGE"
@@ -5197,7 +5205,7 @@
   [
    97,
    21,
-   0,
+   1,
    40,
    1,
    "IMAGE"
@@ -5309,7 +5317,7 @@
   [
    111,
    21,
-   0,
+   1,
    41,
    0,
    "IMAGE"
@@ -5325,7 +5333,7 @@
   [
    113,
    21,
-   2,
+   3,
    41,
    2,
    "CROP_DATA"
@@ -5341,21 +5349,29 @@
   [
    115,
    21,
-   2,
+   0,
    42,
    1,
-   "CROP_DATA"
+   "IMAGE"
   ],
   [
    116,
    41,
    0,
    42,
-   3,
+   2,
    "MASK"
   ],
   [
    117,
+   21,
+   3,
+   42,
+   3,
+   "CROP_DATA"
+  ],
+  [
+   118,
    41,
    1,
    43,
@@ -5363,7 +5379,7 @@
    "*"
   ],
   [
-   118,
+   119,
    42,
    0,
    43,
@@ -5371,7 +5387,7 @@
    "*"
   ],
   [
-   119,
+   120,
    37,
    0,
    43,
@@ -5379,7 +5395,7 @@
    "*"
   ],
   [
-   120,
+   121,
    43,
    0,
    44,
@@ -5387,7 +5403,7 @@
    "IMAGE"
   ],
   [
-   121,
+   122,
    40,
    0,
    45,
@@ -5395,7 +5411,7 @@
    "IMAGE"
   ],
   [
-   122,
+   123,
    40,
    1,
    46,
@@ -5403,7 +5419,7 @@
    "IMAGE"
   ],
   [
-   123,
+   124,
    40,
    2,
    47,
@@ -5411,7 +5427,7 @@
    "IMAGE"
   ],
   [
-   124,
+   125,
    40,
    4,
    48,
@@ -5419,7 +5435,7 @@
    "IMAGE"
   ],
   [
-   125,
+   126,
    30,
    2,
    49,
@@ -5427,7 +5443,7 @@
    "IMAGE"
   ],
   [
-   126,
+   127,
    24,
    2,
    50,
@@ -5435,7 +5451,7 @@
    "IMAGE"
   ],
   [
-   127,
+   128,
    31,
    1,
    51,
@@ -5443,7 +5459,7 @@
    "*"
   ],
   [
-   128,
+   129,
    27,
    0,
    51,
@@ -5451,7 +5467,7 @@
    "*"
   ],
   [
-   129,
+   130,
    51,
    0,
    52,
@@ -5459,7 +5475,7 @@
    "IMAGE"
   ],
   [
-   130,
+   131,
    31,
    3,
    53,
@@ -5467,7 +5483,7 @@
    "*"
   ],
   [
-   131,
+   132,
    27,
    0,
    53,
@@ -5475,7 +5491,7 @@
    "*"
   ],
   [
-   132,
+   133,
    53,
    0,
    54,
@@ -5483,7 +5499,7 @@
    "IMAGE"
   ],
   [
-   133,
+   134,
    34,
    0,
    55,
@@ -5491,7 +5507,7 @@
    "*"
   ],
   [
-   134,
+   135,
    27,
    0,
    55,
@@ -5499,7 +5515,7 @@
    "*"
   ],
   [
-   135,
+   136,
    55,
    0,
    56,
@@ -5507,7 +5523,7 @@
    "IMAGE"
   ],
   [
-   136,
+   137,
    32,
    0,
    57,
@@ -5515,7 +5531,7 @@
    "*"
   ],
   [
-   137,
+   138,
    27,
    0,
    57,
@@ -5523,7 +5539,7 @@
    "*"
   ],
   [
-   138,
+   139,
    26,
    0,
    58,
@@ -5531,15 +5547,15 @@
    "IMAGEPOST_JOB"
   ],
   [
-   139,
+   140,
    21,
-   0,
+   1,
    58,
    1,
    "IMAGE"
   ],
   [
-   140,
+   141,
    37,
    0,
    58,
@@ -5547,7 +5563,7 @@
    "IMAGE"
   ],
   [
-   141,
+   142,
    34,
    0,
    58,
@@ -5555,7 +5571,7 @@
    "IMAGE"
   ],
   [
-   142,
+   143,
    34,
    1,
    58,
@@ -5563,7 +5579,7 @@
    "MASK"
   ],
   [
-   143,
+   144,
    57,
    0,
    58,
@@ -5571,7 +5587,7 @@
    "IMAGE"
   ],
   [
-   144,
+   145,
    37,
    1,
    58,
@@ -5579,7 +5595,7 @@
    "MASK"
   ],
   [
-   145,
+   146,
    19,
    0,
    60,
@@ -5587,7 +5603,7 @@
    "*"
   ],
   [
-   146,
+   147,
    1,
    3,
    60,
@@ -5595,7 +5611,7 @@
    "*"
   ],
   [
-   147,
+   148,
    4,
    2,
    61,
@@ -5603,7 +5619,7 @@
    "*"
   ],
   [
-   148,
+   149,
    4,
    0,
    61,
@@ -5611,7 +5627,7 @@
    "*"
   ],
   [
-   149,
+   150,
    43,
    0,
    61,
@@ -5619,7 +5635,7 @@
    "*"
   ],
   [
-   150,
+   151,
    60,
    0,
    62,
@@ -5627,7 +5643,7 @@
    "IMAGE"
   ],
   [
-   151,
+   152,
    74,
    0,
    62,
@@ -5635,7 +5651,7 @@
    "MASK"
   ],
   [
-   152,
+   153,
    61,
    0,
    62,
@@ -5643,7 +5659,7 @@
    "IMAGE"
   ],
   [
-   153,
+   154,
    19,
    3,
    62,
@@ -5651,7 +5667,7 @@
    "INT"
   ],
   [
-   154,
+   155,
    7,
    0,
    62,
@@ -5659,7 +5675,7 @@
    "STRING"
   ],
   [
-   155,
+   156,
    1,
    1,
    62,
@@ -5667,7 +5683,7 @@
    "FLOAT"
   ],
   [
-   156,
+   157,
    75,
    0,
    63,
@@ -5675,7 +5691,7 @@
    "IMAGE"
   ],
   [
-   157,
+   158,
    1,
    2,
    63,
@@ -5683,7 +5699,7 @@
    "AUDIO"
   ],
   [
-   158,
+   159,
    1,
    1,
    63,
@@ -5691,7 +5707,7 @@
    "FLOAT"
   ],
   [
-   159,
+   160,
    75,
    0,
    64,
@@ -5699,7 +5715,7 @@
    "IMAGE"
   ],
   [
-   160,
+   161,
    1,
    2,
    64,
@@ -5707,7 +5723,7 @@
    "AUDIO"
   ],
   [
-   161,
+   162,
    1,
    1,
    64,
@@ -5715,7 +5731,7 @@
    "*"
   ],
   [
-   162,
+   163,
    64,
    0,
    65,
@@ -5723,7 +5739,7 @@
    "VIDEO"
   ],
   [
-   163,
+   164,
    62,
    4,
    66,
@@ -5731,7 +5747,7 @@
    "IMAGE"
   ],
   [
-   164,
+   165,
    62,
    3,
    67,
@@ -5739,7 +5755,7 @@
    "*"
   ],
   [
-   165,
+   166,
    12,
    0,
    70,
@@ -5747,7 +5763,7 @@
    "IMAGE"
   ],
   [
-   166,
+   167,
    17,
    1,
    70,
@@ -5755,7 +5771,7 @@
    "MASK"
   ],
   [
-   167,
+   168,
    2,
    0,
    70,
@@ -5763,7 +5779,7 @@
    "IMAGE"
   ],
   [
-   168,
+   169,
    82,
    0,
    70,
@@ -5771,7 +5787,7 @@
    "MASK"
   ],
   [
-   169,
+   170,
    7,
    1,
    70,
@@ -5779,7 +5795,7 @@
    "STRING"
   ],
   [
-   170,
+   171,
    70,
    0,
    71,
@@ -5787,7 +5803,7 @@
    "IMAGE"
   ],
   [
-   171,
+   172,
    12,
    0,
    72,
@@ -5795,7 +5811,7 @@
    "*"
   ],
   [
-   172,
+   173,
    9,
    0,
    72,
@@ -5803,7 +5819,7 @@
    "*"
   ],
   [
-   173,
+   174,
    1,
    0,
    73,
@@ -5811,7 +5827,7 @@
    "*"
   ],
   [
-   174,
+   175,
    9,
    0,
    73,
@@ -5819,7 +5835,7 @@
    "*"
   ],
   [
-   175,
+   176,
    16,
    0,
    74,
@@ -5827,7 +5843,7 @@
    "*"
   ],
   [
-   176,
+   177,
    85,
    0,
    74,
@@ -5835,7 +5851,7 @@
    "*"
   ],
   [
-   177,
+   178,
    1,
    0,
    75,
@@ -5843,7 +5859,7 @@
    "IMAGE"
   ],
   [
-   178,
+   179,
    62,
    0,
    75,
@@ -5851,7 +5867,7 @@
    "IMAGE"
   ],
   [
-   179,
+   180,
    19,
    4,
    75,
@@ -5859,7 +5875,7 @@
    "STRING"
   ],
   [
-   180,
+   181,
    19,
    2,
    75,
@@ -5867,7 +5883,7 @@
    "INT"
   ],
   [
-   181,
+   182,
    12,
    0,
    76,
@@ -5875,7 +5891,7 @@
    "IMAGE"
   ],
   [
-   182,
+   183,
    17,
    1,
    76,
@@ -5883,7 +5899,7 @@
    "MASK"
   ],
   [
-   183,
+   184,
    76,
    0,
    77,
@@ -5891,7 +5907,7 @@
    "IMAGE"
   ],
   [
-   184,
+   185,
    60,
    0,
    78,
@@ -5899,7 +5915,7 @@
    "IMAGE"
   ],
   [
-   185,
+   186,
    74,
    0,
    78,
@@ -5907,7 +5923,7 @@
    "MASK"
   ],
   [
-   186,
+   187,
    78,
    0,
    79,
@@ -5915,7 +5931,7 @@
    "IMAGE"
   ],
   [
-   187,
+   188,
    1,
    1,
    79,
@@ -5923,7 +5939,7 @@
    "*"
   ],
   [
-   188,
+   189,
    79,
    0,
    80,
@@ -5931,7 +5947,7 @@
    "VIDEO"
   ],
   [
-   189,
+   190,
    10,
    0,
    81,
@@ -5939,7 +5955,7 @@
    "MODEL"
   ],
   [
-   190,
+   191,
    2,
    0,
    81,
@@ -5947,7 +5963,7 @@
    "IMAGE"
   ],
   [
-   191,
+   192,
    11,
    0,
    81,
@@ -5955,7 +5971,7 @@
    "CONDITIONING"
   ],
   [
-   192,
+   193,
    2,
    0,
    82,
@@ -5963,23 +5979,23 @@
    "IMAGE"
   ],
   [
-   193,
-   2,
-   1,
-   82,
-   1,
-   "MASK"
-  ],
-  [
    194,
-   81,
-   0,
-   82,
    2,
+   1,
+   82,
+   1,
    "MASK"
   ],
   [
    195,
+   81,
+   0,
+   82,
+   2,
+   "MASK"
+  ],
+  [
+   196,
    2,
    0,
    83,
@@ -5987,7 +6003,7 @@
    "IMAGE"
   ],
   [
-   196,
+   197,
    2,
    1,
    83,
@@ -5995,7 +6011,7 @@
    "MASK"
   ],
   [
-   197,
+   198,
    81,
    0,
    83,
@@ -6003,7 +6019,7 @@
    "MASK"
   ],
   [
-   198,
+   199,
    73,
    0,
    85,
@@ -6011,7 +6027,7 @@
    "*"
   ],
   [
-   199,
+   200,
    84,
    0,
    85,
@@ -6019,7 +6035,7 @@
    "*"
   ],
   [
-   200,
+   201,
    86,
    2,
    87,
@@ -6027,7 +6043,7 @@
    "*"
   ],
   [
-   201,
+   202,
    11,
    0,
    87,
@@ -6035,17 +6051,17 @@
    "*"
   ],
   [
-   202,
+   203,
    21,
-   1,
+   2,
    88,
    0,
    "MASK"
   ],
   [
-   203,
+   204,
    21,
-   2,
+   3,
    88,
    1,
    "CROP_DATA"

@@ -235,8 +235,8 @@ def definition_all():
             "input_image": L(20, 0), "image": "", "center_x": 0.0, "center_y": 0.0, "frame_width": 0, "frame_height": 0,
             "rotation": 0.0, "aspect_ratio": "free", "padding_color": "grey", "mask": L(17, 1)}, (960, 140)),
         88: ("ProductLabelFrameMask", "Straightened product mask (the frame's padding left out)", {
-            "mask": L(21, 1), "crop_data": L(21, 2)}, (960, 680)),
-        22: (RUN, "Auto Draft: only without a given job", {"value": L(21, 0), "when": L(5, 0), "run_when": "false"},
+            "mask": L(21, 2), "crop_data": L(21, 3)}, (960, 680)),
+        22: (RUN, "Auto Draft: only without a given job", {"value": L(21, 1), "when": L(5, 0), "run_when": "false"},
              (960, 700)),
         23: (SW, "Auto Draft's product mask (on, off)", {"when": L(8, 0), "if_true": L(88, 0)}, (960, 840)),
         24: ("ImagePostAutoDraft", "Auto Draft", {
@@ -248,41 +248,41 @@ def definition_all():
         26: (SW, "Job: the given one, else the draft", {"when": L(5, 0), "if_true": L(25, 0), "if_false": L(24, 0)},
              (960, 2000)),
         27: ("ProductLabelPrintType", "Print type (from the job)", {"job": job}, (960, 2140)),
-        28: ("ImagePostJobMasks", "Job Masks", {"job": job, "scene": L(21, 0), "product_mask": L(30, 1)}, (1500, 180)),
+        28: ("ImagePostJobMasks", "Job Masks", {"job": job, "scene": L(21, 1), "product_mask": L(30, 1)}, (1500, 180)),
         29: ("ImagePostFitWarp", "Fit Warp", {"job": job}, (1500, 0)),
-        30: ("ImagePostWarpReference", "Warp Reference", {"job": job, "homography": L(29, 0), "scene": L(21, 0),
+        30: ("ImagePostWarpReference", "Warp Reference", {"job": job, "homography": L(29, 0), "scene": L(21, 1),
                                                           "reference": L(2, 0), "reference_mask": L(83, 0)}, (1500, 400)),
         31: ("ImagePostGradeToScene", "Grade To Scene (paper graph)", {
-            "job": job, "scene": L(21, 0), "warped": L(30, 0), "product_mask": L(30, 1), "old_silhouette": L(28, 0),
+            "job": job, "scene": L(21, 1), "warped": L(30, 0), "product_mask": L(30, 1), "old_silhouette": L(28, 0),
             "occluder_mask": L(28, 1), "colour": "job", "shading": "job", "reference": L(2, 0), "coords": L(30, 3),
             "relight": "job"}, (1500, 700)),
         32: ("ImagePostMatchFinish", "Match Finish (paper graph)", {
-            "job": job, "scene": L(21, 0), "graded": L(31, 0), "product_mask": L(30, 1), "old_silhouette": L(28, 0),
+            "job": job, "scene": L(21, 1), "graded": L(31, 0), "product_mask": L(30, 1), "old_silhouette": L(28, 0),
             "occluder_mask": L(28, 1), "coords": L(30, 3)}, (1500, 1080)),
         33: (SW, "Old silhouette: the product mask (print on the body), else the job's", {
-            "when": light, "if_true": L(21, 1), "if_false": L(28, 0)}, (1980, 0)),
+            "when": light, "if_true": L(88, 0), "if_false": L(28, 0)}, (1980, 0)),
         34: ("ImagePostFillLeftovers", "Fill Leftovers", {
-            "job": job, "scene": L(21, 0), "product_mask": L(30, 1), "old_silhouette": L(33, 0),
+            "job": job, "scene": L(21, 1), "product_mask": L(30, 1), "old_silhouette": L(33, 0),
             "occluder_mask": L(28, 1), "coords": L(30, 3)}, (1980, 140)),
         35: (SW, "Product layer: the warped print (print on the body), else graded", {
             "when": light, "if_true": L(30, 0), "if_false": L(32, 0)}, (1980, 420)),
         36: (SW, "Ink: Fill Leftovers' (print on the body), else Grade To Scene's", {
             "when": light, "if_true": L(34, 3), "if_false": L(31, 4)}, (1980, 560)),
         37: ("ImagePostCompositeBehind", "Composite Behind", {
-            "job": job, "scene": L(21, 0), "background": L(34, 0), "product": L(35, 0), "product_mask": L(30, 1),
+            "job": job, "scene": L(21, 1), "background": L(34, 0), "product": L(35, 0), "product_mask": L(30, 1),
             "occluder_mask": L(28, 1), "ink": L(36, 0), "coords": L(30, 3)}, (1980, 700)),
         38: (SW, "Grade report (paper graph)", {"when": light, "if_false": L(31, 2)}, (1980, 1000)),
         39: (SW, "Finish report (paper graph)", {"when": light, "if_false": L(32, 1)}, (1980, 1140)),
         40: ("ImagePostQASheet", "QA Sheet (its text: report.json)", {
-            "job": job, "before": L(21, 0), "after": L(37, 0), "reference": L(2, 0), "matte": L(37, 1),
+            "job": job, "before": L(21, 1), "after": L(37, 0), "reference": L(2, 0), "matte": L(37, 1),
             "fill_mask": L(34, 1), "reference_mask": L(83, 0), "align_report": L(29, 1), "grade_report": L(38, 0),
             "finish_report": L(39, 0), "fill_report": L(34, 2), "old_silhouette": L(33, 0), "occluder_mask": L(28, 1),
             "coords": L(30, 3), "ink": L(34, 3)}, (2460, 0)),
         41: ("ProductLabelPasteBackMask", "Paste-back mask (straightened crops)", {
-            "before": L(21, 0), "after": L(37, 0), "crop_data": L(21, 2), "grow": 2}, (2460, 560)),
+            "before": L(21, 1), "after": L(37, 0), "crop_data": L(21, 3), "grow": 2}, (2460, 560)),
         42: ("ImageReframeComposite", "Straightened crop back into its frame", {
-            "frame_image": L(37, 0), "crop_data": L(21, 2), "paste": "crop onto original", "feather": 0,
-            "resize_source": True, "mask": L(41, 0)},
+            "frame_image": L(37, 0), "original_image": L(21, 0), "paste": "crop onto original", "feather": 0,
+            "resize_source": True, "mask": L(41, 0), "crop_data": L(21, 3)},
             (2460, 760)),
         43: (SW, "Refined frame: pasted back (straightened), else as it is", {
             "when": L(41, 1), "if_true": L(42, 0), "if_false": L(37, 0)}, (2460, 980)),
@@ -305,7 +305,7 @@ def definition_all():
         57: (RUN, "Product layer for the PSD: paper only", {"value": L(32, 0), "when": light, "run_when": "false"},
              (3900, 500)),
         58: ("ImagePostSavePSD", "Save PSD (paper)", {
-            "job": job, "scene": L(21, 0), "image": L(37, 0), "background": L(34, 0), "fill_mask": L(34, 1),
+            "job": job, "scene": L(21, 1), "image": L(37, 0), "background": L(34, 0), "fill_mask": L(34, 1),
             "product": L(57, 0), "matte": L(37, 1), "filename_prefix": "product-label-refinement/refined"}, (3900, 640)),
         # video: Refine (Video) through the clip from the keyframe (the stills branch's, or the given one)
         60: (RUN, "Video branch: only for a clip", {"value": L(19, 0), "when": L(1, 3), "run_when": "true"}, (960, 2300)),
@@ -432,9 +432,9 @@ FOREIGN = {
     "ImageReframe": ([("input_image", "IMAGE"), ("mask", "MASK")],
                      ["image", "upload", "center_x", "center_y", "frame_width", "frame_height", "rotation", "aspect_ratio",
                       "padding_color", "image_reframe_editor"],
-                     ("IMAGE", "MASK", "CROP_DATA"), ("image", "mask", "crop_data")),
-    "ImageReframeComposite": ([("frame_image", "IMAGE"), ("crop_data", "CROP_DATA"), ("original", "IMAGE"),
-                               ("mask", "MASK")], ["paste", "feather", "resize_source"], ("IMAGE",), ("image",)),
+                     ("IMAGE", "IMAGE", "MASK", "CROP_DATA"), ("original_image", "cropped_image", "mask", "crop_data")),
+    "ImageReframeComposite": ([("frame_image", "IMAGE"), ("original_image", "IMAGE"), ("mask", "MASK"),
+                               ("crop_data", "CROP_DATA")], ["paste", "feather", "resize_source"], ("IMAGE",), ("image",)),
     "PrimitiveStringMultiline": ([], ["value"], ("STRING",), ("STRING",)),
     "PrimitiveInt": ([], ["value", "control_after_generate"], ("INT",), ("INT",)),
     "PrimitiveBoolean": ([], ["value"], ("BOOLEAN",), ("BOOLEAN",)),
