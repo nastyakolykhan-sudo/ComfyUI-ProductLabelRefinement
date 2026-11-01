@@ -314,6 +314,182 @@ class ProductLabelShot:
         return (frames[s:e + 1], masks, s, k - s if k >= 0 else -1, json.dumps(shot))
 
 
+def _sam3_detect(model, images, conditioning, threshold=0.33):
+    """Core SAM3_Detect on a batch of frames (one union mask per frame), as the workflow's own detect node runs it."""
+    from comfy_extras.nodes_sam3 import SAM3_Detect
+    o = SAM3_Detect.execute(model=model, image=images, conditioning=conditioning, threshold=threshold,
+                            refine_iterations=2, individual_masks=False)
+    m = (getattr(o, "result", None) or getattr(o, "args", None) or o)[0]
+    return m[None] if m.dim() == 2 else m
+
+
+class ProductLabelFindKeyframe:
+    # candidates per shot: these fractions of the way through it
+    PROBES = (0.25, 0.5, 0.75)
+    MIN_AREA = 0.002                         # a detection smaller than this share of the frame isn't the product
+    TIE = 0.01                               # keypick scores this close to the best are a tie
+    CLOSE = 0.7                              # another shot scoring this share of the best one's: a warning
+    ALSO = 0.5                               # ... this share: reported as likely showing the product too (not fixed)
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+                    "frames": ("IMAGE", {"tooltip": "The whole clip (an image: its frame 0)"}),
+                    "keyframe_frame": ("INT", {"default": -1, "min": -1, "max": 1_000_000, "tooltip": (
+                        "The keyframe frame as set: 0 or more is kept; -1 is found (with a corrected keyframe, Refine "
+                        "finds its frame)")}),
+                    "keyframe_given": ("BOOLEAN", {"default": False, "tooltip": "A corrected keyframe is given"}),
+                    "mask_given": ("BOOLEAN", {"default": False, "tooltip": "A product mask video is given"})},
+                "optional": {
+                    "masks": ("MASK", {"lazy": True, "tooltip": "The given mask video (one per frame of the clip)"}),
+                    "model": ("MODEL", {"lazy": True, "tooltip": "SAM 3"}),
+                    "conditioning": ("CONDITIONING", {"lazy": True, "tooltip": "SAM 3's text prompt"}),
+                    "reference": ("IMAGE", {"lazy": True, "tooltip": "The packshot"}),
+                    "reference_mask": ("MASK", {"lazy": True, "tooltip": "The packshot's outline (Load Image's "
+                                                                         "convention: 1 = transparent)"})}}
+
+    RETURN_TYPES = ("INT", "STRING")
+    RETURN_NAMES = ("keyframe_frame", "report")
+    FUNCTION = "find"
+    CATEGORY = CATEGORY
+    DESCRIPTION = (
+        "The keyframe frame: as set (0 or more), or found (-1). Found: the clip's shots (between hard cuts); in each, "
+        "SAM 3 on three frames; the shot whose product matches the packshot best (silhouette, print layout, colour, "
+        "size on screen); in that shot, SAM 3's track and the frame where the product shows largest, sharpest and "
+        "most frontal, off morph frames and the shot's ends (the engine's keypick). With a corrected keyframe, -1 "
+        "passes on (Refine finds its frame); an image is frame 0. report: JSON with every shot's score, the pick and "
+        "its runner-up; a margin under 5 % or a weak match is flagged.")
+
+    def _auto(self, frames, keyframe_frame, keyframe_given):
+        return keyframe_frame < 0 and not keyframe_given and frames.shape[0] > 1
+
+    def check_lazy_status(self, frames, keyframe_frame, keyframe_given, mask_given, masks=_UNSET, model=_UNSET,
+                          conditioning=_UNSET, reference=_UNSET, reference_mask=_UNSET):
+        if not self._auto(frames, keyframe_frame, keyframe_given):
+            return []
+        need = ["reference", "reference_mask"] + (["masks"] if mask_given else ["model", "conditioning"])
+        got = {"masks": masks, "model": model, "conditioning": conditioning, "reference": reference,
+               "reference_mask": reference_mask}
+        return [k for k in need if got[k] is None]
+
+    def find(self, frames, keyframe_frame, keyframe_given, mask_given, masks=None, model=None, conditioning=None,
+             reference=None, reference_mask=None):
+        if not self._auto(frames, keyframe_frame, keyframe_given):
+            k = int(keyframe_frame) if frames.shape[0] > 1 or keyframe_frame < 0 else 0
+            why = ("set" if keyframe_frame >= 0 else "the corrected keyframe's (Refine finds it)") \
+                if frames.shape[0] > 1 else "an image"
+            rep = json.dumps({"keyframe_frame": k, "from": why})
+            return {"ui": {"text": [rep]}, "result": (k, rep)}
+        import numpy as np
+        from .video_nodes import _engine, _u8
+        _engine()
+        from imgauto import keypick, refangle, shots as ash
+        T = int(frames.shape[0])
+        cuts = find_cuts(frames)
+        bounds = list(zip([0] + cuts, [c - 1 for c in cuts] + [T - 1]))
+        ref = _u8(reference[:1])[0]
+        rm = reference_mask[None] if reference_mask.dim() == 2 else reference_mask
+        Rm = rm[0].detach().cpu().numpy() < 0.5 if rm.shape[1:3] == reference.shape[1:3] and bool((rm > 0.5).any()) \
+            else _reference_matte(ref, None)
+        if masks is not None:
+            masks = masks[None] if masks.dim() == 2 else masks
+        probes = sorted({min(e, max(s, round(s + (e - s) * q))) for s, e in bounds for q in self.PROBES})
+        idx = torch.tensor(probes)
+        pm = masks[idx] if mask_given else _sam3_detect(model, frames[idx], conditioning)
+        shots_rep = []
+        for s, e in bounds:
+            cands = []
+            for j, t in enumerate(probes):
+                if not s <= t <= e:
+                    continue
+                M = pm[j].detach().cpu().numpy() > 0.5
+                fr = _u8(frames[t:t + 1])[0]
+                cands.append(dict(t=t, **_match_packshot(fr, M, ref, Rm, refangle, self.MIN_AREA)))
+            best = max(cands, key=lambda c: c["score"])
+            shots_rep.append({"shot": [s, e], "score": best["score"], "best": best["t"], "probes": cands})
+        ranked = sorted(shots_rep, key=lambda r: -r["score"])
+        top = ranked[0]
+        if top["score"] <= 0:
+            raise ValueError("no shot shows the product (SAM 3 found nothing like the packshot on any shot's probes): "
+                             "check the SAM 3 prompt, or set the keyframe frame")
+        s, e = top["shot"]
+        # the shot's masks: the given ones, else SAM 3 tracked through it from its best probe
+        if mask_given:
+            sm = masks[s:e + 1]
+        else:
+            from .video_nodes import ProductLabelVideoSAM3BothWays
+            kt = top["best"] - s
+            km = _sam3_detect(model, frames[top["best"]:top["best"] + 1], conditioning)
+            sm = ProductLabelVideoSAM3BothWays().track(frames[s:e + 1], model, km, kt, conditioning=conditioning,
+                                                       detection_threshold=0.33, max_objects=1, detect_interval=1)[0]
+        F = _u8(frames[s:e + 1])
+        M = sm.detach().cpu().numpy() > 0.5
+        n = e - s + 1
+        F2, M2 = ash.downscale(F, 2), ash.downscale(M, 2)
+        stats, bnds, _sh, _kinds, _why = ash.analyse(F2, M2)
+        # the shot's ends are cuts (penalised as edges) unless they are the clip's own first or last frame
+        ranking = keypick.score(stats, bnds, range(n), open_ends=[t for t, c in ((0, s == 0), (n - 1, e == T - 1)) if c])
+        top_s = ranking[0]["score"]
+        # frames keypick can't tell apart (within TIE of the best): the one nearest the shot's middle, so the label's
+        # track runs the shortest way to either end (the track's error grows with the distance from the keyframe)
+        near = [r for r in ranking if r["score"] >= (1.0 - self.TIE) * top_s]
+        best = min(near, key=lambda r: (abs(r["t"] - (n - 1) / 2), -r["score"]))
+        k = s + int(best["t"])
+        warn = []
+        if best["flags"]:
+            warn.append(f"the pick is flagged {', '.join(best['flags'])} (keypick): check the keyframe frame")
+        close = [r for r in ranked[1:] if r["score"] >= self.CLOSE * top["score"]]
+        for r in close:
+            warn.append(f"shot {r['shot'][0]}-{r['shot'][1]} matches the packshot nearly as well ({r['score']:.3f} vs "
+                        f"{top['score']:.3f}): if it shows another product of the same kind, name what tells this one "
+                        "apart in the SAM 3 prompt (its colour) or set the keyframe frame; if it shows this product "
+                        "too, run again with the keyframe frame set there")
+        also = [r["shot"] for r in ranked[1:] if r["score"] >= self.ALSO * top["score"]]
+        rep = {"keyframe_frame": k, "from": "found", "shot": [s, e], "also_likely": also,
+               "pick": {**best, "t": k, "best_scored": s + int(ranking[0]["t"]),
+                        "tied": [s + int(r["t"]) for r in sorted(near, key=lambda r: r["t"])]},
+               "shots": shots_rep, "warnings": warn}
+        text = json.dumps(rep, default=float)
+        print(f"keyframe   frame {k} (shot {s}-{e}, score {top['score']:.2f}; " +
+              ", ".join(f"{r['shot'][0]}-{r['shot'][1]} {r['score']:.2f}" for r in shots_rep) + ")" +
+              "".join(f"\nkeyframe   WARN {w}" for w in warn))
+        return {"ui": {"text": [text]}, "result": (k, text)}
+
+
+def _ab_hist(rgb, m, bins=16, reach=48.0):
+    """The colours of the masked pixels as a smoothed CIELAB a*b* histogram (lightness left out: the scene's light
+    and the packshot's differ; the darkest and brightest pixels too: print and highlights carry no hue)."""
+    import numpy as np
+    from scipy import ndimage as ndi
+    x = rgb[m].astype(np.float64) / 255.0
+    x = np.where(x > 0.04045, ((x + 0.055) / 1.055) ** 2.4, x / 12.92)
+    xyz = x @ np.array([[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]]).T
+    f = xyz / np.array([0.9505, 1.0, 1.089])
+    f = np.where(f > 0.008856, np.cbrt(f), 7.787 * f + 16 / 116)
+    L, a, b = 116 * f[:, 1] - 16, 500 * (f[:, 0] - f[:, 1]), 200 * (f[:, 1] - f[:, 2])
+    k = (L > 15) & (L < 97)
+    h, _, _ = np.histogram2d(a[k], b[k], bins=bins, range=[[-reach, reach], [-reach, reach]])
+    h = ndi.gaussian_filter(h, 1.0)
+    return h / max(h.sum(), 1e-9)
+
+
+def _match_packshot(frame, M, ref, Rm, refangle, min_area, max_area=0.6):
+    """How well SAM 3's product on a frame matches the packshot's: -> {"area", "shape", "colour", "score"}.
+    shape: the silhouettes' overlap after their centroid, axis and length are matched (refangle); colour: the
+    Bhattacharyya overlap of the two products' a*b* colour histograms; score: shape x colour x the square root of the
+    product's share of the frame (bigger on screen is better to fix from). The print's layout isn't scored: seen from
+    above or with the generator's own print, it reads low on the right product. A detection over max_area of the
+    frame is the scene, not a product."""
+    import numpy as np
+    area = float(M.mean())
+    if not min_area <= area <= max_area:
+        return {"area": round(area, 4), "shape": 0.0, "colour": 0.0, "score": 0.0}
+    iou = refangle.shape_iou(Rm, M)
+    col = float(np.sqrt(_ab_hist(frame, M) * _ab_hist(ref, Rm)).sum())
+    score = iou * col * np.sqrt(area)
+    return {"area": round(area, 4), "shape": round(float(iou), 3), "colour": round(col, 3), "score": round(float(score), 4)}
+
+
 class ProductLabelSplice:
     @classmethod
     def INPUT_TYPES(cls):
@@ -372,24 +548,31 @@ class ProductLabelMaskOverlay:
 
 
 class ProductLabelPackshotMatte:
-    USES = ["alpha, else SAM 3", "alpha only (else the engine traces the packshot's background)"]
+    USES = ["auto: alpha, else the backdrop's trace where SAM 3 agrees, else SAM 3", "alpha, else SAM 3"]
+    # the backdrop's trace and SAM 3's mask overlap this much or more: the trace is kept (exact to the pixel on a plain
+    # backdrop); less, and the trace has taken in something round the product (a drop shadow, a reflection)
+    AGREE = 0.98
 
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {"reference": ("IMAGE",),
                              "mask": ("MASK", {"tooltip": "The packshot Load Image's MASK (1 = transparent)"}),
                              "use": (cls.USES, {"tooltip": (
-                                 "A packshot without alpha (a product on a white or black backdrop): its outline from "
-                                 "SAM 3 (needs on white-on-white), or left to the engine's own tracing of the backdrop")})},
+                                 "A packshot without alpha (a product on a white or black backdrop). auto: the engine's "
+                                 "own trace of the backdrop where SAM 3's outline agrees with it, else SAM 3's (the trace "
+                                 "took in a drop shadow or a reflection). alpha, else SAM 3: always SAM 3's outline "
+                                 "(Label Triage's sheet)")})},
                 "optional": {"sam_mask": ("MASK", {"lazy": True, "tooltip": "SAM 3 on the packshot (1 = product)"})}}
 
     RETURN_TYPES = ("MASK", "STRING")
     RETURN_NAMES = ("mask", "source")
     FUNCTION = "matte"
     CATEGORY = CATEGORY
-    DESCRIPTION = ("The packshot's outline as Load Image's MASK (1 = transparent): its alpha when it has one; else, with "
-                   "'alpha, else SAM 3', SAM 3's mask of it (computed only then); else Load Image's mask as it is, so "
-                   "the engine traces the backdrop. source: alpha, sam3 or none.")
+    DESCRIPTION = ("The packshot's outline as Load Image's MASK (1 = transparent): its alpha when it has one. Else, with "
+                   "auto, the engine's own trace of the backdrop (Load Image's mask passed on as it is) where SAM 3's "
+                   "mask of the packshot overlaps it by 98 % or more, and SAM 3's mask where it doesn't: the trace has "
+                   "then taken in a drop shadow or a reflection round the product. With 'alpha, else SAM 3', SAM 3's "
+                   "mask. source: alpha, sam3 or none (the trace), and for auto why.")
 
     @staticmethod
     def _alpha(reference, mask):
@@ -397,17 +580,40 @@ class ProductLabelPackshotMatte:
         return m.shape[1:3] == reference.shape[1:3] and bool((m > 0.5).any())
 
     def check_lazy_status(self, reference, mask, use, sam_mask=_UNSET):
-        need = not self._alpha(reference, mask) and use == self.USES[0]
+        need = not self._alpha(reference, mask)
         return ["sam_mask"] if need and sam_mask is None else []
 
     def matte(self, reference, mask, use, sam_mask=None):
         if self._alpha(reference, mask):
-            return (mask, "alpha")
-        if use == self.USES[0] and sam_mask is not None:
+            return {"ui": {"text": ["alpha"]}, "result": (mask, "alpha")}
+        s = None
+        if sam_mask is not None:
             s = sam_mask[None] if sam_mask.dim() == 2 else sam_mask
-            if bool((s[:1] > 0.5).any()):
-                return (1.0 - (s[:1] > 0.5).float(), "sam3")
-        return (mask, "none")
+            s = (s[:1] > 0.5) if s.shape[1:3] == reference.shape[1:3] and bool((s[:1] > 0.5).any()) else None
+        src = self._decide(reference, s) if use == self.USES[0] else "sam3" if s is not None else "none"
+        out = (1.0 - s.float(), src) if src.startswith("sam3") else (mask, src)
+        return {"ui": {"text": [src]}, "result": out}
+
+    def _decide(self, reference, s):
+        """auto: the engine's trace (as Auto Draft draws it from a packshot on a plain backdrop) against SAM 3's."""
+        from .nodes import _u8
+        from .imgpost import autofit as af, raster
+        import numpy as np
+        ref = _u8(reference[:1], "reference")
+        if not af.on_plain_background(ref):
+            return "sam3 (the packshot isn't on a plain backdrop)" if s is not None else \
+                "none (WARN: no plain backdrop and no SAM 3 outline: the engine takes the whole image as the outline)"
+        if s is None:
+            return "none (SAM 3 found nothing on the packshot: the backdrop's trace)"
+        P = np.asarray(af.trace_outline(af.reference_mask(ref, None)), float)
+        tr = raster.fill_polygon(ref.shape[0], ref.shape[1], [tuple(q) for q in P]) > 0
+        sm = s[0].detach().cpu().numpy()
+        iou = float((tr & sm).sum() / max((tr | sm).sum(), 1))
+        extra, miss = int((tr & ~sm).sum()), int((sm & ~tr).sum())
+        if iou >= self.AGREE:
+            return f"none (the backdrop's trace: SAM 3 agrees, IoU {iou:.3f})"
+        return (f"sam3 (the backdrop's trace and SAM 3 overlap {iou:.3f}: the trace takes in {extra} px SAM 3 leaves "
+                f"out, a drop shadow or a reflection, and misses {miss} px)")
 
 
 class ProductLabelSAM3Points:
@@ -616,6 +822,7 @@ NODE_CLASS_MAPPINGS = {
     "ProductLabelPrintType": ProductLabelPrintType,
     "ProductLabelPickFrame": ProductLabelPickFrame,
     "ProductLabelShot": ProductLabelShot,
+    "ProductLabelFindKeyframe": ProductLabelFindKeyframe,
     "ProductLabelSplice": ProductLabelSplice,
     "ProductLabelMaskOverlay": ProductLabelMaskOverlay,
     "ProductLabelPackshotMatte": ProductLabelPackshotMatte,
@@ -633,6 +840,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ProductLabelPrintType": "Product Label: Print Type",
     "ProductLabelPickFrame": "Product Label: Pick Frame",
     "ProductLabelShot": "Product Label: Shot (between cuts)",
+    "ProductLabelFindKeyframe": "Product Label: Find Keyframe Frame",
     "ProductLabelSplice": "Product Label: Splice Shot Back",
     "ProductLabelMaskOverlay": "Product Label: Mask Overlay",
     "ProductLabelPackshotMatte": "Product Label: Packshot Matte",

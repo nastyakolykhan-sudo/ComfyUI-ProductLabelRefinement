@@ -1,12 +1,13 @@
 {
   "skill": "~/Documents/Claude/product-label-refinement",
-  "imgpost_version": "0.13.1",
-  "synced": "2026-10-25",
+  "imgpost_version": "0.14.0",
+  "synced": "2026-10-31",
   "files": {
-    "__init__.py": "b1540af17c11dd7637dc18681df39b2f3eb05f6c553cb5df63ca44c46877aae8",
+    "__init__.py": "7f6c9f35faa69ed554f40c4f78ad850f8dc6a017b6bf85d0471654e0ca6e205c",
     "audit.py": "2e761de246eca7f7b455718d81d4f0a3320e9db24c42fb3048def93e1440a4f8",
     "autofit.py": "92c60d7045eee4be40853a4c35777e739b814044585b7ca343b724c0fdf168e9",
     "bow.py": "56f709307bfe94bf9c96f6e30068586d6f33898202f753a81528b6fe1404b456",
+    "decide.py": "14075495ed69c92847b5053fbfba9b4cf56a9036545b88461e51f0163cf82fb1",
     "draft.py": "b360d429a2736d7b2989654b1b6af83b4ea68e79ad10b3fdc441a5b6f0c67b4e",
     "fill.py": "4267aca68ce18703a25e1bbdd32670de80bcafd5701b2cd7577f46c93722a4af",
     "finish.py": "ddf6fecf4a3246bf1d931fdcb24ae95a8067230523e72a3ac5ba6399848101f0",
@@ -21,15 +22,15 @@
     "raster.py": "f9dc02da8f3121a741ce1ae906e1f0cea5c65b41c1b963edf032da9742816fd4",
     "warp.py": "b7a19675703d2464867e8c6b7dbd6cb5b3cbbde062aac71403418efec9d6a45e"
   },
-  "run_py": "a0c00400b57cc004329b2b0d98f360c977f9b07e9b9243b97ed02e9d0edfeb0b",
+  "run_py": "4e830d0b4aa8984c51ab0bd687f768a3ee27fb1c81ec931e756a8569f93fd689",
   "video_engine": {
-    "synced": "2026-10-30",
-    "imgpost_version": "0.13.1",
+    "synced": "2026-10-31",
+    "imgpost_version": "0.14.0",
     "packages": {
       "imgvideo": {
-        "version": "0.12.0",
+        "version": "0.13.0",
         "files": {
-          "__init__.py": "29109f72cc6e3800aaa360a1aa1e18823a5ee76472a7ee31aaa577999b487fd6",
+          "__init__.py": "a76a7f08e6bbf333a63d7a8085903376bffc92a663382f826d045c6b3fee5eb9",
           "alltracker/LICENSE": "ab740abe5c34e17963fe4d6a1f68a3dcd35bbc05dc520cf08d7a062c0ea13c79",
           "alltracker/__init__.py": "5354c3910da4daa2fe420fb845e2a19204af24d780b57853039c76bbd7be4deb",
           "alltracker/alltracker.py": "417a8d7251cd1e5a38df6787b47508fcd971aaa43ced6f46cfb841b25fe4dee1",
@@ -43,7 +44,7 @@
           "lookchecks.py": "376d05ef9c687d188b9cf4c011bccdb9b1eaa8077435b60031b48538fd77f8e9",
           "optics.py": "ef19545ae8d457937a1861811fa7f36116dc20d42351348e59ca490852ed3f4f",
           "orbit.py": "b6409bccb2744fd756c644beb7487b11dd6131c1d9e68d5575b54935fb5a6e13",
-          "pipeline.py": "9eba38e87cac6febc63df63fb45da40bc1ffd4286ce24adf25dc250e7ceed907",
+          "pipeline.py": "06569c6ff132aaf4534afe83850b80ff900f19349d89627ce2768afabd22bd32",
           "printalpha.py": "07c5d59dc73cd8fcc6a17a65c77dcef607b2be58bda50e2439d443c12b5861f4",
           "qa.py": "e4425d80628f159806af3964b020ab2b0073dd877041791c3c347c5bc3a6015a",
           "render.py": "a070080ddd9af0e495f582b39da65ef9ce109ac26090354ff7cb4f9e67811def",
@@ -55,9 +56,9 @@
         }
       },
       "imgauto": {
-        "version": "0.4.4",
+        "version": "0.4.5",
         "files": {
-          "__init__.py": "658ad3c08812143247b31a78bfc21f68fd26b8947f06c093954b6df58a826289",
+          "__init__.py": "ab5b4524828e004fd4d512b295d40771e0f5a97608579cffc7504ca4248af6c6",
           "composite.py": "b4af068edb01efbbf7868962618ee38f7b11d204d5248491ed56463f6c08ab84",
           "coverage.py": "ca21a60cff9575896afb173ac4661279c278d1293fbc70a692c1c9331f5fb60f",
           "cropbox.py": "ce284dc13d5583808d3514e177c37f8ab1d1232a7a1019ab2e960e7754594b5a",
@@ -69,7 +70,7 @@
           "shadow.py": "85aea70344a609f2b492779079b620c4bbc00c608fa6768f3e1df6383b4edcbc",
           "shots.py": "1c62136c2dd0c64f735085817413043cb77c7b17bde1446bfafa18468ebcba99",
           "triage.py": "2a10846a04506358d20f59fb72a8dad15e6a04af30d5bee0c39cff413af977d9",
-          "verify.py": "8a05dbef0ed7af34d2606a7664cc38f5261bfc137b622ca6eff12bc5cd38f829",
+          "verify.py": "87b11ee47ffaa81da3871f7a4aaffd086008d463c62269b6bbf08a696a4a4e29",
           "vjobs.py": "540ce4cd81ef565714338de69a5b9a6ec28b8d3b870bb93f0395ad78c01db40b"
         }
       }

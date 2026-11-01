@@ -39,4 +39,4 @@ an optional prior. Tall products' sheets are unchanged, byte for byte.
 0.4.4: media.read_small sends imgvideo 0.10.1's vio.passthrough() (-fps_mode passthrough from ffmpeg 5.1, -vsync 0
 below; ffmpeg 9 removed -vsync) where it sent -vsync 0. Output unchanged.
 """
-__version__ = "0.4.4"
+__version__ = "0.4.5"
