@@ -2,7 +2,7 @@
  "id": "0dc5c267-8982-5325-ba1f-da25c82e8753",
  "revision": 0,
  "last_node_id": 90,
- "last_link_id": 204,
+ "last_link_id": 213,
  "nodes": [
   {
    "id": 1,
@@ -26,7 +26,8 @@
      "links": [
       2,
       174,
-      178
+      178,
+      205
      ],
      "slot_index": 0
     },
@@ -71,7 +72,7 @@
     "Node name for S&R": "ProductLabelLoadSource"
    },
    "widgets_values": [
-    "inkdemo_frame.png",
+    "example.png",
     "image"
    ]
   },
@@ -102,7 +103,8 @@
       168,
       191,
       193,
-      196
+      196,
+      209
      ],
      "slot_index": 0
     },
@@ -121,7 +123,7 @@
     "Node name for S&R": "LoadImage"
    },
    "widgets_values": [
-    "inkdemo_packshot.png",
+    "example.png",
     "image"
    ]
   },
@@ -152,7 +154,8 @@
      "type": "MASK",
      "links": [
       23,
-      26
+      26,
+      206
      ],
      "slot_index": 1
     },
@@ -161,7 +164,8 @@
      "type": "BOOLEAN",
      "links": [
       17,
-      22
+      22,
+      213
      ],
      "slot_index": 2
     }
@@ -210,7 +214,8 @@
      "type": "BOOLEAN",
      "links": [
       29,
-      148
+      148,
+      212
      ],
      "slot_index": 2
     }
@@ -279,19 +284,17 @@
      "name": "INT",
      "type": "INT",
      "links": [
-      3,
-      21,
-      27
+      211
      ],
      "slot_index": 0
     }
    ],
-   "title": "Keyframe frame (clips; -1 = find the given keyframe's frame)",
+   "title": "Keyframe frame (clips; -1 = found: the best frame of the product's best shot)",
    "properties": {
     "Node name for S&R": "PrimitiveInt"
    },
    "widgets_values": [
-    0,
+    -1,
     "fixed"
    ]
   },
@@ -409,7 +412,7 @@
    "type": "CheckpointLoaderSimple",
    "pos": [
     620,
-    270
+    620
    ],
    "size": [
     400,
@@ -426,7 +429,8 @@
      "links": [
       4,
       10,
-      190
+      190,
+      207
      ],
      "slot_index": 0
     },
@@ -458,7 +462,7 @@
    "type": "CLIPTextEncode",
    "pos": [
     620,
-    460
+    810
    ],
    "size": [
     400,
@@ -480,7 +484,8 @@
      "type": "CONDITIONING",
      "links": [
       192,
-      202
+      202,
+      208
      ],
      "slot_index": 0
     }
@@ -490,7 +495,7 @@
     "Node name for S&R": "CLIPTextEncode"
    },
    "widgets_values": [
-    "bottle"
+    "product"
    ]
   },
   {
@@ -498,14 +503,14 @@
    "type": "ProductLabelPickFrame",
    "pos": [
     620,
-    1070
+    1420
    ],
    "size": [
     380,
     120
    ],
    "flags": {},
-   "order": 11,
+   "order": 14,
    "mode": 0,
    "inputs": [
     {
@@ -565,14 +570,14 @@
    "type": "SAM3_Detect",
    "pos": [
     620,
-    1260
+    1610
    ],
    "size": [
     400,
     240
    ],
    "flags": {},
-   "order": 14,
+   "order": 17,
    "mode": 0,
    "inputs": [
     {
@@ -639,14 +644,14 @@
    "type": "ProductLabelVideoSAM3BothWays",
    "pos": [
     620,
-    1930
+    2280
    ],
    "size": [
     400,
     260
    ],
    "flags": {},
-   "order": 19,
+   "order": 22,
    "mode": 0,
    "inputs": [
     {
@@ -704,14 +709,14 @@
    "type": "ProductLabelSwitch",
    "pos": [
     620,
-    2260
+    2610
    ],
    "size": [
     380,
     100
    ],
    "flags": {},
-   "order": 20,
+   "order": 23,
    "mode": 0,
    "inputs": [
     {
@@ -751,14 +756,14 @@
    "type": "ProductLabelSwitch",
    "pos": [
     620,
-    2430
+    2780
    ],
    "size": [
     380,
     100
    ],
    "flags": {},
-   "order": 21,
+   "order": 24,
    "mode": 0,
    "inputs": [
     {
@@ -798,14 +803,14 @@
    "type": "ProductLabelPickFrame",
    "pos": [
     620,
-    1740
+    2090
    ],
    "size": [
     380,
     120
    ],
    "flags": {},
-   "order": 23,
+   "order": 26,
    "mode": 0,
    "inputs": [
     {
@@ -864,14 +869,14 @@
    "type": "ProductLabelSwitch",
    "pos": [
     620,
-    1570
+    1920
    ],
    "size": [
     380,
     100
    ],
    "flags": {},
-   "order": 22,
+   "order": 25,
    "mode": 0,
    "inputs": [
     {
@@ -911,14 +916,14 @@
    "type": "ProductLabelShot",
    "pos": [
     620,
-    0
+    350
    ],
    "size": [
     400,
     200
    ],
    "flags": {},
-   "order": 18,
+   "order": 21,
    "mode": 0,
    "inputs": [
     {
@@ -1006,7 +1011,7 @@
     100
    ],
    "flags": {},
-   "order": 25,
+   "order": 28,
    "mode": 0,
    "inputs": [
     {
@@ -1050,7 +1055,7 @@
     720
    ],
    "flags": {},
-   "order": 26,
+   "order": 29,
    "mode": 0,
    "inputs": [
     {
@@ -1138,7 +1143,7 @@
     100
    ],
    "flags": {},
-   "order": 27,
+   "order": 30,
    "mode": 0,
    "inputs": [
     {
@@ -1182,7 +1187,7 @@
     100
    ],
    "flags": {},
-   "order": 29,
+   "order": 32,
    "mode": 0,
    "inputs": [
     {
@@ -1229,7 +1234,7 @@
     760
    ],
    "flags": {},
-   "order": 32,
+   "order": 34,
    "mode": 0,
    "inputs": [
     {
@@ -1283,13 +1288,13 @@
      "slot_index": 3
     }
    ],
-   "title": "Auto Draft",
+   "title": "Auto Draft (model, ink, print box, bow: auto = decided from its inputs)",
    "properties": {
     "Node name for S&R": "ImagePostAutoDraft"
    },
    "widgets_values": [
     "",
-    "affine",
+    "auto",
     "off",
     false,
     "product-label-refinement/draft",
@@ -1298,9 +1303,9 @@
     "",
     "",
     "off",
-    "light",
-    "176,396,432,924",
-    "-140 130/matte"
+    "auto",
+    "auto",
+    "auto"
    ]
   },
   {
@@ -1315,7 +1320,7 @@
     560
    ],
    "flags": {},
-   "order": 33,
+   "order": 35,
    "mode": 0,
    "inputs": [
     {
@@ -1358,7 +1363,7 @@
     100
    ],
    "flags": {},
-   "order": 34,
+   "order": 36,
    "mode": 0,
    "inputs": [
     {
@@ -1414,7 +1419,7 @@
     80
    ],
    "flags": {},
-   "order": 35,
+   "order": 37,
    "mode": 0,
    "inputs": [
     {
@@ -1465,7 +1470,7 @@
     220
    ],
    "flags": {},
-   "order": 38,
+   "order": 40,
    "mode": 0,
    "inputs": [
     {
@@ -1526,7 +1531,7 @@
     140
    ],
    "flags": {},
-   "order": 36,
+   "order": 38,
    "mode": 0,
    "inputs": [
     {
@@ -1571,7 +1576,7 @@
     220
    ],
    "flags": {},
-   "order": 37,
+   "order": 39,
    "mode": 0,
    "inputs": [
     {
@@ -1661,7 +1666,7 @@
     220
    ],
    "flags": {},
-   "order": 39,
+   "order": 41,
    "mode": 0,
    "inputs": [
     {
@@ -1769,7 +1774,7 @@
     220
    ],
    "flags": {},
-   "order": 40,
+   "order": 42,
    "mode": 0,
    "inputs": [
     {
@@ -1845,7 +1850,7 @@
     100
    ],
    "flags": {},
-   "order": 41,
+   "order": 43,
    "mode": 0,
    "inputs": [
     {
@@ -1893,7 +1898,7 @@
     220
    ],
    "flags": {},
-   "order": 42,
+   "order": 44,
    "mode": 0,
    "inputs": [
     {
@@ -1983,7 +1988,7 @@
     100
    ],
    "flags": {},
-   "order": 43,
+   "order": 45,
    "mode": 0,
    "inputs": [
     {
@@ -2030,7 +2035,7 @@
     100
    ],
    "flags": {},
-   "order": 44,
+   "order": 46,
    "mode": 0,
    "inputs": [
     {
@@ -2077,7 +2082,7 @@
     220
    ],
    "flags": {},
-   "order": 45,
+   "order": 47,
    "mode": 0,
    "inputs": [
     {
@@ -2162,7 +2167,7 @@
     100
    ],
    "flags": {},
-   "order": 46,
+   "order": 48,
    "mode": 0,
    "inputs": [
     {
@@ -2209,7 +2214,7 @@
     100
    ],
    "flags": {},
-   "order": 47,
+   "order": 49,
    "mode": 0,
    "inputs": [
     {
@@ -2256,7 +2261,7 @@
     520
    ],
    "flags": {},
-   "order": 48,
+   "order": 50,
    "mode": 0,
    "inputs": [
     {
@@ -2393,7 +2398,7 @@
     220
    ],
    "flags": {},
-   "order": 49,
+   "order": 51,
    "mode": 0,
    "inputs": [
     {
@@ -2450,7 +2455,7 @@
     220
    ],
    "flags": {},
-   "order": 50,
+   "order": 52,
    "mode": 0,
    "inputs": [
     {
@@ -2506,7 +2511,7 @@
     100
    ],
    "flags": {},
-   "order": 51,
+   "order": 53,
    "mode": 0,
    "inputs": [
     {
@@ -2554,7 +2559,7 @@
     330
    ],
    "flags": {},
-   "order": 52,
+   "order": 54,
    "mode": 0,
    "inputs": [
     {
@@ -2584,7 +2589,7 @@
     330
    ],
    "flags": {},
-   "order": 53,
+   "order": 55,
    "mode": 0,
    "inputs": [
     {
@@ -2614,7 +2619,7 @@
     330
    ],
    "flags": {},
-   "order": 54,
+   "order": 56,
    "mode": 0,
    "inputs": [
     {
@@ -2644,7 +2649,7 @@
     330
    ],
    "flags": {},
-   "order": 55,
+   "order": 57,
    "mode": 0,
    "inputs": [
     {
@@ -2674,7 +2679,7 @@
     330
    ],
    "flags": {},
-   "order": 56,
+   "order": 58,
    "mode": 0,
    "inputs": [
     {
@@ -2704,7 +2709,7 @@
     330
    ],
    "flags": {},
-   "order": 57,
+   "order": 59,
    "mode": 0,
    "inputs": [
     {
@@ -2734,7 +2739,7 @@
     330
    ],
    "flags": {},
-   "order": 58,
+   "order": 60,
    "mode": 0,
    "inputs": [
     {
@@ -2764,7 +2769,7 @@
     100
    ],
    "flags": {},
-   "order": 59,
+   "order": 61,
    "mode": 0,
    "inputs": [
     {
@@ -2808,7 +2813,7 @@
     330
    ],
    "flags": {},
-   "order": 60,
+   "order": 62,
    "mode": 0,
    "inputs": [
     {
@@ -2838,7 +2843,7 @@
     100
    ],
    "flags": {},
-   "order": 61,
+   "order": 63,
    "mode": 0,
    "inputs": [
     {
@@ -2882,7 +2887,7 @@
     330
    ],
    "flags": {},
-   "order": 62,
+   "order": 64,
    "mode": 0,
    "inputs": [
     {
@@ -2912,7 +2917,7 @@
     100
    ],
    "flags": {},
-   "order": 63,
+   "order": 65,
    "mode": 0,
    "inputs": [
     {
@@ -2956,7 +2961,7 @@
     330
    ],
    "flags": {},
-   "order": 64,
+   "order": 66,
    "mode": 0,
    "inputs": [
     {
@@ -2986,7 +2991,7 @@
     100
    ],
    "flags": {},
-   "order": 65,
+   "order": 67,
    "mode": 0,
    "inputs": [
     {
@@ -3030,7 +3035,7 @@
     300
    ],
    "flags": {},
-   "order": 66,
+   "order": 68,
    "mode": 0,
    "inputs": [
     {
@@ -3090,7 +3095,7 @@
     100
    ],
    "flags": {},
-   "order": 67,
+   "order": 69,
    "mode": 0,
    "inputs": [
     {
@@ -3135,7 +3140,7 @@
     100
    ],
    "flags": {},
-   "order": 68,
+   "order": 70,
    "mode": 0,
    "inputs": [
     {
@@ -3182,7 +3187,7 @@
     440
    ],
    "flags": {},
-   "order": 70,
+   "order": 72,
    "mode": 0,
    "inputs": [
     {
@@ -3283,7 +3288,7 @@
     "auto",
     "",
     0.0,
-    1,
+    0,
     "tube (round products)",
     "settings (render.alpha, else measured)",
     -1.0,
@@ -3302,7 +3307,7 @@
     220
    ],
    "flags": {},
-   "order": 72,
+   "order": 74,
    "mode": 0,
    "inputs": [
     {
@@ -3347,7 +3352,7 @@
     180
    ],
    "flags": {},
-   "order": 73,
+   "order": 75,
    "mode": 0,
    "inputs": [
     {
@@ -3402,7 +3407,7 @@
     300
    ],
    "flags": {},
-   "order": 74,
+   "order": 76,
    "mode": 0,
    "inputs": [
     {
@@ -3442,7 +3447,7 @@
     330
    ],
    "flags": {},
-   "order": 75,
+   "order": 77,
    "mode": 0,
    "inputs": [
     {
@@ -3472,7 +3477,7 @@
     300
    ],
    "flags": {},
-   "order": 76,
+   "order": 78,
    "mode": 0,
    "inputs": [
     {
@@ -3507,7 +3512,7 @@
     220
    ],
    "flags": {},
-   "order": 78,
+   "order": 79,
    "mode": 0,
    "inputs": [
     {
@@ -3577,7 +3582,7 @@
     330
    ],
    "flags": {},
-   "order": 79,
+   "order": 80,
    "mode": 0,
    "inputs": [
     {
@@ -3607,7 +3612,7 @@
     100
    ],
    "flags": {},
-   "order": 24,
+   "order": 27,
    "mode": 0,
    "inputs": [
     {
@@ -3651,7 +3656,7 @@
     100
    ],
    "flags": {},
-   "order": 15,
+   "order": 18,
    "mode": 0,
    "inputs": [
     {
@@ -3695,7 +3700,7 @@
     100
    ],
    "flags": {},
-   "order": 69,
+   "order": 71,
    "mode": 0,
    "inputs": [
     {
@@ -3740,7 +3745,7 @@
     240
    ],
    "flags": {},
-   "order": 71,
+   "order": 73,
    "mode": 0,
    "inputs": [
     {
@@ -3804,7 +3809,7 @@
     120
    ],
    "flags": {},
-   "order": 80,
+   "order": 81,
    "mode": 0,
    "inputs": [
     {
@@ -3848,7 +3853,7 @@
     330
    ],
    "flags": {},
-   "order": 81,
+   "order": 82,
    "mode": 0,
    "inputs": [
     {
@@ -3878,7 +3883,7 @@
     120
    ],
    "flags": {},
-   "order": 82,
+   "order": 83,
    "mode": 0,
    "inputs": [
     {
@@ -3922,7 +3927,7 @@
     180
    ],
    "flags": {},
-   "order": 83,
+   "order": 84,
    "mode": 0,
    "inputs": [
     {
@@ -3977,7 +3982,7 @@
     300
    ],
    "flags": {},
-   "order": 84,
+   "order": 85,
    "mode": 0,
    "inputs": [
     {
@@ -4017,7 +4022,7 @@
     240
    ],
    "flags": {},
-   "order": 30,
+   "order": 11,
    "mode": 0,
    "inputs": [
     {
@@ -4090,7 +4095,7 @@
     140
    ],
    "flags": {},
-   "order": 77,
+   "order": 12,
    "mode": 0,
    "inputs": [
     {
@@ -4114,7 +4119,8 @@
      "name": "mask",
      "type": "MASK",
      "links": [
-      169
+      169,
+      210
      ],
      "slot_index": 0
     },
@@ -4145,7 +4151,7 @@
     140
    ],
    "flags": {},
-   "order": 31,
+   "order": 33,
    "mode": 0,
    "inputs": [
     {
@@ -4182,12 +4188,12 @@
      "slot_index": 1
     }
    ],
-   "title": "Packshot outline for the fix (alpha only: the engine traces the backdrop)",
+   "title": "Packshot outline for the fix: alpha, else the backdrop's trace, else SAM 3",
    "properties": {
     "Node name for S&R": "ProductLabelPackshotMatte"
    },
    "widgets_values": [
-    "alpha only (else the engine traces the packshot's background)"
+    "auto: alpha, else the backdrop's trace where SAM 3 agrees, else SAM 3"
    ]
   },
   {
@@ -4202,7 +4208,7 @@
     80
    ],
    "flags": {},
-   "order": 16,
+   "order": 19,
    "mode": 0,
    "inputs": [],
    "outputs": [
@@ -4235,7 +4241,7 @@
     100
    ],
    "flags": {},
-   "order": 17,
+   "order": 20,
    "mode": 0,
    "inputs": [
     {
@@ -4273,14 +4279,14 @@
    "type": "ProductLabelSAM3Points",
    "pos": [
     620,
-    730
+    1080
    ],
    "size": [
     400,
     100
    ],
    "flags": {},
-   "order": 12,
+   "order": 15,
    "mode": 0,
    "inputs": [],
    "outputs": [
@@ -4322,14 +4328,14 @@
    "type": "ProductLabelSwitch",
    "pos": [
     620,
-    900
+    1250
    ],
    "size": [
     380,
     100
    ],
    "flags": {},
-   "order": 13,
+   "order": 16,
    "mode": 0,
    "inputs": [
     {
@@ -4377,7 +4383,7 @@
     80
    ],
    "flags": {},
-   "order": 28,
+   "order": 31,
    "mode": 0,
    "inputs": [
     {
@@ -4409,6 +4415,104 @@
    "widgets_values": []
   },
   {
+   "id": 89,
+   "type": "ProductLabelFindKeyframe",
+   "pos": [
+    620,
+    0
+   ],
+   "size": [
+    400,
+    280
+   ],
+   "flags": {},
+   "order": 13,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "frames",
+     "type": "IMAGE",
+     "link": 205
+    },
+    {
+     "name": "masks",
+     "type": "MASK",
+     "link": 206
+    },
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 207
+    },
+    {
+     "name": "conditioning",
+     "type": "CONDITIONING",
+     "link": 208
+    },
+    {
+     "name": "reference",
+     "type": "IMAGE",
+     "link": 209
+    },
+    {
+     "name": "reference_mask",
+     "type": "MASK",
+     "link": 210
+    },
+    {
+     "name": "keyframe_frame",
+     "type": "INT",
+     "widget": {
+      "name": "keyframe_frame"
+     },
+     "link": 211
+    },
+    {
+     "name": "keyframe_given",
+     "type": "BOOLEAN",
+     "widget": {
+      "name": "keyframe_given"
+     },
+     "link": 212
+    },
+    {
+     "name": "mask_given",
+     "type": "BOOLEAN",
+     "widget": {
+      "name": "mask_given"
+     },
+     "link": 213
+    }
+   ],
+   "outputs": [
+    {
+     "name": "keyframe_frame",
+     "type": "INT",
+     "links": [
+      3,
+      21,
+      27
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": null,
+     "slot_index": 1
+    }
+   ],
+   "title": "Keyframe frame: as set, else found from the clip and the packshot",
+   "properties": {
+    "Node name for S&R": "ProductLabelFindKeyframe"
+   },
+   "widgets_values": [
+    0,
+    false,
+    false
+   ]
+  },
+  {
    "id": 90,
    "type": "Note",
    "pos": [
@@ -4417,17 +4521,17 @@
    ],
    "size": [
     480,
-    980
+    1180
    ],
    "flags": {},
-   "order": 85,
+   "order": 86,
    "mode": 0,
    "inputs": [],
    "outputs": [],
    "title": "What to set",
    "properties": {},
    "widgets_values": [
-    "ONE WORKFLOW FOR EVERY CASE\n\nSource: an image or a clip (Load Source). An image runs the stills branch only; a clip runs SAM 3 through the keyframe frame's shot, the stills branch on the keyframe frame, then Refine (Video) on that shot, spliced back into the clip. An edit with several shots: the Shot node finds the cuts round the keyframe frame (or set its start and end); run each product's shot, then the next product on the output.\n\nPackshot: the real product photo.\nProduct mask: (none) = SAM 3 with the prompt; or a mask file (white = product; a clip: one per frame).\nCorrected keyframe (clips): (none) = the stills branch makes it; or a frame fixed elsewhere.\nFix this product: false = the product looks fine on the triage sheet: only SAM 3 on the keyframe frame and the sheet run.\nJob JSON: empty = Auto Draft from its inputs; or a measured job.\nKeyframe frame (clips): the frame the stills branch fixes, from 0.\nRefine settings JSON and product copy (clips).\nSAM 3 prompt: the product, e.g. 'pump bottle'.\nStraighten: Image Reframe's frame and rotation (all 0: off).\nPrint type: Auto Draft's ink (off: a paper label, or print on paper or a flat panel; light or dark: print straight on a round body, lighter or darker than it, with no paper; dark also snaps the print onto the generated print).\n\nOutputs: the refined image (a clip: the refined keyframe), QA sheets and report.json (QA Sheet's text); for a clip, the lossless master (.mov), the mp4 review copy, the QA plot and the Refine report.\n\nOnly the needed branch runs: Switch and Run If nodes skip the rest."
+    "ONE WORKFLOW FOR EVERY CASE\n\nSet: the source (an image or a clip), the packshot (the real product photo), the SAM 3 prompt (the product's kind in a word or two, e.g. 'jar', 'pump bottle') and, for a clip, the product's copy. Everything else is decided from these and reported:\n- Keyframe frame -1: found. The clip's shots (between hard cuts) are each probed with SAM 3; the shot whose product matches the packshot best (silhouette, print layout, colour, size) is fixed, from its best frame (largest, sharpest, most frontal, off morph frames and the shot's ends). Set it (from 0) to choose.\n- The packshot's outline: its alpha, else the engine's trace of the backdrop where SAM 3 agrees, else SAM 3's (the trace took in a drop shadow or a reflection).\n- Auto Draft auto: the print's polarity from the packshot; the fit affine where the packshot's silhouette fits the product's mask (seen front on), else homography; dark print seen front on is warped whole, else the print goes on the frame's own body (dark print registered onto the generated print), inside a print box read off the packshot's glyphs; the bow from the generated print's lines or the mask's ends.\n- Refine: the label turns round the body only where its print slides past the review's limit and the camera's orbit is measured on the ground; render processes by the machine's cores and memory.\n\nOptional: a product mask (else SAM 3), a corrected keyframe (else the stills branch makes it), a job (else Auto Draft), Refine settings JSON, Straighten (Image Reframe's frame and rotation, all 0: off). Fix this product false: only the triage sheet runs. An edit with several products: run one product's packshot, then the next on the output.\n\nOutputs: the refined image (a clip: the refined keyframe), QA sheets and report.json (QA Sheet's text); for a clip, the lossless master (.mov), the mp4 review copy, the QA plot and the Refine report. Each decision is in its node's text: Find Keyframe Frame, Packshot Matte, Auto Draft, Refine's report.\n\nOnly the needed branch runs: Switch and Run If nodes skip the rest."
    ],
    "color": "#432",
    "bgcolor": "#653"
@@ -4452,7 +4556,7 @@
   ],
   [
    3,
-   6,
+   89,
    0,
    12,
    2,
@@ -4596,7 +4700,7 @@
   ],
   [
    21,
-   6,
+   89,
    0,
    17,
    2,
@@ -4644,7 +4748,7 @@
   ],
   [
    27,
-   6,
+   89,
    0,
    19,
    2,
@@ -6065,6 +6169,78 @@
    88,
    1,
    "CROP_DATA"
+  ],
+  [
+   205,
+   1,
+   0,
+   89,
+   0,
+   "IMAGE"
+  ],
+  [
+   206,
+   3,
+   1,
+   89,
+   1,
+   "MASK"
+  ],
+  [
+   207,
+   10,
+   0,
+   89,
+   2,
+   "MODEL"
+  ],
+  [
+   208,
+   11,
+   0,
+   89,
+   3,
+   "CONDITIONING"
+  ],
+  [
+   209,
+   2,
+   0,
+   89,
+   4,
+   "IMAGE"
+  ],
+  [
+   210,
+   82,
+   0,
+   89,
+   5,
+   "MASK"
+  ],
+  [
+   211,
+   6,
+   0,
+   89,
+   6,
+   "INT"
+  ],
+  [
+   212,
+   4,
+   2,
+   89,
+   7,
+   "BOOLEAN"
+  ],
+  [
+   213,
+   3,
+   2,
+   89,
+   8,
+   "BOOLEAN"
   ]
  ],
  "groups": [
@@ -6083,12 +6259,12 @@
   },
   {
    "id": 2,
-   "title": "SAM 3: the product's mask (skipped when a mask is given); the keyframe frame's shot",
+   "title": "SAM 3: the product's mask (skipped when a mask is given); the keyframe frame and its shot",
    "bounding": [
     600,
     -80,
     440,
-    2630
+    2980
    ],
    "color": "#8A8",
    "font_size": 24,

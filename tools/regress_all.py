@@ -37,18 +37,21 @@ VOLATILE = {"job", "path", "_source", "seconds", "work", "qa_plot", "log"}
 
 def cases(empty_mask):
     ink, demo, vid = PACK / "examples" / "ink_demo", PACK / "examples" / "demo", PACK / "examples" / "video_demo"
+    # the one workflow decides Auto Draft's settings itself; against the templates it is given the ink demo's own measured
+    # print box and bow. Its packshot outline stays auto: SAM 3 agrees with the backdrop's trace on both demos (98.3-99.5 %)
+    ink_set = ["--set", "24.model=affine", "--set", "24.ink=light", "--set", f"24.print_box={INK_DRAFT_INPUT['print_box']}",
+               "--set", f"24.bow={INK_DRAFT_INPUT['bow']}"]
     ink_in = ["--reference", ink / "inkdemo_packshot.png", "--mask", ink / "inkdemo_mask.png"]
     paper_off = ["--mask", empty_mask, "--set", "8.value=false", "--psd"]
     paper_draft = ["--set", "24.ink=off", "--set", "24.model=homography", "--set", "24.light=relight",
                    "--set", f"24.quad={DRAFT_INPUT['quad']}", "--set", f"24.pairs={DRAFT_INPUT['pairs']}",
                    "--set", f"24.occluders={DRAFT_INPUT['occluders']}", "--set", "24.print_box=", "--set", "24.bow="]
-    assert INK_DRAFT_INPUT["print_box"] and INK_DRAFT_INPUT["bow"]    # the one workflow holds the ink demo's
     return {
         "ink-draft": (["--workflow", WF / "product-label-refinement-ink-draft.api.json", "--scene", ink / "inkdemo_frame.png", *ink_in],
-                      ["--source", ink / "inkdemo_frame.png", *ink_in]),
+                      ["--source", ink / "inkdemo_frame.png", *ink_in, *ink_set]),
         "ink-job": (["--workflow", WF / "product-label-refinement-ink.api.json", "--scene", ink / "inkdemo_frame.png", *ink_in,
                      "--job", ink / "job.json"],
-                    ["--source", ink / "inkdemo_frame.png", *ink_in, "--job", ink / "job.json"]),
+                    ["--source", ink / "inkdemo_frame.png", *ink_in, *ink_set, "--job", ink / "job.json"]),
         "paper-draft": (["--workflow", WF / "product-label-refinement-draft.api.json", "--scene", demo / "imagepost_demo_scene.png",
                          "--reference", demo / "imagepost_demo_packshot.png", "--psd"],
                         ["--source", demo / "imagepost_demo_scene.png", "--reference", demo / "imagepost_demo_packshot.png",

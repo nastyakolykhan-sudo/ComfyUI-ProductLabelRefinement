@@ -4,8 +4,8 @@ A corrected keyframe (a generative edit, or a hand fix) is trusted only when:
 - it is a frame of the clip: least difference outside the grown matte, well clear of the runner-up;
 - the edit stayed on the label: what changed lies inside the matte, and the product's outline didn't move;
 - its text is the copy, spelled exactly. The engine's QA recall forgives one edit on long words (OCR slips at a few
-  px per letter), so "niacynamide" would pass it. Here a near miss is "unconfirmed": a second reader (Qwen-VL on
-  Swordfish) must read the word exactly, or the attempt fails.
+  px per letter), so "niacynamide" would pass it. Here a near miss is "unconfirmed": a second reader (Qwen-VL on a
+  ComfyUI server) must read the word exactly, or the attempt fails.
 """
 import numpy as np
 from scipy import ndimage as ndi

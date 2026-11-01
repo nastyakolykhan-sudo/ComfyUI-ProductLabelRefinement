@@ -147,8 +147,9 @@ class ProductLabelVideoRefine:
                                         "tooltip": "JSON: the engine's vjob sections (track, fit, render, qa, review, key) "
                                                    "and anchor, shots, words, matte_patch, merged over what is measured."}),
                 "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 240.0, "step": 0.001}),
-                "processes": ("INT", {"default": 1, "min": 1, "max": 16,
-                                      "tooltip": "Render processes. Above 1 the engine runs in its own process (same "
+                "processes": ("INT", {"default": 0, "min": 0, "max": 16,
+                                      "tooltip": "Render processes. 0: as many as the machine's cores and free memory "
+                                                 "allow (at most 8). Above 1 the engine runs in its own process (same "
                                                  "pixels, faster)."}),
                 "model": (MODELS, {"default": MODELS[0],
                                    "tooltip": "The label's surface. tube: bottles, jars, tubes, lipsticks (anything round). "
@@ -188,9 +189,10 @@ class ProductLabelVideoRefine:
                    "and grain. Pixels outside the changed area come back exactly as they went in.")
 
     def refine(self, frames, mask, keyframes, tracker, keyframe_index=-1, keyframe_frames="auto", keyframe_bbox=None,
-               product=None, settings="", fps=24.0, processes=1, model=None, compositing=None, soft_cap=-1.0,
+               product=None, settings="", fps=24.0, processes=0, model=None, compositing=None, soft_cap=-1.0,
                glue=False):
         pl = _engine()
+        processes, why = _processes(processes, frames.shape)
         if mask.dim() == 2:
             mask = mask[None]
         if frames.shape[0] != mask.shape[0] or frames.shape[1:3] != mask.shape[1:3]:
@@ -229,8 +231,13 @@ class ProductLabelVideoRefine:
         os.environ["PLR_ALLTRACKER"] = weights
         root = Path(folder_paths.get_temp_directory()) / "label-video" / _digest(fr, mk, *kfs)
         root.mkdir(parents=True, exist_ok=True)
+        print(f"processes  {processes} ({why})")
         if processes > 1:
-            r = _refine_in_process_of_its_own(root, fr, mk, kfs, cfg, kfr, fps, processes, weights)
+            try:
+                r = _refine_in_process_of_its_own(root, fr, mk, kfs, cfg, kfr, fps, processes, weights)
+            except _WorkerKilled as e:               # out of memory: the same render in this process, one worker
+                print(f"processes  the {processes}-process render was stopped ({e}): again with 1")
+                r = pl.refine(fr, mk, kfs, cfg, kfr, fps=fps, work=root / "work", workers=1)
         else:
             r = pl.refine(fr, mk, kfs, cfg, kfr, fps=fps, work=root / "work", workers=1)
         changed = torch.from_numpy(r["changed"])
@@ -256,6 +263,31 @@ def _digest(*arrays):
     return h.hexdigest()
 
 
+# memory a render process takes per million pixels of a frame
+GB_PER_MPX = 1.4
+
+
+class _WorkerKilled(RuntimeError):
+    pass
+
+
+def _processes(n, shape):
+    """Render processes: n when given (1 or more); 0 picks them from the machine, -> (n, why): the cores, at most 8,
+    and as many as the free memory holds (GB_PER_MPX a worker per frame megapixel, plus one worker's worth spare)."""
+    if n >= 1:
+        return int(n), "set"
+    cores = os.cpu_count() or 1
+    try:
+        import psutil
+        free = psutil.virtual_memory().available / 2 ** 30
+    except Exception:                        # no psutil: the cores decide
+        free = None
+    per = GB_PER_MPX * shape[1] * shape[2] / 1e6
+    by_mem = int(free // per) - 1 if free is not None else cores
+    k = max(1, min(8, cores, by_mem))
+    return k, f"auto: {cores} cores" + (f", {free:.0f} GB free at {per:.1f} GB a worker" if free is not None else "")
+
+
 def _refine_in_process_of_its_own(root, fr, mk, kfs, cfg, kfr, fps, processes, weights):
     """refine() in a child Python (video_worker.py): its render workers can spawn there, which they can't from inside
     ComfyUI (a spawned worker re-imports the main module, ComfyUI's main.py)."""
@@ -267,6 +299,8 @@ def _refine_in_process_of_its_own(root, fr, mk, kfs, cfg, kfr, fps, processes, w
     env = dict(os.environ, PLR_ALLTRACKER=weights)
     p = subprocess.run([sys.executable, "-P", str(PACK / "video_worker.py"), str(io)], env=env, capture_output=True, text=True)
     sys.stdout.write(p.stdout[-6000:])
+    if p.returncode < 0:                     # killed by a signal (the system's out-of-memory killer)
+        raise _WorkerKilled(f"signal {-p.returncode}")
     if p.returncode:
         raise RuntimeError(f"label video worker failed:\n{p.stderr[-4000:]}")
     z = np.load(io / "outputs.npz")

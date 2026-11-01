@@ -12,6 +12,7 @@ from scipy.ndimage import binary_dilation, binary_erosion, gaussian_filter
 
 from .imgpost import audit as au
 from .imgpost import autofit as af
+from .imgpost import decide as dc
 from .imgpost import draft as dr
 from .imgpost import fill as fl
 from .imgpost import finish as fn
@@ -52,18 +53,33 @@ def draft(scene_u8, ref_u8, ref_a, quad=None, pairs=(), occluders=(), mask=None,
     which Fit Warp and Warp Reference do here. label "cylinder" / "flat": run.py draft --label (the label only).
     ink "light" / "dark", print_box, bow: run.py draft --ink --print-box --bow (print straight on a coloured body). The
     job's old_silhouette stays the draft's: here the product mask goes into Fill Leftovers' old_silhouette instead
-    (run.py draft writes the mask's file there)."""
+    (run.py draft writes the mask's file there). model, ink, print_box, bow "auto": decided from the frame, the mask
+    and the packshot (imgpost.decide.resolve), the decisions in the lines."""
+    auto = []
+    if "auto" in (model, ink, print_box, bow):
+        try:
+            model, ink, print_box, bow, auto = dc.resolve(scene_u8, mask, ref_u8, ref_a, outline, model, ink or "off",
+                                                          print_box, bow)
+        except ValueError as e:
+            raise StageError(str(e)) from e
     try:
         d = dr.draft(scene_u8, ref_u8, ref_a, quad=quad, pairs=pairs, occluders=occluders, mask=mask,
                      mask_skip=mask_skip, model=model, outline=outline, cylinder=cylinder, relight=relight,
                      suggest=suggest, label=label)
         if ink or bow:
-            dr.print_on_body(d, scene_u8, mask=mask, ink=ink, print_box=print_box, bow=bow)
+            try:
+                dr.print_on_body(d, scene_u8, mask=mask, ink=ink, print_box=print_box, bow=bow)
+            except dr.DraftError as e:
+                if not (auto and bow == "print"):
+                    raise
+                # decided, not given: a product with no long line to read its bow from stays flat
+                auto.append(f"auto       bow none: {e}")
+                dr.print_on_body(d, scene_u8, mask=mask, ink=ink, print_box=print_box, bow=None)
     except dr.DraftError as e:
         raise StageError(str(e)) from e
     check_job(d["job"])
     _, rep = fit_warp(d["job"])
-    return d["job"], "\n".join(dr.summary(d) + [align_table(rep)]), d["sheet"]
+    return d["job"], "\n".join(auto + dr.summary(d) + [align_table(rep)]), d["sheet"]
 
 
 def generated_cover(job, roi):

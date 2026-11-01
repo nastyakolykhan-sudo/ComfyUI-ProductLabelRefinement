@@ -26,10 +26,10 @@ CATEGORY = "image/product-label-refinement"
 COLOUR_CHOICES = ["job", "scene", "reference"]
 SHADING_CHOICES = ["job", "off"]
 RELIGHT_CHOICES = ["job", "off"]
-MODEL_CHOICES = ["homography", "affine"]
+MODEL_CHOICES = ["homography", "affine", "auto"]
 LIGHT_CHOICES = ["relight", "cylinder", "off"]
 LABEL_CHOICES = ["off", "cylinder", "flat"]
-INK_CHOICES = ["off", "light", "dark"]
+INK_CHOICES = ["off", "light", "dark", "auto"]
 
 
 def _stages():
@@ -297,7 +297,9 @@ class ImagePostAutoDraft:
                     "landmark pairs instead. With label on: the generated label's own 4 corners, in the packshot "
                     "label's order (TL TR BR BL), within about 3 px.")}),
                 "model": (MODEL_CHOICES, {"default": "homography", "tooltip": (
-                    "homography: perspective. affine: no perspective (a small or flat-on product).")}),
+                    "homography: perspective. affine: no perspective (a small or flat-on product). auto: affine "
+                    "where the packshot's silhouette fits the product's mask (the frame shows it front on), else "
+                    "homography (needs product_mask).")}),
                 "light": (LIGHT_CHOICES, {"default": "relight", "tooltip": (
                     "relight: grade.relight on (cast shadows, falloff, glows). cylinder: the shading template for "
                     "cans and bottles instead (measure the highlight and add spec / shadow). off: neither.")}),
@@ -338,12 +340,14 @@ class ImagePostAutoDraft:
                     "its coloured bars): the print is also snapped onto where the generator drew it (its place, scale "
                     "and bow) and sharpened to its edges. The packshot's print is laid on the frame's own body in the "
                     "frame's own print colour (job matte ink). Run it with the ink template: product_mask also goes "
-                    "into Fill Leftovers' old_silhouette, the matte the print stays inside.")}),
+                    "into Fill Leftovers' old_silhouette, the matte the print stays inside. auto (needs "
+                    "product_mask): light print on the body; dark print warped whole (off) where the packshot's "
+                    "silhouette fits the product's mask, else on the body (dark).")}),
                 "print_box": ("STRING", {"default": "", "tooltip": (
                     "With ink: the print's box on the packshot x0,y0,x1,y1 (reference px), from the first to the "
                     "last line of print with a few px to spare, inside the body's frosted rims, seams and lid edge. "
                     "Only print inside it is laid on, so the packshot's own highlights, seams and rims don't go on "
-                    "as ink.")}),
+                    "as ink. auto: the packshot's glyphs' extent, kept off its lid, cap, rims and bands.")}),
                 "bow": ("STRING", {"default": "", "tooltip": (
                     "A round body seen from above or below: its print bows like its seams (align.bow; needs "
                     "product_mask). t along the product's axis from the mask's centre, px, + down the image: "
@@ -351,7 +355,9 @@ class ImagePostAutoDraft:
                     "seam on a narrower ring of half-width w (a collar); t/matte the mask's own end (a base). "
                     "Example: \"-150:0 146.5\". print: the bow the generated product's own long lines draw (its "
                     "rules, a band's edges), less the warped packshot's, for a packshot warped whole (a squeeze "
-                    "tube seen from above). Empty: no bow (seen from level).")}),
+                    "tube seen from above). auto: print for a packshot warped whole; on the body, from the "
+                    "mask's two ends (dark print keeps it where the print registers better). Empty: no bow (seen "
+                    "from level).")}),
             },
         }
 
@@ -378,8 +384,8 @@ class ImagePostAutoDraft:
         su8 = _u8(scene, "scene")
         ru8, ra = _reference({}, reference, reference_mask)
         mask, note = _product_mask(product_mask, su8.shape[:2])
-        pb = _numbers(print_box)
-        if pb and len(pb) != 4:
+        pb = "auto" if print_box.strip().lower() == "auto" else _numbers(print_box)
+        if pb and pb != "auto" and len(pb) != 4:
             raise ValueError(f"print_box: {len(pb)} numbers; give x0,y0,x1,y1 in reference px")
         job, text, sheet = _stages().draft(su8, ru8, ra, quad=_quad(quad), pairs=_pairs(pairs),
                                            occluders=_occluders(occluders), mask=mask,
@@ -387,7 +393,8 @@ class ImagePostAutoDraft:
                                            outline=_outline(outline), cylinder=light == "cylinder",
                                            relight=light == "relight", suggest=suggest,
                                            label=None if label == "off" else label,
-                                           ink=None if ink == "off" else ink, print_box=pb or None, bow=bow.strip() or None)
+                                           ink=None if ink == "off" else ink, print_box=pb or None,
+                                           bow="auto" if bow.strip().lower() == "auto" else bow.strip() or None)
         if note:
             text = f"note       {note}\n{text}"
         if ink in ("light", "dark"):

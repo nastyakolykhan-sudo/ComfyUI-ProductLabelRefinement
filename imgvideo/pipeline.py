@@ -781,6 +781,33 @@ def print_defaults(render, given=None):
 FEATHER_PRINT_GAP = 2.0
 
 
+# whole-band compositing's measured-job defaults whose off state failed in testing: a setting asking for it is an error,
+# not a variant (the user, 2026-10-31: "don't keep the approaches that didn't work")
+REMOVED = {
+    ("shade_print", False): "the frame's print read into the light left the generator's bold letters as shadows (V54)",
+    ("shade_local", False): "the frame's overall light under the print boiled round the label's text (V58)",
+    ("steady_light", False): "the light read frame by frame blinked in blobs round the label's text (V63)",
+    ("clear_glass", False): "the keyframe's glass over the frame's own came along as soft smudges (V56)",
+    ("limb_snap.front", "mean"): "the limbs' common offset moved the whole print 6-7 px off the frame's own (V57)",
+    ("anchor.over_print", False): "the measured band left the generated lines past it doubling the label's (V54)",
+    ("body_snap.turn", "hold"): "held at the keyframe's place, the label ignored the camera orbiting the product (V65)",
+}
+
+
+def removed_settings(cfg):
+    """Settings that ask for a removed behaviour (REMOVED). -> ValueError with each one and why, or None"""
+    rc = cfg.get("render") or {}
+    got = {("shade_print", rc.get("shade_print")), ("shade_local", rc.get("shade_local")),
+           ("steady_light", rc.get("steady_light")), ("clear_glass", rc.get("clear_glass")),
+           ("limb_snap.front", (rc.get("limb_snap") or {}).get("front") if isinstance(rc.get("limb_snap"), dict) else None),
+           ("body_snap.turn", (rc.get("body_snap") or {}).get("turn") if isinstance(rc.get("body_snap"), dict) else None)}
+    anchors = cfg.get("anchor") if isinstance(cfg.get("anchor"), list) else [cfg.get("anchor")]
+    got |= {("anchor.over_print", a.get("over_print")) for a in anchors if isinstance(a, dict)}
+    bad = [f"{k} {v!r}: {why}" for (k, v), why in REMOVED.items() if (k, v) in got]
+    if bad:
+        raise ValueError("removed settings (they failed in testing; the defaults replace them): " + "; ".join(bad))
+
+
 def print_gap_default(render, given=None):
     """Whole-band compositing (render.alpha "label") from a measured job (V54): the label's end fade stops
     feather.print_gap px short of its own print, the frame's light is read off the print (render.shade_print) from the
@@ -1042,6 +1069,8 @@ def _body_snap(J, C, fr, frames):
     roll_deg, pivot)} for the frames it moves, the report for render.json)"""
     rc = C["rc"]
     bc = dict(vf.BODY_SNAP, **(rc["body_snap"] if isinstance(rc["body_snap"], dict) else {}))
+    if bc.get("turn") == "auto":
+        return _body_snap_turn_auto(J, C, fr, frames, bc)
     P = J.outline()
     (u0, v0), (u1, v1) = P.min(0), P.max(0)
     uc, vr = 0.5 * (u0 + u1), (float(v0), float(v1))
@@ -1061,7 +1090,7 @@ def _body_snap(J, C, fr, frames):
                                bc["reach"], bc["across"], bc["inside"], H_print=Hp, ref=ref, window=bc["window"])
     kinds = {"top": bc["top"], "bottom": bc["bottom"]}
     o = C.get("orbit") or {}
-    if bc.get("turn") and bc["turn"] != "hold" and o.get("phi"):
+    if bc.get("turn") and o.get("phi"):
         # standing on the ground, seen from above (V66): the matte's top is the far rim of the product's top face, which
         # moves down the body as the camera comes closer or lower, and its base's front reads through the ground's
         # reflections; the label keeps the print's place along the body (explicit edges still hold it)
@@ -1077,15 +1106,11 @@ def _body_snap(J, C, fr, frames):
     # every other frame round the gaps the reference's proportion predicts for it (None: its neighbours' correction)
     meas = {t: (ref if t == a else measure(t, kinds["top"], kinds["bottom"], ref)) for t in sorted(frames)}
     off = {t: vf.body_offsets(m, ref) for t, m in meas.items() if m is not None}
-    # the turn hold (V59) holds the label to the scene's orbit where the ground round the product's base shows it
-    # (V65; "hold": to the reference frame's place, as before)
+    # the turn hold (V59) holds the label to the scene's orbit where the ground round the product's base shows it (V65),
+    # else to the reference frame's place
     orbit_px, orbit_rep = None, None
     if bc.get("turn"):
-        if o.get("phi") and bc.get("turn") == "hold":
-            orbit_rep = {"measured": True, "followed": False,
-                         "deg": [round(float(np.degrees(o["phi"][0] - o["phi"][a])), 2),
-                                 round(float(np.degrees(o["phi"][-1] - o["phi"][a])), 2)]}
-        elif o.get("phi"):
+        if o.get("phi"):
             Hb = placed(a)[0]
             while hasattr(Hb, "base"):
                 Hb = Hb.base
@@ -1144,6 +1169,44 @@ def _body_snap(J, C, fr, frames):
                                 f"the scene turned {orbit_rep['deg'][0]:+.2f} to {orbit_rep['deg'][1]:+.2f} deg; "
                                 f"body_snap.turn \"hold\" keeps the keyframe frame's place" if "deg" in orbit_rep else
                                 f"not measured ({orbit_rep['skipped']}): the turn held at the keyframe frame's place"))
+    return body, rep
+
+
+def _body_snap_turn_auto(J, C, fr, frames, bc):
+    """render.body_snap.turn "auto" (the measured job's default): the turn decided from the shot. The print the label
+    tracks is measured round the body first, as with no turn. Where it stays within the review's slide limit of the
+    keyframe's place, there is no turn to correct: the label follows its print (turn off). Where it slides further,
+    the scene's orbit is measured on the ground round the product's base: found, the label turns with the camera's orbit
+    at the print's rate (turn true, V65-V66); not found (no ground round a base in view), it follows its print and the
+    review's `slide` check flags the frames. The decision is written back into the render settings, so the workers and
+    the review read the turn the render took. -> (as _body_snap, the report with "turn_auto")"""
+    from .review import DEFAULTS as RV
+    rc = C["rc"]
+    base = dict(rc["body_snap"]) if isinstance(rc["body_snap"], dict) else {}
+    lim = float(RV["slide_px"])
+    rc["body_snap"] = dict(base, turn=False)
+    body, rep = _body_snap(J, C, fr, frames)
+    tp = (rep.get("before") or {}).get("turn_px")
+    slide = max(abs(tp[0]), abs(tp[1])) if tp else None
+    dec = {"slide_px": None if slide is None else round(slide, 2), "limit_px": lim}
+    if slide is None or slide <= lim:
+        dec.update(turn=False, why=("the print the label tracks stays within the slide limit round the body: the label "
+                                    "follows it" if slide is not None else "no body measure (as turn false)"))
+    else:
+        C["orbit"] = o = _scene_orbit(J, fr, int(bc.get("ref_frame", J.anchor)) - J.s0)
+        if o.get("phi"):
+            rc["body_snap"] = dict(base, turn=True)
+            body, rep = _body_snap(J, C, fr, frames)
+            dec.update(turn=True, why="the print slides round the body and the ground round its base turns with the "
+                                      "camera: the label turns with the camera's orbit")
+        else:
+            C.pop("orbit", None)
+            dec.update(turn=False, why=f"the print slides round the body but no orbit was measured ({o.get('skipped')}): "
+                                       "the label follows its print; the review's slide check flags the frames")
+    rc["body_snap"]["turn_auto"] = dec
+    rep["turn_auto"] = dec
+    print(f"turn auto  {'on' if dec['turn'] else 'off'}: {dec['why']} (the print's slide "
+          f"{dec['slide_px']} px, the limit {lim:g})")
     return body, rep
 
 
@@ -1390,8 +1453,9 @@ def stage_render(J, rng=None, workers=None):
     C = _render_context(J, rc, optics, shutter, ax_ref, res=res, art=art)
     body_rep = None
     bsc = rc.get("body_snap")
-    if isinstance(bsc, dict) and bsc.get("turn"):
-        # the scene's orbit, for the turn hold to follow and the review's slide to judge against (V65)
+    if isinstance(bsc, dict) and bsc.get("turn") and bsc["turn"] != "auto":
+        # the scene's orbit, for the turn hold to follow and the review's slide to judge against (V65; "auto": measured
+        # by the body snap, when the print slides)
         C["orbit"] = _scene_orbit(J, fr, int(bsc.get("ref_frame", J.anchor)) - J.s0)
     if rc.get("body_snap"):
         # measured over every frame the tracks hold (not only a test range or a patch job's frames), so a range renders
@@ -1942,7 +2006,7 @@ def _body_reference(P, c, frame_at):
     lum, mt = frame_at(a).astype(float).mean(-1), P.key(a - P.s0, H).astype(float)
     edges = {"top": bc["top"], "bottom": bc["bottom"]}
     po = P.work / "orbit.json"
-    if bc.get("turn") and bc["turn"] != "hold" and po.exists() and \
+    if bc.get("turn") and po.exists() and \
             (json.loads(po.read_text()).get("orbit") or {}).get("phi"):
         # as the render: a product standing on the ground, seen from above, has no body ends to hold (V66)
         edges = {k: "none" if v == "auto" else v for k, v in edges.items()}
@@ -2380,8 +2444,7 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
     keyframes  [H x W x 3 uint8, ...]: corrected frames of the clip (the label fixed), one per shot to cover
     settings   video.py's vjob sections (track, fit, render, qa, review, artwork, key) merged over the measured ones,
                plus "anchor" (band, model, theta_lim: the same for every keyframe, or a list, one per keyframe;
-               over_print: false keeps the measured band where the keyframe corrected print past it, or
-               {BAND_OVER_PRINT keys}, V54),
+               over_print: {BAND_OVER_PRINT keys}, V54),
                "shots" ([[a, b] or null per keyframe]) and "words" (the label's copy, for OCR in QA)
     keyframe_frames  [frame or None per keyframe]; None: matched outside the matte (video.py's anchor.frame "auto")
     work       folder for each shot's work/ caches; reused across runs (track, fit and still run again only when their
@@ -2400,6 +2463,7 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
     from .keyframe import find_keyframe
     t_start = time.time()
     cfg = dict(settings or {})
+    removed_settings(cfg)
     frames = np.ascontiguousarray(frames)
     masks = np.array(masks, dtype=bool)                     # a copy: the matte patch writes into it
     media = ArrayMedia(frames, masks, fps)
@@ -2443,7 +2507,7 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
             d["skipped"] = "the matte is (nearly) empty on the keyframe's frame"
             continue
         anc = dict(per_keyframe("anchor", i) or {})
-        over_print = anc.pop("over_print", True)
+        over_print = anc.pop("over_print", None)
         changed, outside = aver.edit_region(kf, frames[f], m)
         polarity = (cfg.get("render") or {}).get("polarity") or aver.print_polarity(kf, m, changed)
         stroke = aver.stroke_width(frames[f], m, changed) or 4
@@ -2452,7 +2516,7 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
         else:
             band, binfo = aver.body_band(kf, m)
             binfo = dict(binfo, **{"from": "measured (product profile)"})
-            if band and over_print is not False:
+            if band:
                 # the label carries every line the keyframe corrected, with room for its end fade; the tube is still
                 # fitted on the profile's band (V54)
                 b2, over = band_over_print(band, changed, m, kf, polarity, stroke,
@@ -2500,6 +2564,13 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
         # what the measured job switched on that the settings don't name (logged by the render, in the report)
         dflt = defaults_on(vj["render"], cfg.get("render"), {"*": "the measured job", **{
             k: "the measured job, round products" for k in ("body_snap", "glue", "level")}})
+        g_bs = (cfg.get("render") or {}).get("body_snap")
+        if vj["render"].get("body_snap") and not (isinstance(g_bs, dict) and "turn" in g_bs):
+            # the turn round the body decided from the shot (_body_snap_turn_auto): off unless the print slides
+            vj["render"]["body_snap"] = dict(vj["render"]["body_snap"] if isinstance(vj["render"]["body_snap"], dict)
+                                             else {}, turn="auto")
+            dflt["body_snap.turn"] = {"value": "auto", "by": "the measured job (decided from the shot: the print's slide "
+                                                             "round the body, the camera's orbit)"}
         if dflt:
             vj["render"]["_defaults"] = dflt
         # render.alpha "print": its defaults over the measured job's (feather.v_px 4 unless the settings give one)

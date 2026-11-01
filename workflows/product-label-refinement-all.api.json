@@ -1,7 +1,7 @@
 {
   "1": {
     "inputs": {
-      "source": "inkdemo_frame.png"
+      "source": "example.png"
     },
     "class_type": "ProductLabelLoadSource",
     "_meta": {
@@ -10,7 +10,7 @@
   },
   "2": {
     "inputs": {
-      "image": "inkdemo_packshot.png"
+      "image": "example.png"
     },
     "class_type": "LoadImage",
     "_meta": {
@@ -46,11 +46,11 @@
   },
   "6": {
     "inputs": {
-      "value": 0
+      "value": -1
     },
     "class_type": "PrimitiveInt",
     "_meta": {
-      "title": "Keyframe frame (clips; -1 = find the given keyframe's frame)"
+      "title": "Keyframe frame (clips; -1 = found: the best frame of the product's best shot)"
     }
   },
   "7": {
@@ -90,6 +90,50 @@
       "title": "Render the clip (false: only the keyframe, to check it before the clip)"
     }
   },
+  "89": {
+    "inputs": {
+      "frames": [
+        "1",
+        0
+      ],
+      "keyframe_frame": [
+        "6",
+        0
+      ],
+      "keyframe_given": [
+        "4",
+        2
+      ],
+      "mask_given": [
+        "3",
+        2
+      ],
+      "masks": [
+        "3",
+        1
+      ],
+      "model": [
+        "10",
+        0
+      ],
+      "conditioning": [
+        "11",
+        0
+      ],
+      "reference": [
+        "2",
+        0
+      ],
+      "reference_mask": [
+        "82",
+        0
+      ]
+    },
+    "class_type": "ProductLabelFindKeyframe",
+    "_meta": {
+      "title": "Keyframe frame: as set, else found from the clip and the packshot"
+    }
+  },
   "19": {
     "inputs": {
       "frames": [
@@ -97,7 +141,7 @@
         0
       ],
       "keyframe_index": [
-        "6",
+        "89",
         0
       ],
       "start": -1,
@@ -123,7 +167,7 @@
   },
   "11": {
     "inputs": {
-      "text": "bottle",
+      "text": "product",
       "clip": [
         "10",
         1
@@ -137,7 +181,7 @@
   "12": {
     "inputs": {
       "index": [
-        "6",
+        "89",
         0
       ],
       "images": [
@@ -300,7 +344,7 @@
   "17": {
     "inputs": {
       "index": [
-        "6",
+        "89",
         0
       ],
       "masks": [
@@ -367,7 +411,7 @@
         "2",
         1
       ],
-      "use": "alpha only (else the engine traces the packshot's background)",
+      "use": "auto: alpha, else the backdrop's trace where SAM 3 agrees, else SAM 3",
       "sam_mask": [
         "81",
         0
@@ -375,7 +419,7 @@
     },
     "class_type": "ProductLabelPackshotMatte",
     "_meta": {
-      "title": "Packshot outline for the fix (alpha only: the engine traces the backdrop)"
+      "title": "Packshot outline for the fix: alpha, else the backdrop's trace, else SAM 3"
     }
   },
   "70": {
@@ -620,7 +664,7 @@
         0
       ],
       "quad": "",
-      "model": "affine",
+      "model": "auto",
       "light": "off",
       "suggest": false,
       "filename_prefix": "product-label-refinement/draft",
@@ -637,13 +681,13 @@
       "outline": "",
       "mask_skip": "",
       "label": "off",
-      "ink": "light",
-      "print_box": "176,396,432,924",
-      "bow": "-140 130/matte"
+      "ink": "auto",
+      "print_box": "auto",
+      "bow": "auto"
     },
     "class_type": "ImagePostAutoDraft",
     "_meta": {
-      "title": "Auto Draft"
+      "title": "Auto Draft (model, ink, print box, bow: auto = decided from its inputs)"
     }
   },
   "25": {
@@ -1430,7 +1474,7 @@
         "1",
         1
       ],
-      "processes": 1,
+      "processes": 0,
       "model": "tube (round products)",
       "compositing": "settings (render.alpha, else measured)",
       "soft_cap": -1.0,
