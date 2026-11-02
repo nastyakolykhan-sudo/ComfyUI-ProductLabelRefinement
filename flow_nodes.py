@@ -490,6 +490,34 @@ def _match_packshot(frame, M, ref, Rm, refangle, min_area, max_area=0.6):
     return {"area": round(area, 4), "shape": round(float(iou), 3), "colour": round(col, 3), "score": round(float(score), 4)}
 
 
+class ProductLabelAuditGate:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"keyframe": ("IMAGE", {"tooltip": "The refined keyframe the stills branch made"}),
+                             "report": ("STRING", {"forceInput": True, "tooltip": "QA Sheet's report (its text)"})}}
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("keyframe",)
+    FUNCTION = "gate"
+    CATEGORY = CATEGORY
+    DESCRIPTION = ("The keyframe on to Refine (Video) only when its audit has no FAIL; else the run stops here with each "
+                   "FAIL and why. A keyframe off the product's print (ink_place), cut along an occluder or squeezed "
+                   "would be carried through every frame of the shot. The keyframe itself is still saved, to look at.")
+
+    def gate(self, keyframe, report):
+        try:
+            rep = json.loads(report)
+        except (TypeError, ValueError):
+            rep = {}
+        fails = [f for f in rep.get("audit") or [] if f.get("level") == "FAIL"]
+        if fails:
+            raise ValueError("the keyframe's audit failed, so the clip isn't rendered (a wrong keyframe goes into every "
+                             "frame): " + "; ".join(f"{f['check']}: {f['text']}" for f in fails) +
+                             ". Look at qa/audit and the refined keyframe; fix it with Render the clip off, then queue "
+                             "again.")
+        return (keyframe,)
+
+
 class ProductLabelSplice:
     @classmethod
     def INPUT_TYPES(cls):
@@ -823,6 +851,7 @@ NODE_CLASS_MAPPINGS = {
     "ProductLabelPickFrame": ProductLabelPickFrame,
     "ProductLabelShot": ProductLabelShot,
     "ProductLabelFindKeyframe": ProductLabelFindKeyframe,
+    "ProductLabelAuditGate": ProductLabelAuditGate,
     "ProductLabelSplice": ProductLabelSplice,
     "ProductLabelMaskOverlay": ProductLabelMaskOverlay,
     "ProductLabelPackshotMatte": ProductLabelPackshotMatte,
@@ -841,6 +870,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ProductLabelPickFrame": "Product Label: Pick Frame",
     "ProductLabelShot": "Product Label: Shot (between cuts)",
     "ProductLabelFindKeyframe": "Product Label: Find Keyframe Frame",
+    "ProductLabelAuditGate": "Product Label: Audit Gate",
     "ProductLabelSplice": "Product Label: Splice Shot Back",
     "ProductLabelMaskOverlay": "Product Label: Mask Overlay",
     "ProductLabelPackshotMatte": "Product Label: Packshot Matte",

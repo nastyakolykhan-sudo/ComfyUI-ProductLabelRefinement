@@ -1,8 +1,8 @@
 {
  "id": "0dc5c267-8982-5325-ba1f-da25c82e8753",
  "revision": 0,
- "last_node_id": 90,
- "last_link_id": 213,
+ "last_node_id": 91,
+ "last_link_id": 215,
  "nodes": [
   {
    "id": 1,
@@ -2368,7 +2368,9 @@
     {
      "name": "report",
      "type": "STRING",
-     "links": null,
+     "links": [
+      215
+     ],
      "slot_index": 3
     },
     {
@@ -2536,7 +2538,7 @@
      "type": "*",
      "links": [
       121,
-      150
+      214
      ],
      "slot_index": 0
     }
@@ -3133,14 +3135,14 @@
    "type": "ProductLabelSwitch",
    "pos": [
     5960,
-    170
+    340
    ],
    "size": [
     380,
     100
    ],
    "flags": {},
-   "order": 70,
+   "order": 71,
    "mode": 0,
    "inputs": [
     {
@@ -3180,14 +3182,14 @@
    "type": "ProductLabelVideoRefine",
    "pos": [
     5960,
-    340
+    510
    ],
    "size": [
     420,
     440
    ],
    "flags": {},
-   "order": 72,
+   "order": 73,
    "mode": 0,
    "inputs": [
     {
@@ -3307,7 +3309,7 @@
     220
    ],
    "flags": {},
-   "order": 74,
+   "order": 75,
    "mode": 0,
    "inputs": [
     {
@@ -3352,7 +3354,7 @@
     180
    ],
    "flags": {},
-   "order": 75,
+   "order": 76,
    "mode": 0,
    "inputs": [
     {
@@ -3407,7 +3409,7 @@
     300
    ],
    "flags": {},
-   "order": 76,
+   "order": 77,
    "mode": 0,
    "inputs": [
     {
@@ -3447,7 +3449,7 @@
     330
    ],
    "flags": {},
-   "order": 77,
+   "order": 78,
    "mode": 0,
    "inputs": [
     {
@@ -3477,7 +3479,7 @@
     300
    ],
    "flags": {},
-   "order": 78,
+   "order": 79,
    "mode": 0,
    "inputs": [
     {
@@ -3512,7 +3514,7 @@
     220
    ],
    "flags": {},
-   "order": 79,
+   "order": 80,
    "mode": 0,
    "inputs": [
     {
@@ -3582,7 +3584,7 @@
     330
    ],
    "flags": {},
-   "order": 80,
+   "order": 81,
    "mode": 0,
    "inputs": [
     {
@@ -3700,7 +3702,7 @@
     100
    ],
    "flags": {},
-   "order": 71,
+   "order": 72,
    "mode": 0,
    "inputs": [
     {
@@ -3745,7 +3747,7 @@
     240
    ],
    "flags": {},
-   "order": 73,
+   "order": 74,
    "mode": 0,
    "inputs": [
     {
@@ -3809,7 +3811,7 @@
     120
    ],
    "flags": {},
-   "order": 81,
+   "order": 82,
    "mode": 0,
    "inputs": [
     {
@@ -3853,7 +3855,7 @@
     330
    ],
    "flags": {},
-   "order": 82,
+   "order": 83,
    "mode": 0,
    "inputs": [
     {
@@ -3883,7 +3885,7 @@
     120
    ],
    "flags": {},
-   "order": 83,
+   "order": 84,
    "mode": 0,
    "inputs": [
     {
@@ -3927,7 +3929,7 @@
     180
    ],
    "flags": {},
-   "order": 84,
+   "order": 85,
    "mode": 0,
    "inputs": [
     {
@@ -3982,7 +3984,7 @@
     300
    ],
    "flags": {},
-   "order": 85,
+   "order": 86,
    "mode": 0,
    "inputs": [
     {
@@ -4524,7 +4526,7 @@
     1180
    ],
    "flags": {},
-   "order": 86,
+   "order": 87,
    "mode": 0,
    "inputs": [],
    "outputs": [],
@@ -4535,6 +4537,48 @@
    ],
    "color": "#432",
    "bgcolor": "#653"
+  },
+  {
+   "id": 91,
+   "type": "ProductLabelAuditGate",
+   "pos": [
+    5960,
+    170
+   ],
+   "size": [
+    380,
+    100
+   ],
+   "flags": {},
+   "order": 70,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "keyframe",
+     "type": "IMAGE",
+     "link": 214
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "link": 215
+    }
+   ],
+   "outputs": [
+    {
+     "name": "keyframe",
+     "type": "IMAGE",
+     "links": [
+      150
+     ],
+     "slot_index": 0
+    }
+   ],
+   "title": "Keyframe on to the clip only with no FAIL in its audit",
+   "properties": {
+    "Node name for S&R": "ProductLabelAuditGate"
+   },
+   "widgets_values": []
   }
  ],
  "links": [
@@ -5732,7 +5776,7 @@
   ],
   [
    150,
-   43,
+   91,
    0,
    61,
    2,
@@ -6241,6 +6285,22 @@
    89,
    8,
    "BOOLEAN"
+  ],
+  [
+   214,
+   43,
+   0,
+   91,
+   0,
+   "IMAGE"
+  ],
+  [
+   215,
+   40,
+   3,
+   91,
+   1,
+   "STRING"
   ]
  ],
  "groups": [

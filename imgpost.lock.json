@@ -1,20 +1,20 @@
 {
   "skill": "~/Documents/Claude/product-label-refinement",
-  "imgpost_version": "0.14.0",
-  "synced": "2026-10-31",
+  "imgpost_version": "0.14.1",
+  "synced": "2026-11-01",
   "files": {
-    "__init__.py": "7f6c9f35faa69ed554f40c4f78ad850f8dc6a017b6bf85d0471654e0ca6e205c",
+    "__init__.py": "4654a3b212f1dd3f3d327da263fe9d337ad6015a289734026fe4d90e7e44b88e",
     "audit.py": "2e761de246eca7f7b455718d81d4f0a3320e9db24c42fb3048def93e1440a4f8",
     "autofit.py": "92c60d7045eee4be40853a4c35777e739b814044585b7ca343b724c0fdf168e9",
     "bow.py": "56f709307bfe94bf9c96f6e30068586d6f33898202f753a81528b6fe1404b456",
     "decide.py": "14075495ed69c92847b5053fbfba9b4cf56a9036545b88461e51f0163cf82fb1",
-    "draft.py": "b360d429a2736d7b2989654b1b6af83b4ea68e79ad10b3fdc441a5b6f0c67b4e",
+    "draft.py": "24425a09dde29e1599adf24682378fafd6a4dd43c3df4cdb19b733075fb745eb",
     "fill.py": "4267aca68ce18703a25e1bbdd32670de80bcafd5701b2cd7577f46c93722a4af",
     "finish.py": "ddf6fecf4a3246bf1d931fdcb24ae95a8067230523e72a3ac5ba6399848101f0",
     "geometry.py": "2cc8d23c3d2e140d3ec0dab72b72bd0ef1d046cc73ecbe9fc4dd65f405a273b9",
     "grade.py": "fe0c9d16dbc4c9df56f1cd8e69a88e37f5f87cd976089370a0fcd1e21f728d2b",
     "images.py": "7d2e9e6f77b4f70c555bcf35412a11caa7705afbffff83e8636dbac0604d7e3d",
-    "ink.py": "68e80cc42998c4176968a25c02554804c6f4625e5e8f4aeaf1fd16919198a97c",
+    "ink.py": "4779fa3d70168792737ff8b4285f60cafc7b81f541c7ab3a399b8295c47b843c",
     "masks.py": "2f46b382f3b6f0654d603557ed3b2b39f130f7dd825ccacbe0bb725e464b91a9",
     "outline.py": "134de36ca4749f6d58a5d177f2e97f90c6c84400edf6fc30cbd2992d252ad60f",
     "psd.py": "132fdcb5dd9ef88004cdb29c78a5bd67621f395c53b39e47fc8f5b1a0a13f868",
@@ -24,8 +24,8 @@
   },
   "run_py": "4e830d0b4aa8984c51ab0bd687f768a3ee27fb1c81ec931e756a8569f93fd689",
   "video_engine": {
-    "synced": "2026-10-31",
-    "imgpost_version": "0.14.0",
+    "synced": "2026-11-01",
+    "imgpost_version": "0.14.1",
     "packages": {
       "imgvideo": {
         "version": "0.13.0",
