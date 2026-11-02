@@ -1371,9 +1371,56 @@ def dark_checks(crop_u8, out_u8, info, offset):
     if info.get("polarity") != "dark":
         return []
     size = int(info.get("frame_size") or 19)
-    return level_check(crop_u8, out_u8, info["matte"], size, offset) + \
+    return place_check(crop_u8, out_u8, info["matte"], size, offset) + \
+        level_check(crop_u8, out_u8, info["matte"], size, offset) + \
         shape_check(crop_u8, out_u8, info["matte"], size, offset) + \
         rim_check(crop_u8, out_u8, info["matte"], info.get("vis"), size, offset)
+
+
+MIN_MATCH = 0.5      # place_check: the two prints' profiles correlate this well or better for a FAIL
+
+
+def place_check(src_u8, out_u8, M, size, offset, max_px=12.0, max_share=0.10):
+    """Dark print is registered onto the generated print, so it lands on it: the result's new print against the frame's
+    own print along the body's axis (their row profiles across the body, correlated over shifts up to the new print's
+    height). Off by over max_px, or max_share of that height, the label sits off the generated print and the
+    generator's own print shows beside it: a FAIL, which stops the clip (a misplaced keyframe would carry through
+    every frame); with the profiles matching under MIN_MATCH (another layout) a WARN. Measured: a squat jar whose mask
+    fit was squeezed into two thirds of its mask, +144 px over a 229 px print (match 0.78); the same jar fitted right,
+    -2 px (0.85). -> audit findings ("ink_place")"""
+    from . import bow as bw
+    Ps, Po, changed = _print_maps(src_u8, out_u8, M, size)
+    inner = ndi.binary_erosion(M, iterations=4)
+    ys, xs = np.nonzero(inner)
+    if len(ys) < 200:
+        return []
+    c, ax, _n = bw.body_axis(M)
+    t = np.round((xs - c[0]) * ax[0] + (ys - c[1]) * ax[1]).astype(int)
+    lo = int(t.min())
+    pn = np.bincount(t - lo, weights=Po[ys, xs] * changed[ys, xs])
+    pg = np.bincount(t - lo, weights=Ps[ys, xs], minlength=len(pn))
+    rows = np.nonzero(pn > 0.05 * pn.max())[0] if pn.max() > 0 else []
+    if len(rows) < 10 or pg.max() <= 0:
+        return []
+    span = int(rows.max() - rows.min())
+    best, shift = -1.0, 0
+    for d in range(-span, span + 1):
+        a, b = pn[max(0, -d):len(pn) - max(0, d)], pg[max(0, d):len(pg) - max(0, -d)]
+        v = float((a * b).sum() / (np.sqrt((a * a).sum() * (b * b).sum()) + 1e-9))
+        if v > best:
+            best, shift = v, d
+    lim = max(max_px, max_share * span)
+    text = (f"the new print sits {shift:+d} px along the body from the generated print it replaces (its {span} px of rows; "
+            f"profile match {best:.2f})")
+    if abs(shift) > lim:
+        yy, xx = np.nonzero(changed & inner)
+        box = [int(xx.min()) + offset[0], int(yy.min()) + offset[1], int(xx.max()) + offset[0], int(yy.max()) + offset[1]]
+        # a weak profile match (the generator drew another layout) can't tell where the print should be: a WARN
+        return [{"check": "ink_place", "level": "FAIL" if best >= MIN_MATCH else "WARN", "px": int(abs(shift)), "box": box,
+                 "shift_px": int(shift),
+                 "text": text + f": over {lim:.0f} px, the label is off the product's print and the generator's own shows "
+                                "beside it (the outline's fit to the mask, the registration's reach)"}]
+    return [{"check": "ink_place", "level": "INFO", "px": int(abs(shift)), "shift_px": int(shift), "text": text}]
 
 
 def layers(filled, out_u8, info):

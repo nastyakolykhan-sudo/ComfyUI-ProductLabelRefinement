@@ -1426,6 +1426,22 @@
       "title": "Video branch: only for a clip"
     }
   },
+  "91": {
+    "inputs": {
+      "keyframe": [
+        "43",
+        0
+      ],
+      "report": [
+        "40",
+        3
+      ]
+    },
+    "class_type": "ProductLabelAuditGate",
+    "_meta": {
+      "title": "Keyframe on to the clip only with no FAIL in its audit"
+    }
+  },
   "61": {
     "inputs": {
       "when": [
@@ -1437,7 +1453,7 @@
         0
       ],
       "if_false": [
-        "43",
+        "91",
         0
       ]
     },

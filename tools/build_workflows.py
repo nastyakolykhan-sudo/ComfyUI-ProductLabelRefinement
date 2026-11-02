@@ -319,8 +319,11 @@ def definition_all():
             "product": L(57, 0), "matte": L(37, 1), "filename_prefix": "product-label-refinement/refined"}, (3900, 640)),
         # video: Refine (Video) through the clip from the keyframe (the stills branch's, or the given one)
         60: (RUN, "Video branch: only for a clip", {"value": L(19, 0), "when": L(1, 3), "run_when": "true"}, (960, 2300)),
+        # the stills branch's keyframe goes on to the clip only when its audit has no FAIL (else the run stops)
+        91: ("ProductLabelAuditGate", "Keyframe on to the clip only with no FAIL in its audit", {
+            "keyframe": L(43, 0), "report": L(40, 3)}, (0, 0)),
         61: (SW, "Keyframe: the given one, else the stills branch's", {"when": L(4, 2), "if_true": L(4, 0),
-                                                                       "if_false": L(43, 0)}, (960, 2440)),
+                                                                       "if_false": L(91, 0)}, (960, 2440)),
         62: ("ProductLabelVideoRefine", "Product Label: Refine (Video)", {
             "frames": L(60, 0), "mask": L(74, 0), "keyframes": L(61, 0), "tracker": "alltracker.pth",
             "keyframe_index": L(19, 3), "keyframe_frames": "auto", "settings": L(7, 0), "fps": L(1, 1), "processes": 0,
@@ -357,7 +360,7 @@ ALL_COLUMNS = [[1, 2, 3, 4, 5, 6, 7, 8, 9, 84], [89, 19, 10, 11, 86, 87, 12, 13,
                [81, 82, 83, 70, 71, 76, 77, 72, 73, 85, 74],
                [20, 21, 88, 22, 23, 24], [25, 26, 27, 29, 28, 30],
                [31, 32, 33, 34, 35, 36], [37, 38, 39, 40], [41, 42, 43, 44], [45, 46, 47, 48], [49, 50, 51, 52, 53, 54],
-               [55, 56, 57, 58], [60, 61, 62], [75, 63, 64, 65], [66, 67, 78, 79, 80]]
+               [55, 56, 57, 58], [60, 91, 61, 62], [75, 63, 64, 65], [66, 67, 78, 79, 80]]
 ALL_HEIGHTS = {1: 374, 21: 720, 24: 852, 31: 246, 70: 300}
 ALL_WIDTHS = {4: 510, 6: 439, 11: 504, 33: 416, 35: 397, 43: 400}
 
@@ -416,7 +419,7 @@ ALL_GROUPS = [
     ("Paper or print on the body, composite and QA", [33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43], "#a1309b"),
     ("Stills outputs", [44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58], "#444"),
     ("Video: Refine (Video) through the shot, spliced back into the clip (clips only)",
-     [60, 61, 62, 75, 63, 64, 65, 66, 67, 78, 79, 80], "#335"),
+     [60, 91, 61, 62, 75, 63, 64, 65, 66, 67, 78, 79, 80], "#335"),
 ]
 
 
@@ -424,7 +427,7 @@ SIZE = {"LoadImage": (400, 360), "LoadImageMask": (400, 360), "SaveImage": (400,
         "ImagePostQASheet": (420, 520), "ImagePostFitWarp": (380, 140), "ImagePostSavePSD": (420, 300),
         "ProductLabelLoadSource": (400, 360), "ProductLabelLoadOptional": (400, 360), "ProductLabelSwitch": (380, 100),
         "ProductLabelRunIf": (380, 100), "ProductLabelPrintType": (380, 80), "ProductLabelPickFrame": (380, 120),
-        "ProductLabelShot": (400, 200), "ProductLabelFindKeyframe": (400, 280), "ProductLabelSplice": (400, 240), "ProductLabelMaskOverlay": (380, 120),
+        "ProductLabelShot": (400, 200), "ProductLabelFindKeyframe": (400, 280), "ProductLabelAuditGate": (380, 100), "ProductLabelSplice": (400, 240), "ProductLabelMaskOverlay": (380, 120),
         "ProductLabelPackshotMatte": (400, 140), "ProductLabelSAM3Points": (400, 100),
         "PrimitiveStringMultiline": (400, 240), "PrimitiveInt": (400, 100), "PrimitiveBoolean": (400, 80),
         "ProductLabelVideoSettings": (400, 320), "CLIPTextEncode": (400, 200), "CheckpointLoaderSimple": (400, 120),

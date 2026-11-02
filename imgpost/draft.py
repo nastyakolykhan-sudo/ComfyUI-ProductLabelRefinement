@@ -105,6 +105,43 @@ def _snap_occluders(scene, occluders):
     return occ
 
 
+MISS_MAX = 0.05     # a mask-alone fit may leave this share of the product's mask uncovered by the outline, no more
+
+
+def _miss(mask, P, H):
+    """The share of the product's mask the fitted outline leaves uncovered (an occluder or a part the packshot shows
+    larger only makes the outline overshoot, which doesn't count)."""
+    W = raster.fill_polygon(mask.shape[0], mask.shape[1], [tuple(q) for q in geo.apply_H(H, P)]) > 0
+    return float((mask & ~W).sum() / max(mask.sum(), 1)), float((mask & W).sum() / max((mask | W).sum(), 1))
+
+
+def _fit_mask_alone(mask, rmask, P, model, skip, notes):
+    """The outline fitted to the mask from its rough starts (mask_starts): the best by the residual on the contour
+    (_mask_score), as before. Its coverage is then checked: where it leaves over MISS_MAX of the mask uncovered, the
+    residual was fooled (a squat product seen from above: the frontal outline never fits its silhouette within the
+    residual's 5 px cap, so a fit squeezed into two thirds of the mask scored about as well as the right one), and
+    every start, plus the model fitted on top of an affine fit, is tried again and the best by coverage kept. If even
+    that misses, the draft stops: the mask alone can't place this packshot. -> the fit (dict as af.fit_to_mask)"""
+    fits = [af.fit_to_mask(mask, P, h, model=model, skip=skip) for h in mask_starts(mask, rmask, P, model)]
+    fit = min(fits, key=_mask_score)
+    miss, iou = _miss(mask, P, fit["H"])
+    if miss <= MISS_MAX:
+        return fit
+    if model != "affine":
+        fa = min((af.fit_to_mask(mask, P, h, model="affine", skip=skip) for h in mask_starts(mask, rmask, P, "affine")),
+                 key=_mask_score)
+        fits.append(af.fit_to_mask(mask, P, fa["H"], model=model, skip=skip))
+    scored = [(_miss(mask, P, f["H"]), f) for f in fits]
+    (miss2, iou2), best = min(scored, key=lambda x: (x[0][0] > MISS_MAX, _mask_score(x[1]) + 20.0 * (1.0 - x[0][1])))
+    if miss2 > MISS_MAX:
+        raise DraftError(f"the packshot's outline, fitted to the product's mask, leaves {miss2:.0%} of the mask uncovered "
+                         f"(at most {MISS_MAX:.0%}): the mask alone can't place this packshot. Give a quad or landmark "
+                         "pairs, a mask without occluders, or a packshot of the same product seen as the frame shows it")
+    notes.append(f"the mask fit's first pick left {miss:.0%} of the mask uncovered (overlap {iou:.3f}): refitted from every "
+                 f"start and an affine fit, {miss2:.1%} uncovered (overlap {iou2:.3f})")
+    return best
+
+
 def _mask_score(fit):
     """How well a mask fit sits on the contour: mean |residual| per outline sample, capped at 5 px (5 where none)."""
     r = np.abs(fit["residual"])
@@ -180,8 +217,7 @@ def draft(scene_u8, ref_u8, ref_alpha=None, quad=None, pairs=(), occluders=(), m
         if H0 is not None:
             fit = af.fit_to_mask(mask, P, H0, model=model, skip=skip)
         else:
-            fit = min((af.fit_to_mask(mask, P, h, model=model, skip=skip) for h in mask_starts(mask, rmask, P, model)),
-                      key=_mask_score)
+            fit = _fit_mask_alone(mask, rmask, P, model, skip, notes)
         H0 = fit["H"]
         mask_note = fit["notes"][-1]
 
