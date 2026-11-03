@@ -1,0 +1,138 @@
+# The pack's checks on every pull request (and on main after a merge), on CPU, in parallel jobs:
+#   checks          brand names in the change, the pins, tools/regress.py --psd on the demo against the skill's run.py
+#   one workflow    tools/regress_all.py, one case per job: the one workflow against each template, 0 px
+#   video node      tools/regress_video.py on the video demo: Refine (Video) against the skill's video.py, bit for bit,
+#                   on ffmpeg 5.0.1 and on Ubuntu's own (6.1)
+# README.md "Maintaining" has the routine: a branch per change, these checks, a one-click merge, Swordfish pulls main.
+name: checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  COMFYUI_VERSION: v0.41.0
+  COMFY: ${{ github.workspace }}/ComfyUI
+  MASKASPECTCROP_REF: 056bc65c010d7cb99e7d3a6414103957bd5fc272   # the one workflow's Crop & Rotate nodes
+  TORCH_VERSION: 2.14.1
+  TORCHVISION_VERSION: 0.29.1
+  ALLTRACKER_REV: c8ba31225828cab9ec512d0627f0f826e641a877
+  ALLTRACKER_SHA256: ffd9ebcfb6d206d594b646999a150540f92c049cf9b2bf940facf7123f62aa1d
+  SAM3_REV: 7bb8374780a725b4353ed31f3a9395c9742b5621
+  SAM3_SHA256: 9ba99c92703c2e8b4f47de2d34a539bb8e18923049e238b780d70dbe6368eb03
+  FFMPEG_VERSION: 5.0.1          # the engine's: see .github/actions/setup
+  FFMPEG_SHA256: b54806fff96647aee8fa6dbccdce305308221b9a3ebdbe815966fb82a9bc252b
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  checks:
+    name: brand names, pins, stills against run.py
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: pack
+          fetch-depth: 0
+      - uses: ./pack/.github/actions/setup
+
+      - name: Brand names in this change (the terms are the repository secret BRAND_TERMS)
+        working-directory: pack
+        env:
+          BRAND_TERMS: ${{ secrets.BRAND_TERMS }}
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before || 'HEAD~1' }}
+        run: |
+          case "$BASE" in 0000000*) BASE=HEAD~1 ;; esac
+          python -P tools/brand_check.py --base "$BASE"
+
+      - name: Pins (the vendored engine and the skill's command lines against imgpost.lock.json)
+        working-directory: pack
+        run: |
+          python -P tools/sync_imgpost.py
+          python -P tools/sync_video_engine.py
+
+      - name: Stills against the skill's run.py (the demo, with the PSD)
+        working-directory: pack
+        run: python -I tools/regress.py --psd --work "$RUNNER_TEMP/regress"
+
+      - name: Keep the run (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regress
+          retention-days: 7
+          path: ${{ runner.temp }}/regress
+
+  one-workflow:
+    name: one workflow, ${{ matrix.case }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        case: [ink-draft, ink-job, paper-draft, paper-job, video]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: pack
+      - uses: ./pack/.github/actions/setup
+        with:
+          sam3: "true"
+          server: "true"
+
+      - name: The one workflow against its template
+        working-directory: pack
+        run: python -P tools/regress_all.py --server http://127.0.0.1:8188 --only ${{ matrix.case }} --keep "$RUNNER_TEMP/regress_all"
+
+      - name: Keep the runs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: one-workflow-${{ matrix.case }}
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/comfyui.log
+            ${{ runner.temp }}/regress_all
+
+  video-node:
+    name: video node against video.py${{ matrix.label }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ffmpeg: pinned
+            label: ""
+          - ffmpeg: ubuntu
+            label: ", Ubuntu's ffmpeg 6.1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: pack
+      - uses: ./pack/.github/actions/setup
+        with:
+          ffmpeg: ${{ matrix.ffmpeg }}
+
+      - name: Refine (Video) against video.py --refine (the video demo, bit for bit)
+        working-directory: pack
+        env:
+          PLR_ALLTRACKER: ${{ github.workspace }}/ComfyUI/models/trackers/alltracker.pth
+        run: python -P tools/regress_video.py --comfy "$COMFY" --keep "$RUNNER_TEMP/regress_video"
+
+      - name: Keep the runs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-node-${{ matrix.ffmpeg }}
+          retention-days: 7
+          path: ${{ runner.temp }}/regress_video

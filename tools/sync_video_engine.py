@@ -3,10 +3,12 @@
 imgauto, byte for byte, next to the stills nodes' imgpost (tools/sync_imgpost.py keeps that one).
 
   python3 -P tools/sync_video_engine.py              # check (default); exit 1 when anything moved
-  python3 -P tools/sync_video_engine.py --update     # copy the skill's imgvideo/ and imgauto/ here and re-pin them
+  python3 -P tools/sync_video_engine.py --update     # copy the skill's imgvideo/, imgauto/ and video.py here, re-pin
 
 The pin is imgpost.lock.json's "video_engine" entry: each package's version and the sha256 of every file, plus the
-imgpost version the video engine was synced with (the stills sync must keep imgpost at the skill's version too).
+imgpost version the video engine was synced with (the stills sync must keep imgpost at the skill's version too),
+and video.py's sha256: tools/skill_cli/video.py is the skill's video.py, which the pull request checks run
+tools/regress_video.py against, since GitHub has no skill folder.
 After --update: run tools/regress_video.py, then commit.
 """
 import argparse
@@ -21,11 +23,16 @@ from pathlib import Path
 PACK = Path(__file__).resolve().parent.parent
 LOCK = PACK / "imgpost.lock.json"
 PACKAGES = ("imgvideo", "imgauto")
+CLI = PACK / "tools" / "skill_cli"
 
 
 def files(root):
     return {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
             for p in sorted(root.rglob("*")) if p.is_file() and p.suffix in (".py", "") and "__pycache__" not in p.parts}
+
+
+def sha(p):
+    return hashlib.sha256(Path(p).read_bytes()).hexdigest() if Path(p).exists() else None
 
 
 def version(pkg_dir):
@@ -51,6 +58,8 @@ def main():
                 shutil.rmtree(dst)
             shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.md"))
             ve["packages"][pkg] = {"version": version(dst), "files": files(dst)}
+        shutil.copy2(skill / "scripts" / "video.py", CLI / "video.py")
+        ve["video_py"] = sha(CLI / "video.py")
         lock["video_engine"] = ve
         LOCK.write_text(json.dumps(lock, indent=2) + "\n")
         print("synced " + ", ".join(f"{p} {v['version']} ({len(v['files'])} files)" for p, v in ve["packages"].items()) +
@@ -73,6 +82,10 @@ def main():
             moved = sorted(n for n in set(there) | set(pin["files"]) if there.get(n) != pin["files"].get(n))
             if moved:
                 problems.append(f"the skill's {pkg} changed since the pin ({ve['synced']}): " + ", ".join(moved) + "  -> --update")
+    if sha(CLI / "video.py") != ve.get("video_py"):
+        problems.append("tools/skill_cli/video.py differs from the lock's video_py (edited here?)  -> --update")
+    if (skill / "scripts").is_dir() and sha(skill / "scripts" / "video.py") != ve.get("video_py"):
+        problems.append(f"the skill's video.py changed since the pin ({ve['synced']})  -> --update")
     if ve["imgpost_version"] != lock.get("imgpost_version"):
         problems.append(f"the video engine was synced with imgpost {ve['imgpost_version']}, the pack has "
                         f"{lock.get('imgpost_version')}")
