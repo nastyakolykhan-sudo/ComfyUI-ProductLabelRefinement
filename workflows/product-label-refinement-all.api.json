@@ -231,7 +231,6 @@
       ],
       "threshold": 0.33,
       "refine_iterations": 2,
-      "individual_masks": false,
       "conditioning": [
         "87",
         0
@@ -243,11 +242,19 @@
       "negative_coords": [
         "86",
         1
+      ],
+      "reference": [
+        "2",
+        0
+      ],
+      "reference_mask": [
+        "82",
+        0
       ]
     },
-    "class_type": "SAM3_Detect",
+    "class_type": "ProductLabelSAM3Product",
     "_meta": {
-      "title": "SAM 3 on the keyframe frame"
+      "title": "SAM 3 on the keyframe frame: the detection that matches the packshot"
     }
   },
   "14": {
@@ -594,6 +601,7 @@
       "rotation": 0.0,
       "aspect_ratio": "free",
       "padding_color": "grey",
+      "feathering": 0,
       "mask": [
         "17",
         1
@@ -653,6 +661,65 @@
       "title": "Auto Draft's product mask (on, off)"
     }
   },
+  "96": {
+    "inputs": {
+      "text": "label:4",
+      "clip": [
+        "10",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "SAM 3 prompt for labels (label mode)"
+    }
+  },
+  "97": {
+    "inputs": {
+      "model": [
+        "10",
+        0
+      ],
+      "image": [
+        "2",
+        0
+      ],
+      "threshold": 0.33,
+      "refine_iterations": 2,
+      "individual_masks": false,
+      "conditioning": [
+        "96",
+        0
+      ]
+    },
+    "class_type": "SAM3_Detect",
+    "_meta": {
+      "title": "SAM 3: the labels on the packshot"
+    }
+  },
+  "98": {
+    "inputs": {
+      "model": [
+        "10",
+        0
+      ],
+      "image": [
+        "22",
+        0
+      ],
+      "threshold": 0.33,
+      "refine_iterations": 2,
+      "individual_masks": false,
+      "conditioning": [
+        "96",
+        0
+      ]
+    },
+    "class_type": "SAM3_Detect",
+    "_meta": {
+      "title": "SAM 3: the labels on the frame Auto Draft fixes"
+    }
+  },
   "24": {
     "inputs": {
       "scene": [
@@ -680,14 +747,22 @@
       "occluders": "",
       "outline": "",
       "mask_skip": "",
-      "label": "off",
+      "label": "auto",
       "ink": "auto",
       "print_box": "auto",
-      "bow": "auto"
+      "bow": "auto",
+      "label_mask": [
+        "98",
+        0
+      ],
+      "reference_label_mask": [
+        "97",
+        0
+      ]
     },
     "class_type": "ImagePostAutoDraft",
     "_meta": {
-      "title": "Auto Draft (model, ink, print box, bow: auto = decided from its inputs)"
+      "title": "Auto Draft (model, ink, print box, bow, label: auto = decided from its inputs)"
     }
   },
   "25": {
@@ -1174,13 +1249,29 @@
       "title": "Refined frame: pasted back (straightened), else as it is"
     }
   },
+  "93": {
+    "inputs": {
+      "report": [
+        "40",
+        3
+      ],
+      "prefix": "product-label-refinement/refined"
+    },
+    "class_type": "ProductLabelAuditName",
+    "_meta": {
+      "title": "Refined image's name: _AUDIT-FAIL when its audit fails"
+    }
+  },
   "44": {
     "inputs": {
       "images": [
         "43",
         0
       ],
-      "filename_prefix": "product-label-refinement/refined"
+      "filename_prefix": [
+        "93",
+        0
+      ]
     },
     "class_type": "SaveImage",
     "_meta": {
@@ -1426,10 +1517,27 @@
       "title": "Video branch: only for a clip"
     }
   },
+  "92": {
+    "inputs": {
+      "value": [
+        "43",
+        0
+      ],
+      "when": [
+        "60",
+        0
+      ],
+      "run_when": "true"
+    },
+    "class_type": "ProductLabelRunIf",
+    "_meta": {
+      "title": "Keyframe to the gate: only when the clip renders"
+    }
+  },
   "91": {
     "inputs": {
       "keyframe": [
-        "43",
+        "92",
         0
       ],
       "report": [
@@ -1525,6 +1633,34 @@
       "title": "The refined shot back into the clip (its text: shot.json)"
     }
   },
+  "94": {
+    "inputs": {
+      "report": [
+        "62",
+        3
+      ],
+      "prefix": "product-label-refinement/video/refined",
+      "save_summary": true
+    },
+    "class_type": "ProductLabelReviewName",
+    "_meta": {
+      "title": "Master's name: _REVIEW-FAIL / _REVIEW-CHECK from the review (+ its summary)"
+    }
+  },
+  "95": {
+    "inputs": {
+      "report": [
+        "62",
+        3
+      ],
+      "prefix": "product-label-refinement/video/review",
+      "save_summary": false
+    },
+    "class_type": "ProductLabelReviewName",
+    "_meta": {
+      "title": "Review copy's name: _REVIEW-FAIL / _REVIEW-CHECK from the review"
+    }
+  },
   "63": {
     "inputs": {
       "images": [
@@ -1535,7 +1671,10 @@
         "1",
         1
       ],
-      "filename_prefix": "product-label-refinement/video/refined",
+      "filename_prefix": [
+        "94",
+        0
+      ],
       "format": "mov (PNG, exact RGB)",
       "audio": [
         "1",
@@ -1576,7 +1715,10 @@
         "64",
         0
       ],
-      "filename_prefix": "product-label-refinement/video/review",
+      "filename_prefix": [
+        "95",
+        0
+      ],
       "format": "auto",
       "format.codec": "auto",
       "codec": "auto"

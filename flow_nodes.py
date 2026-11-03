@@ -323,6 +323,129 @@ def _sam3_detect(model, images, conditioning, threshold=0.33):
     return m[None] if m.dim() == 2 else m
 
 
+CANDIDATES = 6           # SAM 3's detections of a one-object prompt scored against the packshot
+PICK_MIN_AREA = 0.0002   # a detection smaller than this share of the frame isn't a candidate
+PICK_MARGIN = 0.06       # another detection replaces SAM 3's likeliest only when its match is this much higher (a
+                         # clear bottle over an amber one asked for: 0.74 vs 0.88; two alike bottles, left and right:
+                         # 0.85 vs 0.87, the prompt decides)
+PICK_FLOOR = 0.5         # the pick matching the packshot less than this is another product: stop (the product asked
+                         # for scored 0.53-0.91 on its own frames, partly hidden or opened included; a shelf neighbour
+                         # the prompt fit better than the product: 0.35)
+
+
+def _sam3_candidates(model, image, conditioning, threshold=0.33, refine_iterations=2, n=CANDIDATES):
+    """SAM 3's detections of a one-object prompt on one frame, each on its own, best SAM 3 score first, up to n.
+    -> (masks [N, H, W] bool, scores), or None when the prompt asks for several objects or kinds (name:N, commas)."""
+    if not conditioning:
+        return None
+    meta = conditioning[0][1]
+    multi = meta.get("sam3_multi_cond")          # only there for several prompts or name:N (one prompt: plain)
+    if multi is not None and (len(multi) != 1 or multi[0].get("max_detections", 1) != 1):
+        return None
+    entry = multi[0] if multi else {"cond": conditioning[0][0], "attention_mask": meta.get("attention_mask")}
+    cond = [[conditioning[0][0], {**meta, "sam3_multi_cond": [{**entry, "max_detections": n}]}]]
+    from comfy_extras.nodes_sam3 import SAM3_Detect
+    o = SAM3_Detect.execute(model=model, image=image[:1], conditioning=cond, threshold=threshold,
+                            refine_iterations=refine_iterations, individual_masks=True)
+    r = getattr(o, "result", None) or getattr(o, "args", None) or o
+    boxes = r[1][0] if r[1] else []
+    return r[0].detach().cpu().numpy() > 0.5, [round(float(b["score"]), 3) for b in boxes]
+
+
+def _pick_product(model, image, conditioning, ref, Rm, threshold=0.33, refine_iterations=2):
+    """The product on one frame: of SAM 3's detections of the prompt, the one that matches the packshot best (its
+    silhouette x colour, from _match_packshot), not only SAM 3's likeliest. A group shot can hold a product the
+    prompt fits better (another box beside a battery pack). -> (mask [H, W] bool, report dict). A prompt for several
+    objects or kinds keeps SAM 3's own union."""
+    import numpy as np
+    from .video_nodes import _engine, _u8
+    _engine()
+    from imgauto import refangle
+    c = _sam3_candidates(model, image, conditioning, threshold, refine_iterations)
+    if c is None:
+        m = _sam3_detect(model, image[:1], conditioning, threshold)[0].detach().cpu().numpy() > 0.5
+        return m, {"from": "SAM 3's union (the prompt asks for several objects or kinds)"}
+    masks, scores = c
+    H, W = image.shape[1:3]
+    if not len(masks):
+        return np.zeros((H, W), bool), {"from": "SAM 3 found nothing", "candidates": []}
+    fr = _u8(image[:1])[0]
+    cands = [{"sam3": s, **_match_packshot(fr, m, ref, Rm, refangle, PICK_MIN_AREA)} for m, s in zip(masks, scores)]
+    # which product it is: silhouette x colour. Size is left out here (a bigger neighbour isn't more this product);
+    # it only weighs which shot to fix from
+    for c in cands:
+        c["match"] = round(c["shape"] * c["colour"], 4)
+    # SAM 3's likeliest stays unless another is clearly more this product: two of a kind look alike to the packshot,
+    # and there the prompt's own words (left, right, a colour) decide
+    best = max(range(len(cands)), key=lambda j: (cands[j]["match"], -j))
+    i = best if cands[best]["match"] > cands[0]["match"] + PICK_MARGIN else 0
+    rep = {"from": "the packshot's best match of SAM 3's detections", "pick": i, "candidates": cands}
+    if i:
+        rep["note"] = (f"SAM 3's likeliest detection ({cands[0]['sam3']}) matches the packshot less "
+                       f"({cands[0]['match']}) than its #{i + 1} ({cands[i]['sam3']}: {cands[i]['match']}): took #{i + 1}")
+    elif best:
+        rep["note"] = (f"SAM 3's #{best + 1} matches the packshot about as well ({cands[best]['match']} vs "
+                       f"{cands[0]['match']}): kept SAM 3's likeliest, as the prompt words it")
+    return masks[i], rep
+
+
+class ProductLabelSAM3Product:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+                    "model": ("MODEL", {"tooltip": "SAM 3"}),
+                    "image": ("IMAGE", {"tooltip": "The keyframe frame (an image: the image)"}),
+                    "threshold": ("FLOAT", {"default": 0.33, "min": 0.0, "max": 1.0, "step": 0.01}),
+                    "refine_iterations": ("INT", {"default": 2, "min": 0, "max": 5})},
+                "optional": {
+                    "conditioning": ("CONDITIONING", {"tooltip": "SAM 3's text prompt (none when points are given)"}),
+                    "positive_coords": ("STRING", {"forceInput": True}),
+                    "negative_coords": ("STRING", {"forceInput": True}),
+                    "reference": ("IMAGE", {"tooltip": "The packshot"}),
+                    "reference_mask": ("MASK", {"tooltip": "The packshot's outline (Load Image's convention: 1 = "
+                                                           "transparent)"})}}
+
+    RETURN_TYPES = ("MASK", "STRING")
+    RETURN_NAMES = ("mask", "report")
+    FUNCTION = "detect"
+    CATEGORY = CATEGORY
+    DESCRIPTION = ("SAM 3 on the keyframe frame: the product. Of SAM 3's detections of the prompt (up to 6), the one "
+                   "whose silhouette and colour match the packshot best, so a group shot's neighbour the prompt also "
+                   "fits isn't fixed instead. Points (SAM 3 points node) segment what was clicked; a prompt for "
+                   "several objects or kinds (name:N, commas) keeps SAM 3's union. Stops when even the best match is "
+                   "below 0.5: none of the detections is the packshot's product (the prompt fit a neighbour). report: "
+                   "each detection's scores and the pick.")
+
+    def detect(self, model, image, threshold, refine_iterations, conditioning=None, positive_coords=None,
+               negative_coords=None, reference=None, reference_mask=None):
+        points = bool(json.loads(positive_coords or "[]") or json.loads(negative_coords or "[]"))
+        if points or conditioning is None or reference is None:
+            from comfy_extras.nodes_sam3 import SAM3_Detect
+            o = SAM3_Detect.execute(model=model, image=image[:1], conditioning=conditioning, threshold=threshold,
+                                    refine_iterations=refine_iterations, individual_masks=False,
+                                    positive_coords=positive_coords, negative_coords=negative_coords)
+            m = (getattr(o, "result", None) or getattr(o, "args", None) or o)[0]
+            rep = json.dumps({"from": "the points given" if points else "SAM 3 (no packshot to pick by)"})
+            return {"ui": {"text": [rep]}, "result": (m[None] if m.dim() == 2 else m, rep)}
+        from .video_nodes import _u8
+        ref = _u8(reference[:1])[0]
+        rm = reference_mask[None] if reference_mask is not None and reference_mask.dim() == 2 else reference_mask
+        Rm = rm[0].detach().cpu().numpy() < 0.5 if rm is not None and rm.shape[1:3] == reference.shape[1:3] and \
+            bool((rm > 0.5).any()) else _reference_matte(ref, None)
+        m, rep = _pick_product(model, image, conditioning, ref, Rm, threshold, refine_iterations)
+        text = json.dumps(rep, default=float)
+        print("product    " + rep.get("note", rep["from"]))
+        if rep.get("candidates"):
+            c = rep["candidates"][rep["pick"]]
+            if c["match"] < PICK_FLOOR:
+                raise ValueError(
+                    f"none of SAM 3's {len(rep['candidates'])} detections of the prompt is the packshot's product: the "
+                    f"best matches it {c['match']} (silhouette {c['shape']} x colour {c['colour']}; below {PICK_FLOOR} "
+                    f"is another product). Name the product as the frame shows it in the SAM 3 prompt, or give points "
+                    f"on it. Detections: {text}")
+        return {"ui": {"text": [text]}, "result": (torch.from_numpy(m.astype("float32"))[None], text)}
+
+
 class ProductLabelFindKeyframe:
     # candidates per shot: these fractions of the way through it
     PROBES = (0.25, 0.5, 0.75)
@@ -354,9 +477,10 @@ class ProductLabelFindKeyframe:
     CATEGORY = CATEGORY
     DESCRIPTION = (
         "The keyframe frame: as set (0 or more), or found (-1). Found: the clip's shots (between hard cuts); in each, "
-        "SAM 3 on three frames; the shot whose product matches the packshot best (silhouette, print layout, colour, "
-        "size on screen); in that shot, SAM 3's track and the frame where the product shows largest, sharpest and "
-        "most frontal, off morph frames and the shot's ends (the engine's keypick). With a corrected keyframe, -1 "
+        "SAM 3 on three frames (its detection that matches the packshot best); the shot whose product matches the "
+        "packshot best (silhouette, colour, size on screen); in that shot, SAM 3's track and, of the frames where the "
+        "product is in view, the one where it shows largest, sharpest and most frontal, off morph frames and the "
+        "shot's ends (the engine's keypick). With a corrected keyframe, -1 "
         "passes on (Refine finds its frame); an image is frame 0. report: JSON with every shot's score, the pick and "
         "its runner-up; a margin under 5 % or a weak match is flagged.")
 
@@ -394,15 +518,16 @@ class ProductLabelFindKeyframe:
         if masks is not None:
             masks = masks[None] if masks.dim() == 2 else masks
         probes = sorted({min(e, max(s, round(s + (e - s) * q))) for s, e in bounds for q in self.PROBES})
-        idx = torch.tensor(probes)
-        pm = masks[idx] if mask_given else _sam3_detect(model, frames[idx], conditioning)
+        # each probe's product: the given mask, else SAM 3's detection that matches the packshot best
+        pm = [m.detach().cpu().numpy() > 0.5 for m in masks[torch.tensor(probes)]] if mask_given else \
+            [_pick_product(model, frames[t:t + 1], conditioning, ref, Rm)[0] for t in probes]
         shots_rep = []
         for s, e in bounds:
             cands = []
             for j, t in enumerate(probes):
                 if not s <= t <= e:
                     continue
-                M = pm[j].detach().cpu().numpy() > 0.5
+                M = pm[j]
                 fr = _u8(frames[t:t + 1])[0]
                 cands.append(dict(t=t, **_match_packshot(fr, M, ref, Rm, refangle, self.MIN_AREA)))
             best = max(cands, key=lambda c: c["score"])
@@ -419,7 +544,7 @@ class ProductLabelFindKeyframe:
         else:
             from .video_nodes import ProductLabelVideoSAM3BothWays
             kt = top["best"] - s
-            km = _sam3_detect(model, frames[top["best"]:top["best"] + 1], conditioning)
+            km = torch.from_numpy(pm[probes.index(top["best"])].astype("float32"))[None]
             sm = ProductLabelVideoSAM3BothWays().track(frames[s:e + 1], model, km, kt, conditioning=conditioning,
                                                        detection_threshold=0.33, max_objects=1, detect_interval=1)[0]
         F = _u8(frames[s:e + 1])
@@ -427,13 +552,21 @@ class ProductLabelFindKeyframe:
         n = e - s + 1
         F2, M2 = ash.downscale(F, 2), ash.downscale(M, 2)
         stats, bnds, _sh, _kinds, _why = ash.analyse(F2, M2)
-        # the shot's ends are cuts (penalised as edges) unless they are the clip's own first or last frame
-        ranking = keypick.score(stats, bnds, range(n), open_ends=[t for t, c in ((0, s == 0), (n - 1, e == T - 1)) if c])
+        # the candidates: the frames where the product is in view. A shot can show it for part of its length only (it
+        # slides behind something, into a box, out of the frame); there the track is empty and nothing is measured
+        view = [t for t in range(n) if "width_px" in stats[t] and stats[t]["area"] >= self.MIN_AREA]
+        if not view:
+            raise ValueError(f"SAM 3's track through shot {s}-{e} doesn't hold the product on any frame: check the SAM 3 "
+                             "prompt, or set the keyframe frame")
+        # the shot's ends are cuts (penalised as edges) unless they are the clip's own first or last frame; so are the
+        # frames where the product comes into view or leaves it
+        ranking = keypick.score(stats, bnds, view, open_ends=[t for t, c in ((0, s == 0), (n - 1, e == T - 1)) if c])
         top_s = ranking[0]["score"]
-        # frames keypick can't tell apart (within TIE of the best): the one nearest the shot's middle, so the label's
-        # track runs the shortest way to either end (the track's error grows with the distance from the keyframe)
+        # frames keypick can't tell apart (within TIE of the best): the one nearest the middle of the product's time in
+        # view, so the label's track runs the shortest way to either end (its error grows with the distance)
         near = [r for r in ranking if r["score"] >= (1.0 - self.TIE) * top_s]
-        best = min(near, key=lambda r: (abs(r["t"] - (n - 1) / 2), -r["score"]))
+        mid = (view[0] + view[-1]) / 2
+        best = min(near, key=lambda r: (abs(r["t"] - mid), -r["score"]))
         k = s + int(best["t"])
         warn = []
         if best["flags"]:
@@ -446,11 +579,13 @@ class ProductLabelFindKeyframe:
                         "too, run again with the keyframe frame set there")
         also = [r["shot"] for r in ranked[1:] if r["score"] >= self.ALSO * top["score"]]
         rep = {"keyframe_frame": k, "from": "found", "shot": [s, e], "also_likely": also,
+               "in_view": {"first": s + view[0], "last": s + view[-1], "frames": len(view), "of": n},
                "pick": {**best, "t": k, "best_scored": s + int(ranking[0]["t"]),
                         "tied": [s + int(r["t"]) for r in sorted(near, key=lambda r: r["t"])]},
                "shots": shots_rep, "warnings": warn}
         text = json.dumps(rep, default=float)
-        print(f"keyframe   frame {k} (shot {s}-{e}, score {top['score']:.2f}; " +
+        print(f"keyframe   frame {k} (shot {s}-{e}, the product in view on {len(view)} of its {n} frames; "
+              f"score {top['score']:.2f}; " +
               ", ".join(f"{r['shot'][0]}-{r['shot'][1]} {r['score']:.2f}" for r in shots_rep) + ")" +
               "".join(f"\nkeyframe   WARN {w}" for w in warn))
         return {"ui": {"text": [text]}, "result": (k, text)}
@@ -490,6 +625,109 @@ def _match_packshot(frame, M, ref, Rm, refangle, min_area, max_area=0.6):
     return {"area": round(area, 4), "shape": round(float(iou), 3), "colour": round(col, 3), "score": round(float(score), 4)}
 
 
+def _audit_fails(report):
+    """The FAIL entries of QA Sheet's report (its text)."""
+    try:
+        rep = json.loads(report)
+    except (TypeError, ValueError):
+        rep = {}
+    return [f for f in rep.get("audit") or [] if f.get("level") == "FAIL"]
+
+
+class ProductLabelAuditName:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"report": ("STRING", {"forceInput": True, "tooltip": "QA Sheet's report (its text)"}),
+                             "prefix": ("STRING", {"default": "product-label-refinement/refined"})}}
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("filename_prefix",)
+    FUNCTION = "name"
+    CATEGORY = CATEGORY
+    DESCRIPTION = ("The refined image's file name: the prefix, with _AUDIT-FAIL added when its audit has a FAIL. The "
+                   "image and its QA sheets are still saved, so the run's outputs show what failed (qa/audit); the name "
+                   "keeps it from passing for a finished image.")
+
+    def name(self, report, prefix):
+        fails = _audit_fails(report)
+        out = prefix + "_AUDIT-FAIL" if fails else prefix
+        return {"ui": {"text": ["; ".join(f"{f['check']}: {f['text']}" for f in fails) or "audit: no FAIL"]},
+                "result": (out,)}
+
+
+class ProductLabelReviewName:
+    SHARE = 0.5                  # a check over more than this share of the refined frames
+    WRONG = ("double", "ghost")  # the print wrong on the frame (doubled, the old print through it): over SHARE, FAIL
+    HELD = ("slide",)            # the label off the print it lies on, held (the check's own run): any, FAIL
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"report": ("STRING", {"forceInput": True, "tooltip": "Refine (Video)'s report (its text)"}),
+                             "prefix": ("STRING", {"default": "product-label-refinement/video/refined"}),
+                             "save_summary": ("BOOLEAN", {"default": True, "tooltip": (
+                                 "Save the review's verdict and checks as a JSON file under the name (one of the "
+                                 "clip's two names is enough)")})}}
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("filename_prefix",)
+    FUNCTION = "name"
+    CATEGORY = CATEGORY
+    DESCRIPTION = ("A clip's file name from Refine's own review. _REVIEW-FAIL: the print is wrong on most of the refined "
+                   "frames (doubled, or the old print showing through) or the label slid off the print it lies on. "
+                   "_REVIEW-CHECK: other checks (light flicker, a step at the label's end, edges, ...) flag most of the "
+                   "refined frames: look before delivering. They read approved clips as flagged too, so they don't "
+                   "call a clip failed. The clip is always saved; with save_summary, the verdict and each check's "
+                   "frames go in a JSON file beside it (a platform returns files, not text).")
+
+    @classmethod
+    def verdict(cls, rv):
+        """-> (verdict PASS | CHECK | FAIL, reasons, frames per check) from Refine's review summary"""
+        n, frames = int(rv.get("refined") or 0), rv.get("frames") or {}
+        per = {}
+        for t, ks in frames.items():
+            for k in ks:
+                per.setdefault(k, []).append(int(t))
+        reasons = []
+        wrong = sum(any(k in cls.WRONG for k in ks) for ks in frames.values())
+        if n and wrong > cls.SHARE * n:
+            reasons.append(f"the print wrong on {wrong} of {n} refined frames (" +
+                           ", ".join(f"{k} {len(per[k])}" for k in cls.WRONG if k in per) + ")")
+        for k in cls.HELD:
+            if k in per:
+                reasons.append(f"{k} on {len(per[k])} frames ({(rv.get('checks') or {}).get(k, '')})")
+        f = int(rv.get("flagged") or 0)
+        if reasons:
+            return "FAIL", reasons, per
+        if n and f > cls.SHARE * n:
+            return "CHECK", [f"{f} of {n} refined frames flagged: look before delivering"], per
+        return "PASS", [], per
+
+    def name(self, report, prefix, save_summary=True):
+        try:
+            rv = json.loads(report).get("review") or {}
+        except (TypeError, ValueError, AttributeError):
+            rv = {}
+        v, reasons, per = self.verdict(rv)
+        out = prefix + {"FAIL": "_REVIEW-FAIL", "CHECK": "_REVIEW-CHECK"}.get(v, "")
+        n, f = int(rv.get("refined") or 0), int(rv.get("flagged") or 0)
+        checks = ", ".join(f"{k} ({x})" for k, x in (rv.get("checks") or {}).items())
+        text = (f"review: {v}, {f} of {n} refined frames flagged" + (f": {checks}" if checks else "") +
+                ("".join(f"\n  {r}" for r in reasons)) + (f" -> {out.rpartition('/')[2]}" if v != "PASS" else ""))
+        ui = {"text": [text]}
+        if save_summary:
+            from .nodes import _output_file
+            path, fname, sub = _output_file(out + "_summary", "json")
+            with open(path, "w") as fh:
+                json.dump({"verdict": v, "reasons": reasons, "refined": n, "flagged": f, "checks": rv.get("checks") or {},
+                           "frames_per_check": {k: len(x) for k, x in sorted(per.items())},
+                           "rule": {"FAIL": f"{'/'.join(self.WRONG)} on more than {self.SHARE:.0%} of the refined "
+                                            f"frames, or any {'/'.join(self.HELD)}",
+                                    "CHECK": f"any checks on more than {self.SHARE:.0%} of the refined frames"}},
+                          fh, indent=2)
+            ui["files"] = [{"filename": fname, "subfolder": sub, "type": "output"}]
+        return {"ui": ui, "result": (out,)}
+
+
 class ProductLabelAuditGate:
     @classmethod
     def INPUT_TYPES(cls):
@@ -505,11 +743,7 @@ class ProductLabelAuditGate:
                    "would be carried through every frame of the shot. The keyframe itself is still saved, to look at.")
 
     def gate(self, keyframe, report):
-        try:
-            rep = json.loads(report)
-        except (TypeError, ValueError):
-            rep = {}
-        fails = [f for f in rep.get("audit") or [] if f.get("level") == "FAIL"]
+        fails = _audit_fails(report)
         if fails:
             raise ValueError("the keyframe's audit failed, so the clip isn't rendered (a wrong keyframe goes into every "
                              "frame): " + "; ".join(f"{f['check']}: {f['text']}" for f in fails) +
@@ -852,10 +1086,13 @@ NODE_CLASS_MAPPINGS = {
     "ProductLabelShot": ProductLabelShot,
     "ProductLabelFindKeyframe": ProductLabelFindKeyframe,
     "ProductLabelAuditGate": ProductLabelAuditGate,
+    "ProductLabelReviewName": ProductLabelReviewName,
+    "ProductLabelAuditName": ProductLabelAuditName,
     "ProductLabelSplice": ProductLabelSplice,
     "ProductLabelMaskOverlay": ProductLabelMaskOverlay,
     "ProductLabelPackshotMatte": ProductLabelPackshotMatte,
     "ProductLabelSAM3Points": ProductLabelSAM3Points,
+    "ProductLabelSAM3Product": ProductLabelSAM3Product,
     "ProductLabelPasteBackMask": ProductLabelPasteBackMask,
     "ProductLabelFrameMask": ProductLabelFrameMask,
     "ProductLabelVideoSettings": ProductLabelVideoSettings,
@@ -871,10 +1108,13 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ProductLabelShot": "Product Label: Shot (between cuts)",
     "ProductLabelFindKeyframe": "Product Label: Find Keyframe Frame",
     "ProductLabelAuditGate": "Product Label: Audit Gate",
+    "ProductLabelReviewName": "Product Label: Review Name",
+    "ProductLabelAuditName": "Product Label: Audit Name",
     "ProductLabelSplice": "Product Label: Splice Shot Back",
     "ProductLabelMaskOverlay": "Product Label: Mask Overlay",
     "ProductLabelPackshotMatte": "Product Label: Packshot Matte",
     "ProductLabelSAM3Points": "Product Label: SAM 3 Points",
+    "ProductLabelSAM3Product": "Product Label: SAM 3 Product (picked by the packshot)",
     "ProductLabelPasteBackMask": "Product Label: Paste-Back Mask",
     "ProductLabelFrameMask": "Product Label: Frame Mask",
     "ProductLabelVideoSettings": "Product Label: Video Settings",

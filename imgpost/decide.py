@@ -5,6 +5,8 @@ The print on a packshot is its glyphs: small marks that stand out of the body's 
 below it for dark), inside the product's outline, away from the outline's edge. A part of the product that differs
 from the body (a lid, a cap, a glass base, a coloured band) or a rim reaches the outline, and so does everything joined
 to it; a seam or a lid's shadow runs along such a part. Neither is print."""
+import json
+
 import numpy as np
 from scipy import ndimage as ndi
 
@@ -98,7 +100,9 @@ def settings(scene_u8, mask, ref_u8, ref_alpha=None, outline=None):
                  top in the mask; turned).
       model      affine where the view matches (a silhouette pins no perspective, and the bow is measured on top);
                  homography where it doesn't.
-      ink        light print: on the body (ink light; the frame's body and light kept). Dark print where the view
+      ink        mixed print (glyphs both lighter and darker than the body, neither 2:1 ahead): warped whole (ink
+                 off), whatever the view: an ink route lays one polarity and would read the other ink as body or
+                 as garbled print. Light print: on the body (ink light; the frame's body and light kept). Dark print where the view
                  matches: the packshot warped whole by the fit (ink off), its print placed by the product's own
                  silhouette, not by the generated print, which the generator draws off its place. Dark print seen
                  from another angle: on the body (ink dark), the print registered onto the generated print, which
@@ -122,7 +126,12 @@ def settings(scene_u8, mask, ref_u8, ref_alpha=None, outline=None):
            f"print: {pol} ({prep['light_glyphs']} light glyphs, {prep['dark_glyphs']} dark on the packshot" +
            (", mixed: check the polarity)" if prep["mixed"] else ")")]
     out = {"model": "affine" if front else "homography"}
-    if pol == "dark" and front:
+    if prep["mixed"]:
+        out.update(ink="off", print_box=None, bow="print")
+        why.append("route: print both lighter and darker than the body (mixed): an ink route lays one polarity, so the "
+                   "packshot is warped whole, placed by the product's silhouette (ink off, bow from the generated "
+                   "product's long lines)")
+    elif pol == "dark" and front:
         out.update(ink="off", print_box=None, bow="print")
         why.append("route: dark print seen front on: the packshot warped whole, placed by the product's silhouette "
                    "(ink off, bow from the generated product's long lines)")
@@ -136,6 +145,122 @@ def settings(scene_u8, mask, ref_u8, ref_alpha=None, outline=None):
     out.update(why=why, close=close or prep["mixed"],
                measures={"view_iou": vm["iou"], "polarity": pol, **prep})
     return out
+
+
+# a label laid over the body (pitfall 106): SAM 3's "label" on the packshot, and the body past its two ends
+LABEL_SAME = 10.0     # dE: the body past both ends of a label is one material within this (a frosted bottle's 1.4, a
+                      # tube round its panels 1.4; a jar's lid above its print and glass base below: 18.2, two parts)
+LABEL_FIELD = 25.0    # dE: ... or the label's field stands off the body past both its ends by this much (white paper on
+                      # amber glass 55-87, though the glass reads lighter at a thin shoulder than at a thick base: 37-45
+                      # apart; a jar's printed band against its lid and glass base 11-16)
+LABEL_GAP = 0.02      # the windows past the label's ends, along the product's axis: from this share of its length ...
+LABEL_REACH = 0.08    # ... to this
+LABEL_MIN = 0.01      # a window holding less of the product than this share: the print runs to the product's end
+LABEL_FIND = 0.03     # SAM 3's label covers at least this share of the product, else there's none
+LABEL_SIDE = 0.04     # the body's own colour beside the label at its rows, per side, over this share of the body's
+                      # width: a panel on a face (flat); else the label wraps round the body (cylinder)
+
+
+def _lab(u8):
+    x = im.srgb_to_lin(im.to_float(u8))
+    xyz = x @ np.array([[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]]).T
+    f = xyz / np.array([0.9505, 1.0, 1.089])
+    f = np.where(f > 0.008856, np.cbrt(f), 7.787 * f + 16 / 116)
+    return np.stack([116 * f[..., 1] - 16, 500 * (f[..., 0] - f[..., 1]), 200 * (f[..., 1] - f[..., 2])], -1)
+
+
+def paper_label(ref_u8, band, ref_label):
+    """Is the packshot's print on a label laid over the body (a paper label, printed panels) rather than straight on
+    it? ref_label: SAM 3's "label" on the packshot (bool), taken within the product's outline (band). A label when the
+    product continues past both of its ends along the axis, and either is one material there (LABEL_SAME: a frosted
+    bottle above and below its white label, a tube round its panels) or the label's field stands well off the body on
+    both sides (LABEL_FIELD: white paper on amber glass, which reads lighter at its shoulder than at its base). Print
+    that runs to an end of the product (a serum's to its base, a tube's from its crimp) or a band between two
+    different parts not much unlike it (a lid above, a glass base below) is on the body.
+    -> (kind "cylinder" | "flat" | None, the label's box on the packshot [x0, y0, x1, y1] or None, measures)"""
+    from . import bow as bw
+    L = ref_label & band
+    if L.sum() < LABEL_FIND * band.sum():
+        return None, None, {"label": "none found on the packshot"}
+    c, ax, n = bw.body_axis(band)
+    ys, xs = np.nonzero(band)
+    T = np.full(band.shape, np.nan)
+    T[ys, xs] = (xs - c[0]) * ax[0] + (ys - c[1]) * ax[1]
+    length = float(np.nanmax(T) - np.nanmin(T))
+    t0, t1 = np.percentile(T[L], [1, 99])
+    g, d = LABEL_GAP * length, LABEL_REACH * length
+    lab = _lab(ref_u8)
+    ends, meas = [], {"label_share": round(float(L.sum() / band.sum()), 3)}
+    for name, win in (("before", band & ~L & (T >= t0 - d) & (T <= t0 - g)),
+                      ("after", band & ~L & (T >= t1 + g) & (T <= t1 + d))):
+        share = float(win.sum() / band.sum())
+        meas[name + "_share"] = round(share, 3)
+        ends.append(np.median(lab[win], 0) if share >= LABEL_MIN else None)
+    if any(e is None for e in ends):
+        meas["why"] = "the print runs to an end of the product"
+        return None, None, meas
+    same = float(np.linalg.norm(ends[0] - ends[1]))
+    field = np.median(lab[ndi.binary_erosion(L, iterations=3)], 0)
+    off = min(float(np.linalg.norm(field - e)) for e in ends)
+    meas.update(ends_dE=round(same, 1), field_dE=round(off, 1))
+    if same > LABEL_SAME and off < LABEL_FIELD:
+        meas["why"] = "the parts past its two ends differ (a lid, a base) and the print's field isn't laid over them"
+        return None, None, meas
+    # flat or round: the body's own colour beside the label at its middle rows (a panel's margin) or not (it wraps)
+    body = 0.5 * (ends[0] + ends[1])
+    mid = band & (T >= t0 + 0.3 * (t1 - t0)) & (T <= t0 + 0.7 * (t1 - t0))
+    beside = mid & ~ndi.binary_dilation(L, iterations=2) & (np.linalg.norm(lab - body, axis=-1) <= LABEL_SAME)
+    width = float(mid.sum()) / max(1, len(np.unique(np.round(T[mid]))))
+    side = float(beside.sum()) / max(1, len(np.unique(np.round(T[mid])))) / 2.0 / max(width, 1.0)
+    meas["beside_share"] = round(side, 3)
+    kind = "flat" if side > LABEL_SIDE else "cylinder"
+    ly, lx = np.nonzero(L)
+    box = [int(lx.min()), int(ly.min()), int(lx.max()) + 1, int(ly.max()) + 1]
+    meas.update(kind=kind, box=box)
+    return kind, box, meas
+
+
+def scene_label(mask, label_mask, min_share=0.05):
+    """The generated label on the frame: SAM 3's labels within the product's mask, as one label (the convex hull of
+    the pieces, kept inside the mask: a tube's two printed panels make one). -> bool mask or None"""
+    from scipy.spatial import ConvexHull
+    from . import raster
+    Lm = label_mask & mask
+    if Lm.sum() < max(200, min_share * mask.sum()):
+        return None
+    ys, xs = np.nonzero(Lm)
+    P = np.c_[xs, ys].astype(float)
+    try:
+        hull = P[ConvexHull(P).vertices]
+    except Exception:                                # a degenerate piece: the pieces themselves
+        return Lm
+    return (raster.fill_polygon(mask.shape[0], mask.shape[1], [tuple(q) for q in hull]) > 0) & mask
+
+
+def label_auto(scene_u8, mask, ref_u8, ref_alpha=None, outline=None, ref_label=None, label_mask=None):
+    """Auto Draft's label mode decided (label "auto"): the packshot's print on a label laid over its body
+    (paper_label) and SAM 3's label found on the frame within the product. -> (kind or None, the label's box on the
+    packshot, the generated label's mask, the model for a flat label, notes)"""
+    if ref_label is None or label_mask is None or mask is None:
+        return None, None, None, None, []
+    vm = view_match(scene_u8, mask, ref_u8, ref_alpha, outline)
+    from . import raster
+    band = raster.fill_polygon(ref_u8.shape[0], ref_u8.shape[1], [tuple(q) for q in vm["P"]]) > 0
+    kind, box, meas = paper_label(ref_u8, band, ref_label)
+    if kind is None:
+        return None, None, None, None, [f"auto       label: off ({meas.get('why', meas.get('label'))}; "
+                                        f"{json.dumps(meas)})"]
+    sl = scene_label(mask, label_mask)
+    if sl is None:
+        return None, None, None, None, [
+            f"auto       label: the packshot's print is on a label ({kind}, {json.dumps(meas)}), but SAM 3 found no "
+            "label on the frame within the product: drafted without label mode",
+            "auto       WARN a close call (see above): look at the keyframe before the clip"]
+    model = "affine" if vm["iou"] >= VIEW_IOU else "homography"
+    return kind, box, sl, model, [
+        f"auto       label: {kind} (the packshot's print is on a label laid over the body, the same past both its "
+        f"ends; {json.dumps(meas)}): the label only, its outline on the packshot {box}, the generated label SAM 3's "
+        f"within the product ({int(sl.sum())} px)"]
 
 
 def resolve(scene_u8, mask, ref_u8, ref_alpha=None, outline=None, model="auto", ink="auto", print_box="auto",
