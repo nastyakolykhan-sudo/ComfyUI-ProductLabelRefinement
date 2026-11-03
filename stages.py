@@ -47,19 +47,29 @@ def work_box(job, Hs, Ws):
 # 0. a first job from rough input (run.py draft)
 
 def draft(scene_u8, ref_u8, ref_a, quad=None, pairs=(), occluders=(), mask=None, mask_skip=None, model="homography",
-          outline=None, cylinder=False, relight=True, suggest=False, label=None, ink=None, print_box=None, bow=None):
+          outline=None, cylinder=False, relight=True, suggest=False, label=None, ink=None, print_box=None, bow=None,
+          label_mask=None, ref_label_mask=None):
     """run.py draft without its files -> (job without the scene, reference and output paths; the lines run.py prints:
     the draft's summary and the align table; review sheet PIL image or None). run.py then runs the align stage,
     which Fit Warp and Warp Reference do here. label "cylinder" / "flat": run.py draft --label (the label only).
     ink "light" / "dark", print_box, bow: run.py draft --ink --print-box --bow (print straight on a coloured body). The
     job's old_silhouette stays the draft's: here the product mask goes into Fill Leftovers' old_silhouette instead
     (run.py draft writes the mask's file there). model, ink, print_box, bow "auto": decided from the frame, the mask
-    and the packshot (imgpost.decide.resolve), the decisions in the lines."""
-    auto = []
+    and the packshot (imgpost.decide.resolve), the decisions in the lines. label "auto" with label_mask and
+    ref_label_mask (SAM 3's "label" on the scene and on the packshot): run.py draft --label auto (decide.label_auto)."""
+    auto, resolved = [], False
+    if label == "auto":
+        label, box, sl, lmodel, auto = dc.label_auto(scene_u8, mask, ref_u8, ref_a, outline, ref_label_mask, label_mask)
+        if label:
+            outline, mask = box, sl
+            model = lmodel if model == "auto" else model
+            ink = print_box = bow = None
     if "auto" in (model, ink, print_box, bow):
         try:
-            model, ink, print_box, bow, auto = dc.resolve(scene_u8, mask, ref_u8, ref_a, outline, model, ink or "off",
+            model, ink, print_box, bow, more = dc.resolve(scene_u8, mask, ref_u8, ref_a, outline, model, ink or "off",
                                                           print_box, bow)
+            auto += more
+            resolved = True
         except ValueError as e:
             raise StageError(str(e)) from e
     try:
@@ -70,7 +80,7 @@ def draft(scene_u8, ref_u8, ref_a, quad=None, pairs=(), occluders=(), mask=None,
             try:
                 dr.print_on_body(d, scene_u8, mask=mask, ink=ink, print_box=print_box, bow=bow)
             except dr.DraftError as e:
-                if not (auto and bow == "print"):
+                if not (resolved and bow == "print"):
                     raise
                 # decided, not given: a product with no long line to read its bow from stays flat
                 auto.append(f"auto       bow none: {e}")

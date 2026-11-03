@@ -196,9 +196,10 @@ def definition_all():
         86: ("ProductLabelSAM3Points", "SAM 3 points on the keyframe frame (optional: x,y on the product, -x,y off it)",
              {"points": ""}, (0, 0)),
         87: (SW, "SAM 3 text prompt: left out when points are given", {"when": L(86, 2), "if_false": L(11, 0)}, (0, 0)),
-        13: ("SAM3_Detect", "SAM 3 on the keyframe frame", {
-            "model": L(10, 0), "image": L(12, 0), "threshold": 0.33, "refine_iterations": 2, "individual_masks": False,
-            "conditioning": L(87, 0), "positive_coords": L(86, 0), "negative_coords": L(86, 1)}, (480, 600)),
+        13: ("ProductLabelSAM3Product", "SAM 3 on the keyframe frame: the detection that matches the packshot", {
+            "model": L(10, 0), "image": L(12, 0), "threshold": 0.33, "refine_iterations": 2, "conditioning": L(87, 0),
+            "positive_coords": L(86, 0), "negative_coords": L(86, 1), "reference": L(2, 0),
+            "reference_mask": L(82, 0)}, (480, 600)),
         14: ("ProductLabelVideoSAM3BothWays", "SAM 3 through the shot, both ways from the keyframe", {
             "images": L(19, 0), "model": L(10, 0), "keyframe_mask": L(13, 0), "keyframe_index": L(19, 3),
             "conditioning": L(87, 0), "detection_threshold": 0.33, "max_objects": 1, "detect_interval": 1}, (480, 880)),
@@ -243,17 +244,27 @@ def definition_all():
                                                                   "run_when": "false"}, (960, 0)),
         21: ("ImageReframe", "Straighten: frame and turn (optional; all 0 = the whole frame)", {
             "input_image": L(20, 0), "image": "", "center_x": 0.0, "center_y": 0.0, "frame_width": 0, "frame_height": 0,
-            "rotation": 0.0, "aspect_ratio": "free", "padding_color": "grey", "mask": L(17, 1)}, (960, 140)),
+            "rotation": 0.0, "aspect_ratio": "free", "padding_color": "grey", "feathering": 0, "mask": L(17, 1)}, (960, 140)),
         88: ("ProductLabelFrameMask", "Straightened product mask (the frame's padding left out)", {
             "mask": L(21, 2), "crop_data": L(21, 3)}, (960, 680)),
         22: (RUN, "Auto Draft: only without a given job", {"value": L(21, 1), "when": L(5, 0), "run_when": "false"},
              (960, 700)),
         23: (SW, "Auto Draft's product mask (on, off)", {"when": L(8, 0), "if_true": L(88, 0)}, (960, 840)),
-        24: ("ImagePostAutoDraft", "Auto Draft (model, ink, print box, bow: auto = decided from its inputs)", {
+        # SAM 3's labels on the packshot and on the frame Auto Draft fixes: label mode where the print is on a label
+        # laid over the body (decided in Auto Draft, label auto)
+        96: ("CLIPTextEncode", "SAM 3 prompt for labels (label mode)", {"text": "label:4", "clip": L(10, 1)}, (0, 0)),
+        97: ("SAM3_Detect", "SAM 3: the labels on the packshot", {
+            "model": L(10, 0), "image": L(2, 0), "threshold": 0.33, "refine_iterations": 2, "individual_masks": False,
+            "conditioning": L(96, 0)}, (0, 0)),
+        98: ("SAM3_Detect", "SAM 3: the labels on the frame Auto Draft fixes", {
+            "model": L(10, 0), "image": L(22, 0), "threshold": 0.33, "refine_iterations": 2, "individual_masks": False,
+            "conditioning": L(96, 0)}, (0, 0)),
+        24: ("ImagePostAutoDraft", "Auto Draft (model, ink, print box, bow, label: auto = decided from its inputs)", {
             "scene": L(22, 0), "reference": L(2, 0), "quad": "", "model": "auto", "light": "off", "suggest": False,
             "filename_prefix": "product-label-refinement/draft", "product_mask": L(23, 0), "reference_mask": L(83, 0),
-            "pairs": "", "occluders": "", "outline": "", "mask_skip": "", "label": "off", "ink": "auto",
-            "print_box": "auto", "bow": "auto"}, (960, 980)),
+            "pairs": "", "occluders": "", "outline": "", "mask_skip": "", "label": "auto", "ink": "auto",
+            "print_box": "auto", "bow": "auto", "label_mask": L(98, 0), "reference_label_mask": L(97, 0)},
+            (960, 980)),
         25: ("ImagePostLoadJob", "Load Job (the given job)", {"job_json": L(5, 0), "job_path": ""}, (960, 1800)),
         26: (SW, "Job: the given one, else the draft", {"when": L(5, 0), "if_true": L(25, 0), "if_false": L(24, 0)},
              (960, 2000)),
@@ -296,8 +307,11 @@ def definition_all():
             (2460, 760)),
         43: (SW, "Refined frame: pasted back (straightened), else as it is", {
             "when": L(41, 1), "if_true": L(42, 0), "if_false": L(37, 0)}, (2460, 980)),
+        # the refined image's name: _AUDIT-FAIL added when its audit fails (the image and its QA are still saved)
+        93: ("ProductLabelAuditName", "Refined image's name: _AUDIT-FAIL when its audit fails", {
+            "report": L(40, 3), "prefix": "product-label-refinement/refined"}, (0, 0)),
         44: ("SaveImage", "Save refined image (a clip: the refined keyframe)", {
-            "images": L(43, 0), "filename_prefix": "product-label-refinement/refined"}, (2940, 0)),
+            "images": L(43, 0), "filename_prefix": L(93, 0)}, (2940, 0)),
         45: ("SaveImage", "Save QA compare", {"images": L(40, 0), "filename_prefix": qa + "compare"}, (2940, 360)),
         46: ("SaveImage", "Save QA edges", {"images": L(40, 1), "filename_prefix": qa + "edges"}, (2940, 720)),
         47: ("SaveImage", "Save QA before_after", {"images": L(40, 2), "filename_prefix": qa + "before_after"}, (2940, 1080)),
@@ -319,9 +333,13 @@ def definition_all():
             "product": L(57, 0), "matte": L(37, 1), "filename_prefix": "product-label-refinement/refined"}, (3900, 640)),
         # video: Refine (Video) through the clip from the keyframe (the stills branch's, or the given one)
         60: (RUN, "Video branch: only for a clip", {"value": L(19, 0), "when": L(1, 3), "run_when": "true"}, (960, 2300)),
-        # the stills branch's keyframe goes on to the clip only when its audit has no FAIL (else the run stops)
+        # the stills branch's keyframe goes on to the clip only when its audit has no FAIL (else the run stops). The
+        # gate runs only when the clip renders (its frames, 60): an image, or a clip with Render the clip off, keeps
+        # its outputs and has its audit in its own QA
+        92: (RUN, "Keyframe to the gate: only when the clip renders", {"value": L(43, 0), "when": L(60, 0),
+                                                                       "run_when": "true"}, (0, 0)),
         91: ("ProductLabelAuditGate", "Keyframe on to the clip only with no FAIL in its audit", {
-            "keyframe": L(43, 0), "report": L(40, 3)}, (0, 0)),
+            "keyframe": L(92, 0), "report": L(40, 3)}, (0, 0)),
         61: (SW, "Keyframe: the given one, else the stills branch's", {"when": L(4, 2), "if_true": L(4, 0),
                                                                        "if_false": L(91, 0)}, (960, 2440)),
         62: ("ProductLabelVideoRefine", "Product Label: Refine (Video)", {
@@ -331,13 +349,18 @@ def definition_all():
             "glue": False}, (1500, 2300)),
         75: ("ProductLabelSplice", "The refined shot back into the clip (its text: shot.json)", {
             "frames": L(1, 0), "shot_frames": L(62, 0), "start": L(19, 2), "shot": L(19, 4)}, (0, 0)),
+        # the clip's file names from Refine's review: _REVIEW-FAIL (print wrong, slid), _REVIEW-CHECK (look first)
+        94: ("ProductLabelReviewName", "Master's name: _REVIEW-FAIL / _REVIEW-CHECK from the review (+ its summary)", {
+            "report": L(62, 3), "prefix": "product-label-refinement/video/refined", "save_summary": True}, (0, 0)),
+        95: ("ProductLabelReviewName", "Review copy's name: _REVIEW-FAIL / _REVIEW-CHECK from the review", {
+            "report": L(62, 3), "prefix": "product-label-refinement/video/review", "save_summary": False}, (0, 0)),
         63: ("ProductLabelVideoSaveLossless", "Save the lossless master (QuickTime PNG)", {
-            "images": L(75, 0), "fps": L(1, 1), "filename_prefix": "product-label-refinement/video/refined",
+            "images": L(75, 0), "fps": L(1, 1), "filename_prefix": L(94, 0),
             "format": "mov (PNG, exact RGB)", "audio": L(1, 2)}, (1980, 2300)),
         64: ("CreateVideo", "Review copy", {"images": L(75, 0), "fps": L(1, 1), "audio": L(1, 2), "bit_depth": "auto",
                                             "color_space": "sRGB", "codec": "none"}, (1980, 2560)),
         65: ("SaveVideo", "Save the refined clip (mp4, to review)", {
-            "video": L(64, 0), "filename_prefix": "product-label-refinement/video/review", "format": "auto",
+            "video": L(64, 0), "filename_prefix": L(95, 0), "format": "auto",
             "format.codec": "auto", "codec": "auto"}, (2460, 2300)),
         66: ("SaveImage", "Save the clip's QA plot", {"images": L(62, 4),
                                                       "filename_prefix": "product-label-refinement/video/qa_plot"},
@@ -358,9 +381,9 @@ def definition_all():
 # the one workflow's layout: columns left to right, nodes top to bottom (heights as the frontend draws them)
 ALL_COLUMNS = [[1, 2, 3, 4, 5, 6, 7, 8, 9, 84], [89, 19, 10, 11, 86, 87, 12, 13, 18, 17, 14, 15, 16],
                [81, 82, 83, 70, 71, 76, 77, 72, 73, 85, 74],
-               [20, 21, 88, 22, 23, 24], [25, 26, 27, 29, 28, 30],
-               [31, 32, 33, 34, 35, 36], [37, 38, 39, 40], [41, 42, 43, 44], [45, 46, 47, 48], [49, 50, 51, 52, 53, 54],
-               [55, 56, 57, 58], [60, 91, 61, 62], [75, 63, 64, 65], [66, 67, 78, 79, 80]]
+               [20, 21, 88, 22, 96, 97, 98, 23, 24], [25, 26, 27, 29, 28, 30],
+               [31, 32, 33, 34, 35, 36], [37, 38, 39, 40], [41, 42, 43, 93, 44], [45, 46, 47, 48], [49, 50, 51, 52, 53, 54],
+               [55, 56, 57, 58], [60, 92, 91, 61, 62], [94, 95, 75, 63, 64, 65], [66, 67, 78, 79, 80]]
 ALL_HEIGHTS = {1: 374, 21: 720, 24: 852, 31: 246, 70: 300}
 ALL_WIDTHS = {4: 510, 6: 439, 11: 504, 33: 416, 35: 397, 43: 400}
 
@@ -415,11 +438,11 @@ ALL_GROUPS = [
     ("Triage: does the product need fixing? (the agent sets Fix this product); the mask check; the packshot's outline",
      [81, 82, 83, 70, 71, 76, 77, 72, 73, 85, 74], "#2a7"),
     ("Stills: the image, or the clip's keyframe frame (Auto Draft, or the given job)",
-     [20, 21, 88, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32], "#b58b2a"),
+     [20, 21, 88, 22, 96, 97, 98, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32], "#b58b2a"),
     ("Paper or print on the body, composite and QA", [33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43], "#a1309b"),
-    ("Stills outputs", [44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58], "#444"),
+    ("Stills outputs", [93, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58], "#444"),
     ("Video: Refine (Video) through the shot, spliced back into the clip (clips only)",
-     [60, 91, 61, 62, 75, 63, 64, 65, 66, 67, 78, 79, 80], "#335"),
+     [60, 92, 91, 61, 62, 94, 95, 75, 63, 64, 65, 66, 67, 78, 79, 80], "#335"),
 ]
 
 
@@ -429,13 +452,17 @@ SIZE = {"LoadImage": (400, 360), "LoadImageMask": (400, 360), "SaveImage": (400,
         "ProductLabelRunIf": (380, 100), "ProductLabelPrintType": (380, 80), "ProductLabelPickFrame": (380, 120),
         "ProductLabelShot": (400, 200), "ProductLabelFindKeyframe": (400, 280), "ProductLabelAuditGate": (380, 100), "ProductLabelSplice": (400, 240), "ProductLabelMaskOverlay": (380, 120),
         "ProductLabelPackshotMatte": (400, 140), "ProductLabelSAM3Points": (400, 100),
+        "ProductLabelSAM3Product": (400, 240), "ProductLabelAuditName": (400, 120), "ProductLabelReviewName": (400, 120),
         "PrimitiveStringMultiline": (400, 240), "PrimitiveInt": (400, 100), "PrimitiveBoolean": (400, 80),
         "ProductLabelVideoSettings": (400, 320), "CLIPTextEncode": (400, 200), "CheckpointLoaderSimple": (400, 120),
         "SAM3_Detect": (400, 240), "ProductLabelVideoSAM3BothWays": (400, 260), "ImageReframe": (440, 720), "ProductLabelFrameMask": (380, 80),
         "ProductLabelVideoRefine": (420, 440), "PreviewAny": (420, 300), "CreateVideo": (380, 180), "SaveVideo": (400, 300)}
 
 # Nodes of ComfyUI core and other packs, as the frontend (1.55) serializes them: (slot inputs, widgets in
-# widgets_values order, RETURN_TYPES, RETURN_NAMES). Widgets in FRONTEND_ONLY aren't inputs in the API file.
+# widgets_values order, RETURN_TYPES, RETURN_NAMES). Widgets in FRONTEND_ONLY aren't inputs in the API file. The order:
+# the real widgets as INPUT_TYPES lists them (required, then optional; control_after_generate right after its INT), then
+# what the frontend adds (an image upload button, then DOM widgets such as image_reframe_editor). check_widgets() holds
+# this table to a live server's /object_info.
 FOREIGN = {
     "LoadImage": ([], ["image", "upload"], ("IMAGE", "MASK"), ("IMAGE", "MASK")),
     "SaveImage": ([("images", "IMAGE")], ["filename_prefix"], (), ()),
@@ -446,8 +473,8 @@ FOREIGN = {
                      ("bboxes", "BOUNDING_BOX"), ("positive_coords", "STRING"), ("negative_coords", "STRING")],
                     ["threshold", "refine_iterations", "individual_masks"], ("MASK", "BOUNDING_BOX"), ("masks", "bboxes")),
     "ImageReframe": ([("input_image", "IMAGE"), ("mask", "MASK")],
-                     ["image", "upload", "center_x", "center_y", "frame_width", "frame_height", "rotation", "aspect_ratio",
-                      "padding_color", "image_reframe_editor"],
+                     ["image", "center_x", "center_y", "frame_width", "frame_height", "rotation", "aspect_ratio",
+                      "padding_color", "feathering", "upload", "image_reframe_editor"],
                      ("IMAGE", "IMAGE", "MASK", "CROP_DATA"), ("original_image", "cropped_image", "mask", "crop_data")),
     "ImageReframeComposite": ([("frame_image", "IMAGE"), ("original_image", "IMAGE"), ("mask", "MASK"),
                                ("crop_data", "CROP_DATA")], ["paste", "feather", "resize_source"], ("IMAGE",), ("image",)),
@@ -460,6 +487,8 @@ FOREIGN = {
     "PreviewAny": ([("source", "*")], [], ("STRING",), ("STRING",)),
 }
 FRONTEND_ONLY = {"upload": "image", "control_after_generate": "fixed", "image_reframe_editor": ""}
+BUILT = ("product-label-refinement", "product-label-refinement-draft", "product-label-refinement-ink",
+         "product-label-refinement-ink-draft", "product-label-refinement-all")      # the workflows main() writes
 UI_ONLY = {"Note"}
 WIDGET_PLACEHOLDER = {"INT": 0, "FLOAT": 0.0, "STRING": "", "BOOLEAN": False}
 
@@ -479,17 +508,70 @@ def node_spec(classes, ct):
         return FOREIGN[ct]
     c = classes[ct]
     it = c.INPUT_TYPES()
-    slots, widgets = [], []
+    slots, widgets, added = [], [], []
     for sec in ("required", "optional"):
         for name, (t, *opt) in it.get(sec, {}).items():
             o = opt[0] if opt else {}
             if (isinstance(t, list) or t in WIDGET) and not o.get("forceInput"):
                 widgets.append(name)
-                if o.get("image_upload"):         # the frontend's upload button follows its combo
-                    widgets.append("upload")
+                if o.get("control_after_generate"):
+                    widgets.append("control_after_generate")
+                if o.get("image_upload"):         # the frontend adds its upload button after the real widgets
+                    added.append("upload")
             else:
                 slots.append((name, t))
-    return slots, widgets, c.RETURN_TYPES, getattr(c, "RETURN_NAMES", c.RETURN_TYPES)
+    return slots, widgets + added, c.RETURN_TYPES, getattr(c, "RETURN_NAMES", c.RETURN_TYPES)
+
+
+def server_widgets(info):
+    """A node's widgets_values order from a server's /object_info entry: (real widgets, frontend-added ones). A dynamic
+    combo (COMFY_DYNAMICCOMBO_V3) is followed by its default option's own widgets, named combo.widget."""
+    real, added = [], []
+
+    def walk(inputs, order, prefix=""):
+        for sec in ("required", "optional"):
+            for name in order.get(sec, list(inputs.get(sec, {}))):
+                spec = inputs[sec][name]
+                t, o = spec[0], (spec[1] if len(spec) > 1 and isinstance(spec[1], dict) else {})
+                if o.get("forceInput") or not (isinstance(t, list) or t in WIDGET or t in ("COMBO", "COMFY_DYNAMICCOMBO_V3")):
+                    continue
+                real.append(prefix + name)
+                if o.get("control_after_generate"):
+                    real.append("control_after_generate")
+                if o.get("image_upload"):
+                    added.append("upload")
+                if t == "COMFY_DYNAMICCOMBO_V3" and o.get("options"):
+                    opt = next((x for x in o["options"] if x.get("key") == o.get("default")), o["options"][0])
+                    walk(opt.get("inputs", {}), {}, prefix + name + ".")
+
+    walk(info.get("input", {}), info.get("input_order") or {})
+    return real, added
+
+
+def check_widgets(server, classes=None, header=None):
+    """Every node class in the UI workflows: its widgets in this file's order against the server's own (/object_info):
+    the real ones in its INPUT_TYPES order, then the frontend's (upload, DOM widgets) after them. A widget list out of
+    step shifts every value one slot when the UI loads the file (node 21 saved its upload button second). -> [problems]"""
+    import urllib.request
+    classes = classes or load_pack()
+    used = set()
+    for name in BUILT:
+        used |= {n["type"] for n in json.loads((PACK / "workflows" / f"{name}.json").read_text())["nodes"]
+                 if n["type"] not in UI_ONLY}
+    req = urllib.request.Request(server.rstrip("/") + "/object_info", headers=dict([header.split(": ", 1)]) if header else {})
+    info = json.loads(urllib.request.urlopen(req).read())
+    bad = []
+    for ct in sorted(used):
+        if ct not in info:
+            bad.append(f"{ct}: not on the server")
+            continue
+        mine = node_spec(classes, ct)[1]
+        real, added = server_widgets(info[ct])
+        dom = [w for w in mine if w in FRONTEND_ONLY and w not in ("upload", "control_after_generate")]
+        want = real + added + dom
+        if mine != want:
+            bad.append(f"{ct}: widgets {mine}, the server's order {want}")
+    return bad
 
 
 def widget_type(classes, ct, name):
@@ -512,6 +594,8 @@ def main():
     ink_text = Path(a.ink_job).expanduser().read_text()
     json.loads(ink_text)
     classes = load_pack()
+    assert set(BUILT) == {"product-label-refinement", "product-label-refinement-draft", "product-label-refinement-ink",
+                          "product-label-refinement-ink-draft", "product-label-refinement-all"}
     build("product-label-refinement", definition(job_text), classes)
     build("product-label-refinement-draft", definition_draft(), classes)
     build("product-label-refinement-ink", definition_ink(ink_text), classes)

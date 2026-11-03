@@ -14,6 +14,8 @@ Cases (the pack's demos):
 The one workflow is given the product mask in every case (an empty one for the paper demo, with Auto Draft's mask fit
 off), so SAM 3 doesn't run; its triage sheet has no template to match and isn't compared. Runs go through tools/comfy_run.py. Needs numpy and Pillow, and PyAV for --video (a
 ComfyUI Python has them all). Refine (Video) keeps its tracks by its inputs, so the second video run re-renders only.
+First, each node's widget order in the UI workflows is checked against the server's /object_info (build_workflows.
+check_widgets): a mismatch fails the run.
 """
 import argparse
 import json
@@ -28,7 +30,7 @@ from PIL import Image
 
 PACK = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PACK / "tools"))
-from build_workflows import DRAFT_INPUT, INK_DRAFT_INPUT  # noqa: E402
+from build_workflows import DRAFT_INPUT, INK_DRAFT_INPUT, check_widgets  # noqa: E402
 
 WF = PACK / "workflows"
 ALL = WF / "product-label-refinement-all.api.json"
@@ -151,7 +153,12 @@ def main():
     empty = work / "empty_mask.png"
     Image.new("L", scene.size, 0).save(empty)
     names = a.only or [c for c in cases(empty) if c != "video" or a.video]
-    failed = 0
+    # the UI files' widget order against the server's nodes: a list out of step shifts every value when the UI loads it
+    bad_w = check_widgets(a.server)
+    failed = bool(bad_w)
+    print(f"{'widgets':12s} {'PASS' if not bad_w else 'FAIL'}: the UI workflows' widget order against the server's /object_info")
+    for b in bad_w:
+        print(f"    {b}")
     for name in names:
         tpl, one = cases(empty)[name]
         run(a.server, tpl, work / name / "template", a.timeout)

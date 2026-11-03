@@ -28,7 +28,7 @@ SHADING_CHOICES = ["job", "off"]
 RELIGHT_CHOICES = ["job", "off"]
 MODEL_CHOICES = ["homography", "affine", "auto"]
 LIGHT_CHOICES = ["relight", "cylinder", "off"]
-LABEL_CHOICES = ["off", "cylinder", "flat"]
+LABEL_CHOICES = ["off", "cylinder", "flat", "auto"]
 INK_CHOICES = ["off", "light", "dark", "auto"]
 
 
@@ -314,6 +314,10 @@ class ImagePostAutoDraft:
                     "contour instead of to image edges. Without a quad the fit starts from the mask itself (its box, hull "
                     "corners and main axis): give the quad as well when something stands in front of the product.")}),
                 "reference_mask": ("MASK", {"tooltip": "The reference Load Image's MASK: a transparent packshot's outline is its alpha"}),
+                "label_mask": ("MASK", {"tooltip": "label auto: SAM 3's \"label\" on the scene (1 = label), taken within "
+                                                   "product_mask"}),
+                "reference_label_mask": ("MASK", {"tooltip": "label auto: SAM 3's \"label\" on the packshot (1 = "
+                                                             "label)"}),
                 "pairs": ("STRING", {"default": "", "multiline": True, "tooltip": (
                     "Rough landmark pairs, reference px = scene px: rx,ry=sx,sy, one per line. Each is refined by colour "
                     "correlation and kept only when trusted.")}),
@@ -333,7 +337,10 @@ class ImagePostAutoDraft:
                     "on a flat or flattened face, such as a tube's panels (model as set). The generated label's own "
                     "outline is measured and kept as its shape; its sides become the fit's edges. quad is then the "
                     "label's 4 corners, outline the label on the packshot, product_mask a mask of the label; light is "
-                    "not used (the generated label's paper carries the light).")}),
+                    "not used (the generated label's paper carries the light). auto (with product_mask, label_mask "
+                    "and reference_label_mask): the label only where the packshot's print is on a label laid over its "
+                    "body, the same past both its ends (glass above and below, the tube round its panels), cylinder "
+                    "where it wraps round the body, flat where the body shows beside it; else off.")}),
                 "ink": (INK_CHOICES, {"default": "off", "tooltip": (
                     "Print straight on a coloured body, no paper label. light: lighter than the body (white print on a "
                     "frosted bottle or tube). dark: darker than it (black print on a pink jar or a white bottle, and "
@@ -380,10 +387,16 @@ class ImagePostAutoDraft:
 
     def draft(self, scene, reference, quad, model, light, suggest, filename_prefix, product_mask=None,
               reference_mask=None, pairs="", occluders="", outline="", mask_skip="", label="off", ink="off",
-              print_box="", bow=""):
+              print_box="", bow="", label_mask=None, reference_label_mask=None):
         su8 = _u8(scene, "scene")
         ru8, ra = _reference({}, reference, reference_mask)
         mask, note = _product_mask(product_mask, su8.shape[:2])
+        lmask = _product_mask(label_mask, su8.shape[:2])[0] if label == "auto" else None
+        rlmask = None
+        if label == "auto" and reference_label_mask is not None:
+            r = reference_label_mask.detach().to("cpu", torch.float32)
+            r = r[0] if r.dim() == 3 else r
+            rlmask = r.numpy() > 0.5 if tuple(r.shape) == ru8.shape[:2] else None
         pb = "auto" if print_box.strip().lower() == "auto" else _numbers(print_box)
         if pb and pb != "auto" and len(pb) != 4:
             raise ValueError(f"print_box: {len(pb)} numbers; give x0,y0,x1,y1 in reference px")
@@ -394,7 +407,8 @@ class ImagePostAutoDraft:
                                            relight=light == "relight", suggest=suggest,
                                            label=None if label == "off" else label,
                                            ink=None if ink == "off" else ink, print_box=pb or None,
-                                           bow="auto" if bow.strip().lower() == "auto" else bow.strip() or None)
+                                           bow="auto" if bow.strip().lower() == "auto" else bow.strip() or None,
+                                           label_mask=lmask, ref_label_mask=rlmask)
         if note:
             text = f"note       {note}\n{text}"
         if ink in ("light", "dark"):

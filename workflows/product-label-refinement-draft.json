@@ -133,6 +133,16 @@
      "name": "reference_mask",
      "type": "MASK",
      "link": 3
+    },
+    {
+     "name": "label_mask",
+     "type": "MASK",
+     "link": null
+    },
+    {
+     "name": "reference_label_mask",
+     "type": "MASK",
+     "link": null
     }
    ],
    "outputs": [

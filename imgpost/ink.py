@@ -59,6 +59,11 @@ DEFAULTS = {
 # print came out softer than the generator's (edge blur 0.95 px against 0.62), so it is sharpened to the frame's
 DARK = dict(DEFAULTS, frame_open="auto", gen_rel=0.15, gen_grow=True, register=True, reg_model="scale",
             bow_from="print", sharpen="auto", inks="packshot")
+# light print, drafted from the frame, the mask and the packshot alone (pitfall 105): a fit to the silhouette put a
+# serum's print 30 px off the generated print, and the garbled print, filled only near the true print's footprint,
+# showed beside it on every frame. It is registered onto the generated print as dark print is (scaled along and across
+# the body's axis only); a print already on it moves by the registration's own residual
+LIGHT = dict(DEFAULTS, register=True, reg_model="scale")
 POLARITIES = ("light", "dark")
 
 
@@ -76,7 +81,7 @@ light = on_body
 
 
 def config(matte):
-    cfg = dict(DARK if matte.get("polarity") == "dark" else DEFAULTS)
+    cfg = dict(DARK if matte.get("polarity") == "dark" else LIGHT)
     cfg.update({k: v for k, v in matte.items() if k in DEFAULTS})
     cfg["print_box"] = matte.get("print_box")
     cfg["polarity"] = matte.get("polarity", "light")
@@ -965,8 +970,7 @@ def garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=None
     if vis is not None:
         a = a * vis
     info = {"polarity": pol, "k": k, "alpha": a, "region": work | fillm, "matte": M.copy(), "fill": fillm}
-    if dark:
-        info.update(vis=vis, frame_size=so)        # for dark_checks
+    info.update(vis=vis, frame_size=so)            # for the checks (dark_checks)
     if ink_rgb is not None:
         # the main ink in the frame's own colour (k); any other ink in its packshot colour, relit by the frame's body
         # and no darker than k
@@ -1055,12 +1059,13 @@ def soft_check(crep, cover, ref_sum, alpha, offset):
                      ": its small print loses detail; a larger packshot gives a crisper print (look at it at 100 %)"}]
 
 
-def _print_maps(src_u8, out_u8, M, size):
-    """The frame's and the result's dark print as maps (0..1 against the body light), and the changed pixels."""
+def _print_maps(src_u8, out_u8, M, size, dark=True):
+    """The frame's and the result's print (dark, or light) as maps (0..1 against the body light), and the changed
+    pixels."""
     Ls = im.lum(im.srgb_to_lin(im.to_float(src_u8)))
     Lo = im.lum(im.srgb_to_lin(im.to_float(out_u8)))
-    Ps = print_map(Ls, M, size, True)[0] * M
-    Po = print_map(Lo, M, size, True)[0] * M
+    Ps = print_map(Ls, M, size, dark)[0] * M
+    Po = print_map(Lo, M, size, dark)[0] * M
     changed = np.abs(out_u8.astype(int) - src_u8.astype(int)).max(-1) > 12
     return Ps, Po, changed
 
@@ -1363,15 +1368,51 @@ def rim_check(src_u8, out_u8, M, vis, size, offset):
     return sorted(out, key=lambda f: -f["px"])[:6]
 
 
+DOUBLE_FAIL = 0.25   # double_check: the generated print left beside the new print, as a share of the new print's px
+
+
+def double_check(src_u8, out_u8, M, size, offset, dark=True, share=DOUBLE_FAIL):
+    """The generated print left showing beside the new print: print in the result, unchanged from the frame and
+    within reach of the new strokes (8 px, or 8 % of the new print's extent), counted against the new print's own px.
+    Where the new print lands on the generated print, the fill takes the garbled strokes under and around it; landed
+    beside it, the garbled print shows next to the new one on the keyframe and every frame of the clip. FAIL past
+    `share`. Measured: light print on a serum placed 33 px sideways of its generated print 0.60; registered 0.007; an
+    approved jar 0.046. -> audit findings ("ink_double")"""
+    Ps, Po, changed = _print_maps(src_u8, out_u8, M, size, dark)
+    inner = ndi.binary_erosion(M, iterations=4)
+    new = (Po > 0.3) & changed & inner
+    if new.sum() < 50:
+        return []
+    ys, xs = np.nonzero(new)
+    span = max(np.ptp(ys), np.ptp(xs))
+    near = ndi.distance_transform_edt(~new) <= max(8.0, 0.08 * span)
+    old = (Po > 0.3) & (Ps > 0.3) & ~ndi.binary_dilation(changed, iterations=2) & inner & near
+    v = float(old.sum() / new.sum())
+    text = (f"the generated print still shows beside the new print: {int(old.sum())} px, {100 * v:.1f} % of the new "
+            f"print's {int(new.sum())} px")
+    if v > share:
+        oy, ox = np.nonzero(old)
+        box = [int(ox.min()) + offset[0], int(oy.min()) + offset[1], int(ox.max()) + offset[0], int(oy.max()) + offset[1]]
+        return [{"check": "ink_double", "level": "FAIL", "px": int(old.sum()), "box": box, "share": round(v, 3),
+                 "text": text + f": over {100 * share:.0f} %, the new print sits beside the generator's, not on it "
+                                "(the fit, the registration)"}]
+    return [{"check": "ink_double", "level": "INFO", "px": int(old.sum()), "share": round(v, 3), "text": text}]
+
+
 def dark_checks(crop_u8, out_u8, info, offset):
-    """The checks the user's notes on dark print became (pitfalls 97-100): ink_level (the print's top line skewed
-    against the generated print's), ink_shape (its lines curving unlike the generated print's) and ink_rim (an
-    occluder's edge cut, a straight line of new ink near the body's edge). For run.py and the pack's QA Sheet.
-    -> audit findings ([] for light print)"""
-    if info.get("polarity") != "dark":
+    """The checks the user's notes on print on the body became (pitfalls 97-100, 105): ink_place (the new print off
+    the generated print along the body) and ink_double (the generated print left beside it), either polarity; for
+    dark print also ink_level (the print's top line skewed against the generated print's), ink_shape (its lines
+    curving unlike the generated print's) and ink_rim (an occluder's edge cut, a straight line of new ink near the
+    body's edge). For run.py and the pack's QA Sheet. -> audit findings"""
+    if info.get("polarity") not in POLARITIES:
         return []
     size = int(info.get("frame_size") or 19)
+    if info.get("polarity") == "light":
+        return place_check(crop_u8, out_u8, info["matte"], size, offset, dark=False) + \
+            double_check(crop_u8, out_u8, info["matte"], size, offset, dark=False)
     return place_check(crop_u8, out_u8, info["matte"], size, offset) + \
+        double_check(crop_u8, out_u8, info["matte"], size, offset) + \
         level_check(crop_u8, out_u8, info["matte"], size, offset) + \
         shape_check(crop_u8, out_u8, info["matte"], size, offset) + \
         rim_check(crop_u8, out_u8, info["matte"], info.get("vis"), size, offset)
@@ -1380,16 +1421,17 @@ def dark_checks(crop_u8, out_u8, info, offset):
 MIN_MATCH = 0.5      # place_check: the two prints' profiles correlate this well or better for a FAIL
 
 
-def place_check(src_u8, out_u8, M, size, offset, max_px=12.0, max_share=0.10):
-    """Dark print is registered onto the generated print, so it lands on it: the result's new print against the frame's
+def place_check(src_u8, out_u8, M, size, offset, max_px=12.0, max_share=0.10, dark=True):
+    """Print on the body is registered onto the generated print, so it lands on it: the result's new print against the frame's
     own print along the body's axis (their row profiles across the body, correlated over shifts up to the new print's
     height). Off by over max_px, or max_share of that height, the label sits off the generated print and the
     generator's own print shows beside it: a FAIL, which stops the clip (a misplaced keyframe would carry through
     every frame); with the profiles matching under MIN_MATCH (another layout) a WARN. Measured: a squat jar whose mask
     fit was squeezed into two thirds of its mask, +144 px over a 229 px print (match 0.78); the same jar fitted right,
-    -2 px (0.85). -> audit findings ("ink_place")"""
+    -2 px (0.85); light print on a serum placed by its silhouette alone, 30 px beside its generated print, the
+    garbled print showing on every frame. -> audit findings ("ink_place")"""
     from . import bow as bw
-    Ps, Po, changed = _print_maps(src_u8, out_u8, M, size)
+    Ps, Po, changed = _print_maps(src_u8, out_u8, M, size, dark)
     inner = ndi.binary_erosion(M, iterations=4)
     ys, xs = np.nonzero(inner)
     if len(ys) < 200:

@@ -7,6 +7,7 @@
   squeeze   (cylinder) print within a few degrees of the scene's silhouette, pressed into the edge
   edges     an edge line still more than 1.5 px off after the fit
   cut       (shape 'generated') real print outside the generated label's shape, cut off
+  repaint   the product's own colour moved (its body, glass, cap, finish), not only its print
 
 Each finding: {"check", "level" (FAIL | WARN | INFO), "box" [x0, y0, x1, y1] scene px, "text"}. FAIL and WARN need a
 look at qa/audit.png (before | after tiles of every finding) before delivery.
@@ -198,7 +199,51 @@ def run(crop_u8, after_u8, alpha, old, vis, F, offset, align_rep=None, squeeze=N
 
     if not ink and (align_rep or {}).get("model") != "cylinder":
         found += bow_check(crop_u8, after_u8, old, offset)
+    found += repaint_check(crop_u8, after_u8, old & (vis > 0.5), offset)
     return found, sheet(crop_u8, after_u8, found, offset)
+
+
+REPAINT_DE = 10.0         # a cell's median colour moving this far (CIELAB dE76) is the product repainted, not its print
+REPAINT_SHARE = 0.25      # FAIL when cells holding this share of the product's area moved
+
+
+def repaint_check(crop_u8, after_u8, old, offset, n_along=8, n_across=2):
+    """The product's own colour against the generated product's, cell by cell (8 along its body x 2 across): each
+    cell's median CIELAB before and after. Print is a minority of a cell's pixels, so a clean print over a garbled one
+    leaves the median where it was; a fix that repaints the product moves it. On the test edits a whole warp that
+    turned a glossy peach tube into the packshot's pink one, warps that replaced amber glass and a frosted tube's
+    finish, dark ink that painted amber glass white and a print pasted over the wrong product moved 35-93 % of the
+    product's area by more than 10; every approved fix 0-6 % (a tube's print band, 10.6 at most). -> findings"""
+    from . import bow as bw
+    from .decide import _lab
+    m = binary_erosion(old, iterations=max(2, int(0.01 * np.sqrt(old.sum()))))
+    if m.sum() < 400:
+        return []
+    c, ax, nrm = bw.body_axis(m)
+    ys, xs = np.nonzero(m)
+    P = np.c_[xs, ys].astype(float) - c
+    t, s = P @ ax, P @ nrm
+    k = np.clip(((t - t.min()) / (np.ptp(t) + 1e-6) * n_along).astype(int), 0, n_along - 1) * n_across + \
+        np.clip(((s - s.min()) / (np.ptp(s) + 1e-6) * n_across).astype(int), 0, n_across - 1)
+    y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+    a = _lab(crop_u8[y0:y1, x0:x1])[ys - y0, xs - x0]
+    b = _lab(after_u8[y0:y1, x0:x1])[ys - y0, xs - x0]
+    moved, de = np.zeros(len(ys), bool), []
+    for i in np.unique(k):
+        sel = k == i
+        d = float(np.linalg.norm(np.median(b[sel], 0) - np.median(a[sel], 0)))
+        de.append(d)
+        moved[sel] = d > REPAINT_DE
+    share_ = float(moved.mean())
+    if share_ < REPAINT_SHARE:
+        return []
+    my, mx = ys[moved], xs[moved]
+    return [{"check": "repaint", "level": "FAIL",
+             "box": [int(mx.min()) + offset[0], int(my.min()) + offset[1], int(mx.max()) + offset[0],
+                     int(my.max()) + offset[1]],
+             "text": f"the product's own colour moved by more than {REPAINT_DE:g} (CIELAB) over {100 * share_:.0f} % of "
+                     f"it (up to {max(de):.0f}): the fix repaints the product (its body, glass, cap or finish), not only "
+                     "its print"}]
 
 
 def bow_check(crop_u8, after_u8, old, offset, size=19, min_px=4.0, share=0.1):

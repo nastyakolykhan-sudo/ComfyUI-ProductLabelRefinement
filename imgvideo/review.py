@@ -64,9 +64,9 @@ DEFAULTS = {
     "body_frac": 0.0055,         # (or this share of the label's length, if more: 1 px on the serum's 188 px label),
     "body_roll": 0.5,            # or its axis this many deg off the body's centreline (each a 5-frame median) ...
     "body_run_s": 0.25,          # ... held this long
-    "slide_px": 4.0,             # the label turned round the product this far off the keyframe's place on the body (label
-                                 # px at its middle, 5-frame median, held body_run_s): the jar's label slid 13 px with its
-                                 # generated print across the camera move (V59)
+    "slide_px": 4.0,             # the label turned round the product this far off the frame's own print, the surface it
+                                 # lies on (label px at its middle, 5-frame median, held body_run_s; V69: against the
+                                 # keyframe's place on the body, a product turning on its axis read as sliding)
     "slide_orbit_px": 2.0,       # ... or this far off its place turned with the scene's orbit at the print's rate, where
                                  # the render measured the orbit (V66: v7's jar label, 2-4 px off over 140-160, slid)
     "glitter_tophat": 5,         # specks: a white top-hat this wide (px) ...
@@ -916,11 +916,14 @@ def evaluate(F, fps=24.0, cfg=None):
                     flags[t].append(("body", f"the label sits off the body: top {med['top_px'][i]:+.1f} px, bottom "
                                              f"{med['bottom_px'][i]:+.1f} px off the keyframe's proportion, axis "
                                              f"{med['roll_deg'][i]:+.2f} deg off the body's centreline"))
-        # slide: the label turned round the product off the keyframe's place on the body (the print it follows sliding
-        # across the body, V59), or, where the render measured the scene's orbit (the ground round the product's base),
-        # off its place turned with the orbit (V65: held at the keyframe's place, the label ignored the camera orbiting)
+        # slide: the label turned round the product off the frame's own print, the surface it lies on (V69: a product
+        # turning on its axis turns its print, and the label must turn with it), or, where the render measured the
+        # scene's orbit (the ground round the product's base), off its place turned with the orbit at the print's rate
+        # (V65: held at the keyframe's place, the label ignored the camera orbiting; V66)
         x = np.array([F[t]["body"].get("turn_px") if F[t]["body"].get("turn_px") is not None else np.nan for t in ts], float)
         orb_ = np.array([F[t]["body"].get("orbit_px", np.nan) for t in ts], float)
+        pr_ = np.array([F[t]["body"].get("print_px") if F[t]["body"].get("print_px") is not None else np.nan for t in ts],
+                       float)
         has_orb = bool(np.isfinite(orb_).any())
         gain = rate = None
         if has_orb:
@@ -928,6 +931,8 @@ def evaluate(F, fps=24.0, cfg=None):
             gain, rate = vf.orbit_gain({t: F[t]["body"].get("print_px") for t in ts},
                                        {t: o for t, o in zip(ts, orb_) if np.isfinite(o)}, vf.BODY_SNAP["orbit_gain"])
             x = x - gain * np.where(np.isfinite(orb_), orb_, 0.0)
+        else:
+            x = x - np.where(np.isfinite(pr_), pr_, 0.0)
         med["turn_px"] = ndi.median_filter(np.where(np.isfinite(x), x, np.nanmedian(x) if np.isfinite(x).any() else 0.0),
                                            5, mode="nearest") if len(x) else x
         lim_s = c["slide_orbit_px"] if has_orb else c["slide_px"]
@@ -940,8 +945,8 @@ def evaluate(F, fps=24.0, cfg=None):
                                               f"print's rate (x{gain:.3f}): render.body_snap.turn true holds it there"
                                               if has_orb else
                                               f"the label turned {med['turn_px'][i]:+.1f} px round the product off the "
-                                              f"keyframe's place on its body: if the product doesn't turn on its axis "
-                                              f"there, render.body_snap.turn holds it"))
+                                              f"frame's own print (the surface it lies on): the render's turn hold or "
+                                              f"snap moved it off its print"))
         for i, t in enumerate(ts):
             geometry[t] = dict(F[t]["body"], top_px_med=round(float(med["top_px"][i]), 2),
                                bottom_px_med=round(float(med["bottom_px"][i]), 2),

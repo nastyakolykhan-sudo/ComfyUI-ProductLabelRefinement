@@ -1919,12 +1919,14 @@ def _review(J, parts, ll_path, arrays=None):
                     r["body"] = _body_row(mb, b["ref"])
                     if c.get("orbit_px") and t in c["orbit_px"]:
                         r["body"]["orbit_px"] = round(float(c["orbit_px"][t]), 2)
-                        # the frame's own print (its tracked mapping): the orbit's rate for the slide check (V66)
-                        mp = vf.body_measure(H, src[i].astype(float).mean(-1), m.astype(float), c["v"], c["uc"],
-                                             b["edges"]["top"], b["edges"]["bottom"], b["reach"], b["across"],
-                                             b["inside"], ref=None if T == b["frame"] else b["ref"], window=b["window"])
-                        if mp is not None:
-                            r["body"]["print_px"] = _body_row(mp, b["ref"])["turn_px"]
+                    # the frame's own print (its tracked mapping): the orbit's rate (V66), and the surface the slide
+                    # check reads the label's turn against (V69)
+                    mp = mb if Ho is H else \
+                        vf.body_measure(H, src[i].astype(float).mean(-1), m.astype(float), c["v"], c["uc"],
+                                        b["edges"]["top"], b["edges"]["bottom"], b["reach"], b["across"], b["inside"],
+                                        ref=None if T == b["frame"] else b["ref"], window=b["window"])
+                    if mp is not None:
+                        r["body"]["print_px"] = _body_row(mp, b["ref"])["turn_px"]
             if looks_cfg is not False:
                 # the look checks' per-frame measures (the user's notes from the first real run, V42-V45)
                 pol = (P.v.get("render") or {}).get("polarity", "light")
