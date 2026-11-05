@@ -340,7 +340,9 @@ class ImagePostAutoDraft:
                     "not used (the generated label's paper carries the light). auto (with product_mask, label_mask "
                     "and reference_label_mask): the label only where the packshot's print is on a label laid over its "
                     "body, the same past both its ends (glass above and below, the tube round its panels), cylinder "
-                    "where it wraps round the body, flat where the body shows beside it; else off.")}),
+                    "where it wraps round the body, flat where the body shows beside it; else off. With ink auto too, "
+                    "text only: the label is only fitted and stays as generated, its letters go on as print on it "
+                    "(matte text).")}),
                 "ink": (INK_CHOICES, {"default": "off", "tooltip": (
                     "Print straight on a coloured body, no paper label. light: lighter than the body (white print on a "
                     "frosted bottle or tube). dark: darker than it (black print on a pink jar or a white bottle, and "
@@ -348,8 +350,10 @@ class ImagePostAutoDraft:
                     "and bow) and sharpened to its edges. The packshot's print is laid on the frame's own body in the "
                     "frame's own print colour (job matte ink). Run it with the ink template: product_mask also goes "
                     "into Fill Leftovers' old_silhouette, the matte the print stays inside. auto (needs "
-                    "product_mask): light print on the body; dark print warped whole (off) where the packshot's "
-                    "silhouette fits the product's mask, else on the body (dark).")}),
+                    "product_mask): text only, the generated product kept and its letters changed: light print on "
+                    "the body (light); dark print, and print both lighter and darker than the body (mixed), as letters "
+                    "only, line by line onto the generated lines in their own ink (matte text); a label (label auto) "
+                    "the same.")}),
                 "print_box": ("STRING", {"default": "", "tooltip": (
                     "With ink: the print's box on the packshot x0,y0,x1,y1 (reference px), from the first to the "
                     "last line of print with a few px to spare, inside the body's frosted rims, seams and lid edge. "
@@ -809,7 +813,7 @@ class ImagePostQASheet:
                     elif f["check"] == "leftover" and pol == "dark":   # the new edge is a letter's, and the body
                         f.update(level="INFO", text=f["text"] + " (matte ink dark: the body round the print is the "
                                                                 "generated one)")
-                if isinstance(ink, dict) and ink.get("polarity") in S.ik.POLARITIES:
+                if isinstance(ink, dict) and ink.get("polarity") in S.ik.POLARITIES + ("mixed",):
                     found += S.light_check(job, res, su8, ink, box)
                 sheet = S.au.sheet(su8[box[1]:box[3], box[0]:box[2]], res[box[1]:box[3], box[0]:box[2]], found,
                                    (box[0], box[1])) if found else None

@@ -1000,7 +1000,7 @@ def label_draft(scene_u8, ref_u8, ref_alpha=None, quad=None, outline=None, kind=
             "ref_u8": ref_u8, "ref_alpha": ref_alpha}
 
 
-def print_on_body(d, scene_u8, mask=None, ink=None, print_box=None, bow=None):
+def print_on_body(d, scene_u8, mask=None, ink=None, print_box=None, bow=None, text=False):
     """Print straight on a coloured body (pitfalls 92-95), added to a draft from draft() (either mode), in place:
       ink "light"  job matte {"type": "ink", "polarity": "light" | "dark", "print_box"}: the packshot's print laid
         / "dark"   on the frame's own body (imgpost/ink.py), lighter or darker than it. print_box: [x0, y0, x1, y1]
@@ -1014,10 +1014,22 @@ def print_on_body(d, scene_u8, mask=None, ink=None, print_box=None, bow=None):
     from . import bow as bw
     job = d["job"]
     if ink not in (None, "off"):
-        if ink not in ("light", "dark"):
-            raise DraftError(f"ink {ink!r}: 'light' (print lighter than the body it sits on) or 'dark' (darker)")
+        if ink not in ("light", "dark", "mixed"):
+            raise DraftError(f"ink {ink!r}: 'light' (print lighter than the body it sits on), 'dark' (darker) or "
+                             "'mixed' (both, text only)")
+        if ink == "mixed" and not text:
+            raise DraftError("ink 'mixed' is text only (each line in its own polarity): set text")
         job["matte"] = {"type": "ink", "polarity": ink}
-        if ink == "dark":
+        if text:
+            # text only (pitfall 111): the letters only, line by line, in the generated print's own inks; a label
+            # fitted in label mode keeps the generated label: no outline of it is composited, and its measured
+            # outline bounds the text (its border and the body beyond stay as generated)
+            job["matte"]["text"] = True
+            if job.pop("shape", None) == "generated":
+                osil = job.get("old_silhouette")
+                if isinstance(osil, dict) and osil.get("measured"):
+                    job["matte"]["label"] = osil["measured"]
+        if ink in ("dark", "mixed"):
             job["prefilter"] = "auto"           # no blur before sampling where the frame shows the packshot larger
         if print_box:
             job["matte"]["print_box"] = [int(round(v)) for v in print_box]
@@ -1042,7 +1054,7 @@ def print_on_body(d, scene_u8, mask=None, ink=None, print_box=None, bow=None):
                           (f"; the matte's {' and '.join(prep['matte_ends']['used'])} end too"
                            if prep["matte_ends"]["used"] else ""))
     spec = bw.parse(bow) if isinstance(bow, str) else bow
-    if not spec and ink == "dark" and mask is not None:
+    if not spec and ink in ("dark", "mixed") and mask is not None and not d.get("label"):
         # dark print without a bow given: the body's own bow from its matte's two ends (a jar seen from above bows
         # tens of px, and the seams inside it are hard to read)
         prof, mrep = bw.matte_ends(mask)

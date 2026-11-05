@@ -75,6 +75,11 @@ def print_box(ref_u8, band, dark):
     return box, {"glyphs": n, "pad_px": pad}
 
 
+# text only (2026-11-04, pitfall 111): every route keeps the generated product and changes its letters only. The
+# packshot is never warped whole (a mixed or a dark print seen front on went whole and repainted the product) and a label
+# is never replaced: label mode only fits the label, its letters go on as print on the body (decide.label_text)
+TEXT_ONLY = True
+
 # the packshot's outline, fitted to the product's mask, overlaps it this much or more: the frame shows the product from
 # the packshot's view (front on, as packshots are taken)
 VIEW_IOU = 0.97
@@ -127,11 +132,12 @@ def settings(scene_u8, mask, ref_u8, ref_alpha=None, outline=None):
            (", mixed: check the polarity)" if prep["mixed"] else ")")]
     out = {"model": "affine" if front else "homography"}
     if prep["mixed"]:
-        out.update(ink="off", print_box=None, bow="print")
-        why.append("route: print both lighter and darker than the body (mixed): an ink route lays one polarity, so the "
-                   "packshot is warped whole, placed by the product's silhouette (ink off, bow from the generated "
-                   "product's long lines)")
-    elif pol == "dark" and front:
+        box, brep = print_box(ref_u8, band, pol == "dark")
+        out.update(ink="mixed", print_box=box, bow="matte")
+        why.append(f"route: print both lighter and darker than the body (mixed): text only, each line in its own "
+                   f"polarity on the body (ink mixed), print box {box} ({brep.get('glyphs', 0)} glyphs), bow from the "
+                   "matte's ends, registered onto the generated print")
+    elif pol == "dark" and front and not TEXT_ONLY:
         out.update(ink="off", print_box=None, bow="print")
         why.append("route: dark print seen front on: the packshot warped whole, placed by the product's silhouette "
                    "(ink off, bow from the generated product's long lines)")
@@ -308,6 +314,33 @@ def label_auto(scene_u8, mask, ref_u8, ref_alpha=None, outline=None, ref_label=N
         f"label SAM 3's within the product ({int(sl.sum())} px)"]
 
 
+def text_route(ink, label=False):
+    """Text only for an auto-decided route: a label (label mode) and dark or mixed print on the body go on as letters
+    only (matte text); light print on the body keeps the light ink route, which already lays only the print on the
+    generated body, registered onto the generated print (the approved frosted bottle and tube; text mode on them
+    dropped a vertical wordmark's letter and left lines garbled)."""
+    return TEXT_ONLY and (bool(label) or ink in ("dark", "mixed"))
+
+
+def label_text(ref_u8, box):
+    """Text only on a label (label mode): the polarity of the label's letters against its own field, read inside its
+    outline on the packshot (box [x0, y0, x1, y1] or a polygon). -> ("light" | "dark" | "mixed", measures, notes)"""
+    from . import raster
+    if isinstance(box, (list, tuple)) and len(box) == 4 and np.isscalar(box[0]):
+        band = np.zeros(ref_u8.shape[:2], bool)
+        x0, y0, x1, y1 = [int(round(v)) for v in box]
+        band[y0:y1, x0:x1] = True
+    else:
+        band = raster.fill_polygon(ref_u8.shape[0], ref_u8.shape[1], [tuple(q) for q in box]) > 0
+    band = ndi.binary_erosion(band, iterations=EDGE_PX)
+    pol, prep = polarity(ref_u8, band)
+    if prep["mixed"]:
+        pol = "mixed"
+    notes = [f"auto       text: the label's letters {pol} on its field ({prep['light_glyphs']} light glyphs, "
+             f"{prep['dark_glyphs']} dark): the label kept as generated, its letters only (ink {pol}, text)"]
+    return pol, prep, notes
+
+
 def resolve(scene_u8, mask, ref_u8, ref_alpha=None, outline=None, model="auto", ink="auto", print_box="auto",
             bow="auto"):
     """Auto Draft's model, ink, print_box and bow with each "auto" decided (settings()) and the rest as given.
@@ -326,7 +359,7 @@ def resolve(scene_u8, mask, ref_u8, ref_alpha=None, outline=None, model="auto", 
     if print_box == "auto":
         if ink == s["ink"]:
             print_box = s["print_box"]
-        elif ink in ("light", "dark"):
+        elif ink in ("light", "dark", "mixed"):
             band = view_match(scene_u8, mask, ref_u8, ref_alpha, outline)["P"]
             from . import raster
             band = raster.fill_polygon(ref_u8.shape[0], ref_u8.shape[1], [tuple(q) for q in band]) > 0
@@ -336,7 +369,7 @@ def resolve(scene_u8, mask, ref_u8, ref_alpha=None, outline=None, model="auto", 
     if bow == "auto":
         bow = "print" if ink == "off" else "matte"
     if bow == "matte":
-        if ink == "light":
+        if ink in ("light", "mixed"):
             prof, _rep = bw.matte_ends(mask)
             bow = {"b": prof, "from": "matte"} if prof is not None and max(abs(prof[0][1]), abs(prof[1][1])) >= 1.0 \
                 else None

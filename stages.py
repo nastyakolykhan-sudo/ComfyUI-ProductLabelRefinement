@@ -58,16 +58,26 @@ def draft(scene_u8, ref_u8, ref_a, quad=None, pairs=(), occluders=(), mask=None,
     and the packshot (imgpost.decide.resolve), the decisions in the lines. label "auto" with label_mask and
     ref_label_mask (SAM 3's "label" on the scene and on the packshot): run.py draft --label auto (decide.label_auto)."""
     auto, resolved, body = [], False, None
+    text = False
     if label == "auto":
         label, box, sl, lmodel, auto = dc.label_auto(scene_u8, mask, ref_u8, ref_a, outline, ref_label_mask, label_mask)
         if label:
             outline, mask, body = box, sl, mask
             model = lmodel if model == "auto" else model
-            ink = print_box = bow = None
+            print_box = bow = None
+            if ink == "auto" and dc.TEXT_ONLY:
+                # text only: the label fitted in label mode, kept as generated; its letters go on as print on it
+                ink, _, more = dc.label_text(ref_u8, box)
+                auto += more
+                text = True
+            else:
+                ink = None
     if "auto" in (model, ink, print_box, bow):
+        ink_auto = ink == "auto"
         try:
             model, ink, print_box, bow, more = dc.resolve(scene_u8, mask, ref_u8, ref_a, outline, model, ink or "off",
                                                           print_box, bow)
+            text = text or (ink_auto and dc.text_route(ink))
             auto += more
             resolved = True
         except ValueError as e:
@@ -78,13 +88,13 @@ def draft(scene_u8, ref_u8, ref_a, quad=None, pairs=(), occluders=(), mask=None,
                      suggest=suggest, label=label, body_mask=body)
         if ink or bow:
             try:
-                dr.print_on_body(d, scene_u8, mask=mask, ink=ink, print_box=print_box, bow=bow)
+                dr.print_on_body(d, scene_u8, mask=mask, ink=ink, print_box=print_box, bow=bow, text=text)
             except dr.DraftError as e:
                 if not (resolved and bow == "print"):
                     raise
                 # decided, not given: a product with no long line to read its bow from stays flat
                 auto.append(f"auto       bow none: {e}")
-                dr.print_on_body(d, scene_u8, mask=mask, ink=ink, print_box=print_box, bow=None)
+                dr.print_on_body(d, scene_u8, mask=mask, ink=ink, print_box=print_box, bow=None, text=text)
     except dr.DraftError as e:
         raise StageError(str(e)) from e
     check_job(d["job"])
@@ -543,7 +553,7 @@ def light_fill(job, scene_u8, roi, old, vis, ink_cover):
     x0, y0, x1, y1 = roi
     try:
         filled, info, frep = ik.garbled(scene_u8[y0:y1, x0:x1], old, ink_cover["cover"], ink_cover["band"], cfg, vis,
-                                        ink_cover.get("box"), ink_cover.get("inks"))
+                                        ink_cover.get("box"), ink_cover.get("inks"), ink_cover.get("text"))
     except ik.InkError as e:
         raise StageError(str(e)) from e
     info["cover"] = ink_cover["cover"]
@@ -555,7 +565,7 @@ def light_fill(job, scene_u8, roi, old, vis, ink_cover):
 
 def light_composite(scene_u8, roi, filled, ink):
     """run.py's _run_on_body, the composite -> (work box uint8, alpha)"""
-    if not (isinstance(ink, dict) and ink.get("polarity") in ik.POLARITIES):
+    if not (isinstance(ink, dict) and ink.get("polarity") in ik.POLARITIES + ("mixed",)):
         raise StageError("the job's matte is ink on the body: connect Fill Leftovers' ink to Composite Behind")
     x0, y0, x1, y1 = roi
     return ik.composite(filled, scene_u8[y0:y1, x0:x1], ink)
