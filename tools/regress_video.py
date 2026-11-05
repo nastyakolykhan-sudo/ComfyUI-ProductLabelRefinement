@@ -31,7 +31,7 @@ def main():
     ap.add_argument("--keyframe", nargs="+")
     ap.add_argument("--keyframe-frame", nargs="+")
     ap.add_argument("--settings")
-    ap.add_argument("--weights", default=os.environ.get("PLR_ALLTRACKER", "~/Documents/models/trackers/alltracker/alltracker.pth"))
+    ap.add_argument("--weights", default=os.environ.get("PLR_ALLTRACKER", "~/Documents/ComfyUI/models/trackers/alltracker/alltracker.pth"))
     ap.add_argument("--keep")
     a = ap.parse_args()
     demo = PACK / "examples" / "video_demo"

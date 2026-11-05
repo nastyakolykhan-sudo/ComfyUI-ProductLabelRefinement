@@ -106,11 +106,18 @@ TRACKER_LICENCES = {"alltracker": "MIT (code and weights)", "cotracker": "CC BY-
 
 
 def alltracker_weights():
-    """AllTracker's checkpoint: $PLR_ALLTRACKER, else ~/Documents/models/trackers/alltracker/alltracker.pth (on a
-    server: the volume's models folder). Never downloaded here."""
+    """AllTracker's checkpoint: $PLR_ALLTRACKER, else ~/Documents/ComfyUI/models/trackers/alltracker/alltracker.pth
+    (the older ~/Documents/models/... location still works; on a server: the volume's models folder). Never
+    downloaded here."""
     import os
     from pathlib import Path
-    p = Path(os.environ.get("PLR_ALLTRACKER", "~/Documents/models/trackers/alltracker/alltracker.pth")).expanduser()
+    rel = "trackers/alltracker/alltracker.pth"
+    if os.environ.get("PLR_ALLTRACKER"):
+        p = Path(os.environ["PLR_ALLTRACKER"]).expanduser()
+    else:
+        p = next((c for c in (Path("~/Documents/ComfyUI/models", rel).expanduser(),
+                              Path("~/Documents/models", rel).expanduser()) if c.exists()),
+                 Path("~/Documents/ComfyUI/models", rel).expanduser())
     if not p.exists():
         raise FileNotFoundError(f"AllTracker weights not found at {p}: get alltracker.pth (MIT) from "
                                 "huggingface.co/aharley/alltracker and point PLR_ALLTRACKER at it")
