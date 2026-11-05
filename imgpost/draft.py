@@ -14,7 +14,9 @@ axis and radius from the packshot's silhouette at the label's height, the drop s
 """
 import numpy as np
 
-from scipy.ndimage import gaussian_filter1d, minimum_filter
+from scipy.ndimage import binary_dilation, binary_opening, gaussian_filter1d, minimum_filter
+from scipy.ndimage import label as label_cc
+from scipy.ndimage import sum as sum_cc
 
 from . import autofit as af
 from . import geometry as geo
@@ -149,7 +151,8 @@ def _mask_score(fit):
 
 
 def draft(scene_u8, ref_u8, ref_alpha=None, quad=None, pairs=(), occluders=(), mask=None, mask_skip=None,
-          model="homography", outline=None, cylinder=False, relight=True, suggest=False, about=ABOUT, label=None):
+          model="homography", outline=None, cylinder=False, relight=True, suggest=False, about=ABOUT, label=None,
+          body_mask=None):
     """-> dict:
       job        the draft job without its file paths (scene, reference, output): scene_size, reference_size, roi,
                  reference_outline, align, old_silhouette, occluders, grade, finish, fill
@@ -165,11 +168,12 @@ def draft(scene_u8, ref_u8, ref_alpha=None, quad=None, pairs=(), occluders=(), m
     mask in the scene, bool; without quad and pairs the fit starts from its box and its principal axis. mask_skip: a
     polygon in reference px whose outline points aren't fitted to the mask (a part the mask runs on into).
     outline: None (traced from a packshot on a plain background or its alpha), a polygon [(x, y), ...] or a box
-    (x0, y0, x1, y1) in reference px. label: None (or "off"), "cylinder" or "flat": the label mode (label_draft).
-    Raises DraftError when the input can't make a draft."""
+    (x0, y0, x1, y1) in reference px. label: None (or "off"), "cylinder" or "flat": the label mode (label_draft);
+    body_mask: then the product's own mask (mask is the generated label's). Raises DraftError when the input can't
+    make a draft."""
     if label not in (None, "off"):
         return label_draft(scene_u8, ref_u8, ref_alpha, quad=quad, outline=outline, kind=label, pairs=pairs,
-                           occluders=occluders, mask=mask, model=model, about=about)
+                           occluders=occluders, mask=mask, model=model, about=about, body_mask=body_mask)
     scene, ref = im.to_float(scene_u8), im.to_float(ref_u8)
     Hs, Ws = scene_u8.shape[:2]
     notes = []
@@ -555,6 +559,70 @@ def _mask_corners(mask, M):
     return np.array(out)
 
 
+def _outside(P, N, body):
+    """Points whose outward normal N leaves the product's mask at every probe HIDE_PX past them (bool)."""
+    h, w = body.shape
+    out = np.ones(len(P), bool)
+    for d in HIDE_PX:
+        q = np.round(P + d * N).astype(int)
+        ok = (q[:, 0] >= 0) & (q[:, 0] < w) & (q[:, 1] >= 0) & (q[:, 1] < h)
+        inn = np.zeros(len(P), bool)
+        inn[ok] = body[q[ok, 1], q[ok, 0]]
+        out &= ~inn
+    return out
+
+
+def _seen_corners(M, A, body):
+    """A generated label partly hidden by something in front (a holder, a cloth): SAM 3's label stops at that
+    object's edge, and the hull's corner there is the occluder's, so the quad's side from it ran through the label
+    (a dropper bottle's bottom side across its last lines of text). For the hull's corners that are the occluder's
+    (the top or bottom contour next to them where the product's mask ends, as hidden_edges reads it): where the seen sides' lines meet (a corner under the occluder lies where they lead). Each
+    side's line is fitted to its contour, without the top's and bottom's px the product's mask ends right past and
+    without px off the side's straight run (a rounded corner's arc, an occluder's edge); the other corners stay where
+    the caller found them. A: the hull's quad (TL TR BR BL); M: the label mask's contour. -> (4 corners, the
+    indices of the occluder's), or None when no corner is hidden"""
+    cen = A.mean(0)
+    T = np.roll(M, -1, 0) - np.roll(M, 1, 0)
+    T /= np.maximum(np.linalg.norm(T, axis=1), 1e-9)[:, None]
+    N = np.c_[T[:, 1], -T[:, 0]]
+    N = np.where((((M - cen) * N).sum(1) < 0)[:, None], -N, N)
+    occ = _outside(M, N, body)
+    theirs = []
+    for j, (c0, c1) in ((0, (0, 1)), (2, (2, 3))):          # the top (TL to TR) and the bottom (BR to BL)
+        a, b = A[c0], A[c1]
+        L = float(np.linalg.norm(b - a))
+        t = (b - a) / L
+        n = np.array([-t[1], t[0]])
+        sv, off = (M - a) @ t / L, (M - a) @ n
+        # the edge's own contour, facing as it does (a side's contour round the corner faces the limb)
+        on = (np.abs(off) < max(6.0, 0.2 * L)) & (sv > -0.05) & (sv < 1.05) & (np.abs(N @ n) > 0.7)
+        for c, sel in ((c0, on & (sv < END_SHARE)), (c1, on & (sv > 1 - END_SHARE))):
+            if sel.sum() >= 3 and float(occ[sel].mean()) >= END_HIDDEN:
+                theirs.append(c)
+    if not theirs:
+        return None
+    lines = []
+    for name, j in (("top", 0), ("right", 1), ("bottom", 2), ("left", 3)):
+        a, b = A[j], A[(j + 1) % 4]
+        L = float(np.linalg.norm(b - a))
+        t = (b - a) / L
+        n = np.array([-t[1], t[0]])
+        sv, off = (M - a) @ t / L, (M - a) @ n
+        near = (sv > 0.1) & (sv < 0.9) & (np.abs(off) < max(6.0, 0.2 * L))
+        if name in ("top", "bottom"):
+            near &= ~occ
+        line = geo.line_through(np.vstack([a, b]))
+        if near.sum() >= 6:
+            P = M[near]
+            P = P[~_off_line(P, 2.0)]    # the side's own straight run, not a rounded corner's arc or an occluder's edge
+            if len(P) >= 6:
+                line = geo.line_through(P)
+        lines.append(line)
+    C = np.array([_meet(lines[i - 1], lines[i]) for i in range(4)])
+    far = np.linalg.norm(C - A, axis=1) > 0.5 * np.linalg.norm(np.roll(A, -1, 0) - A, axis=1).min()
+    return C, [i for i in theirs if not far[i]]
+
+
 def _mask_guides(M, corners, slack=3.0):
     """Each side's curve from the mask's contour (corner i to i + 1): a cubic bow off the chord fitted to the contour
     15 to 85 % of the way along, its ends held within `slack` px of the corners. The guides af.label_outline walks."""
@@ -583,15 +651,92 @@ def _mask_guides(M, corners, slack=3.0):
     return G
 
 
+HIDE_PX = (3, 4, 5, 6)   # px past a label edge sample (or a corner) the product's mask is probed at
+
+
+def _off_line(P, tol=3.0):
+    """Samples more than max(tol, 2 % of the run) off a straight line fitted to the rest (bool): along a label's side,
+    an occluder's edge where the side, or the limb it wraps to, runs on straight."""
+    P = np.asarray(P, float)
+    off = np.zeros(len(P), bool)
+    if len(P) < 6:
+        return off
+    t = max(tol, 0.02 * float(np.linalg.norm(P[-1] - P[0])))
+    for _ in range(4):
+        L = geo.line_through(P[~off])
+        r = np.abs(P @ L[:2] + L[2])
+        nxt = r > t
+        if nxt.sum() > 0.5 * len(P) or (nxt == off).all():
+            break
+        off = nxt
+    return off
+
+
+HIDE_RUN = (3, 0.05)  # hidden samples count in runs of this many or more, and this share of the edge's samples
+END_SHARE = 0.15    # a corner is hidden when the top or bottom edge's px nearest it (this share of the edge) ...
+END_HIDDEN = 0.6    # ... are this share or more where the product's mask ends right past them
+
+
+def _runs(hid):
+    """hid kept only in runs of HIDE_RUN or longer: something in front hides a stretch of an edge, not a point (one
+    sample by a shoulder moved a toner's fit 8 px off its approved round)."""
+    n = max(HIDE_RUN[0], int(np.ceil(HIDE_RUN[1] * len(hid))))
+    lab, k = label_cc(hid)
+    if not k:
+        return hid
+    size = sum_cc(hid, lab, np.arange(1, k + 1))
+    return np.isin(lab, 1 + np.nonzero(size >= n)[0])
+
+
+def _end_hidden(hid, at_start):
+    """Of a top or bottom edge's samples in order, the share END_SHARE nearest one end: hidden over END_HIDDEN."""
+    n = max(2, int(round(END_SHARE * len(hid))))
+    part = hid[:n] if at_start else hid[-n:]
+    return len(part) > 0 and float(np.mean(part)) >= END_HIDDEN
+
+
+def hidden_edges(E, CS, body, wrap):
+    """The generated label's edges where something in front hides it: SAM 3's label (taken within the product's mask)
+    ends where the product's mask does, at a holder's or a cloth's edge, and the label's corners and its bottom edge
+    were fitted to that edge: the packshot's label was squeezed into what shows and its bottom edge drawn across the
+    middle of the generated label. Past a label's top and bottom the product goes on (paper_label), so a top or bottom
+    edge sample whose outward normal leaves the product's mask at every probe (HIDE_PX) is the occluder's edge, and a
+    corner is hidden when its top or bottom edge is that near it (_end_hidden). A side runs along the body, where the
+    product's own silhouette may lie a few px off (a label close to a limb, or wrapping to it): its samples off the
+    side's straight line are the occluder's. E["top"] runs TL to TR, E["bottom"] BL to BR. -> (E without those
+    samples, hidden corner indices, {side: samples dropped})"""
+    cen = CS.mean(0)
+    E2, dropped, corners = dict(E), {}, set()
+    for k, P in E.items():
+        if len(P) < 2:
+            continue
+        if k in ("top", "bottom"):
+            T = np.gradient(np.asarray(P, float), axis=0)
+            T /= np.maximum(np.linalg.norm(T, axis=1), 1e-9)[:, None]
+            N = np.c_[T[:, 1], -T[:, 0]]
+            N = np.where((((P - cen) * N).sum(1) < 0)[:, None], -N, N)
+            hid = _runs(_outside(P, N, body))
+            first, last = (0, 1) if k == "top" else (3, 2)
+            corners |= {c for c, at in ((first, True), (last, False)) if _end_hidden(hid, at)}
+        else:
+            hid = _off_line(P)
+        if hid.any():
+            E2[k] = P[~hid]
+            dropped[k] = int(hid.sum())
+    return E2, corners, dropped
+
+
 def label_draft(scene_u8, ref_u8, ref_alpha=None, quad=None, outline=None, kind="cylinder", pairs=(), occluders=(),
-                mask=None, model="homography", about=ABOUT):
+                mask=None, model="homography", about=ABOUT, body_mask=None):
     """draft()'s label mode: the label only, measured by the recipe for labels on bottles, jars and tubes.
     quad: the generated label's 4 corners in the scene, in order round it (TL TR BR BL as on the packshot), a few px
     off at most; or None with mask, the generated label's mask. outline: the label on the packshot, upright, a polygon
     or a box (reference px). kind "cylinder": a label on a bottle or jar (align.model cylinder; axis and radius from
     the packshot's silhouette at the label's height); "flat": a label on a flat or flattened face (a tube's panels),
-    with `model`. pairs: landmark pairs, refined under the fit and added. -> draft()'s dict, plus "label": what was
-    measured (sides' support and bow, radii, cylinder, wrap, limb_min, print reach)."""
+    with `model`. pairs: landmark pairs, refined under the fit and added. body_mask: the product's own mask (bool):
+    where it ends right past the generated label's edge, something in front hides the label there (hidden_edges).
+    -> draft()'s dict, plus "label": what was measured (sides' support and bow, radii, cylinder, wrap, limb_min,
+    print reach, hidden edge samples and corners)."""
     if kind not in LABEL_KINDS:
         raise DraftError(f"label is cylinder, flat or off, not {kind!r}")
     if outline is None or not len(outline):
@@ -661,6 +806,13 @@ def label_draft(scene_u8, ref_u8, ref_alpha=None, quad=None, outline=None, kind=
             raise DraftError("the quad needs the generated label's 4 corners: TL TR BR BL, in the packshot label's order")
     elif M is not None:
         q = _mask_corners(mask, M)
+        if body_mask is not None:
+            seen = _seen_corners(M, _hull_quad(mask), body_mask)
+            if seen is not None and seen[1]:
+                for i in seen[1]:
+                    q[i] = seen[0][i]
+                notes.append("the generated label is partly hidden (the product's mask ends right past part of its "
+                             f"outline): its {', '.join(CORNERS[i] for i in seen[1])} corner where its seen sides meet")
     else:
         raise DraftError("label mode needs the generated label's 4 corners as the quad (TL TR BR BL, as on the "
                          "packshot), or its mask")
@@ -706,8 +858,20 @@ def label_draft(scene_u8, ref_u8, ref_alpha=None, quad=None, outline=None, kind=
                 xi = np.clip(np.round(pts[:, 0]).astype(int) - vb[0], 0, vis.shape[1] - 1)
                 yi = np.clip(np.round(pts[:, 1]).astype(int) - vb[1], 0, vis.shape[0] - 1)
                 E[k] = pts[vis[yi, xi] > 0.5]
-    for k, pts in E.items():
+    hidden, hidden_c = {}, set()
+    if body_mask is not None:
+        E, hidden_c, hidden = hidden_edges(E, CS, body_mask, wrap)
+        sharp |= hidden_c
+        for k, n in hidden.items():
+            notes.append(f"the generated label's {k} side: {n} of its edge samples lie where the product's mask ends "
+                         "right past them (something in front): not fitted to")
+    for k, pts in list(E.items()):
         if len(pts) < 3:
+            opp = {"top": "bottom", "bottom": "top", "left": "right", "right": "left"}[k]
+            if k in hidden and len(E[opp]) >= 3:
+                notes.append(f"the generated label's {k} side is hidden: the fit takes the rest")
+                del E[k]
+                continue
             raise DraftError(f"the generated label's {k} side has too little edge left to fit (an occluder over it?)")
     rt = lambda A: [[round(float(x), 2), round(float(y), 2)] for x, y in A]
     lines, limbs, corners = [], [], []
@@ -723,9 +887,12 @@ def label_draft(scene_u8, ref_u8, ref_alpha=None, quad=None, outline=None, kind=
                     R = R[np.argsort(R[:, 0])]
                     ext.append(np.vstack([R, [lx, _at_x(R, lx)]]) if sg > 0 else np.vstack([[lx, _at_x(R, lx)], R]))
                 top, bot = ext
-        lines.append({"label": "label top edge", "ref": rt(top), "curve": True, "w": 2.0, "scene": rt(E["top"])})
-        lines.append({"label": "label bottom edge", "ref": rt(bot), "curve": True, "w": 2.0, "scene": rt(E["bottom"])})
+        for k, R in (("top", top), ("bottom", bot)):
+            if k in E:
+                lines.append({"label": f"label {k} edge", "ref": rt(R), "curve": True, "w": 2.0, "scene": rt(E[k])})
         for side in ("left", "right"):
+            if side not in E:
+                continue
             if side in wrap:
                 lx = ax - r if side == "left" else ax + r
                 limbs.append({"label": f"label {side} edge = the bottle's silhouette", "side": side,
@@ -734,6 +901,8 @@ def label_draft(scene_u8, ref_u8, ref_alpha=None, quad=None, outline=None, kind=
                 Rs = S[side]
                 lines.append({"label": f"label {side} edge", "ref": rt([Rs[0], Rs[-1]]), "w": 2.0, "scene": rt(E[side])})
         for i, c in enumerate(CORNERS):
+            if i in hidden_c:            # the generated label's corner is hidden: the hull's is the occluder's
+                continue
             side = "left" if c in ("TL", "BL") else "right"
             if side in wrap:             # a corner at the limb: where the edge meets the silhouette, roughly
                 lx = ax - r if side == "left" else ax + r
@@ -748,13 +917,20 @@ def label_draft(scene_u8, ref_u8, ref_alpha=None, quad=None, outline=None, kind=
         align["cylinder"]["limb_min"] = limb_min
     else:
         for k in ("top", "right", "bottom", "left"):
+            if k not in E:
+                continue
             Rs = S[k]
             lines.append({"label": f"label {k} edge", "ref": rt([Rs[0], Rs[-1]]), "w": 2.0, "scene": rt(E[k])})
         for i, c in enumerate(CORNERS):
+            if i in hidden_c:
+                continue
             corners.append({"label": f"label {c} corner (sides extended)" + (": hidden, a weak seed" if i in sharp else ""),
                             "ref": [round(float(v), 2) for v in C[c]], "scene": [round(float(v), 2) for v in CS[i]],
                             "w": 0.3 if i in sharp else 1.0})
         align = {"model": model}
+    if len(corners) < 3:
+        raise DraftError(f"the generated label's corners are hidden ({', '.join(CORNERS[i] for i in sorted(hidden_c))}"
+                         "): too little of the label shows to fit it")
     align.update({"points": corners, "lines": lines})
     if limbs:
         align["limbs"] = limbs
@@ -775,6 +951,18 @@ def label_draft(scene_u8, ref_u8, ref_alpha=None, quad=None, outline=None, kind=
 
     # 7. shape, work box, grade, finish, fill
     sil = np.asarray(lo["polygon"], float)
+    if body_mask is not None and (hidden or hidden_c):
+        # what hides the label (its outline past the product's mask) stays in front: an occluder, so the new label
+        # isn't laid over a holder's edge
+        front = (raster.fill_polygon(Hs, Ws, [tuple(q_) for q_ in sil]) > 0) & ~body_mask
+        front = binary_opening(front, iterations=1)
+        lab_f, n_f = label_cc(front)
+        for i in range(1, n_f + 1):
+            part = lab_f == i
+            if part.sum() >= 12:
+                occ.append({"label": f"in front of the label (outside the product's mask, {int(part.sum())} px)",
+                            "polygon": [[round(float(x), 2), round(float(y), 2)] for x, y in
+                                        af.trace_outline(binary_dilation(part, iterations=2))]})
     small = float(np.sqrt(abs(_area(CS)))) < SMALL      # 1024 px frames: no fill ring, a tighter white level
     m = 16 if small else 40
     allp = np.vstack([sil, geo.map_polygon(H, P)])
@@ -805,7 +993,7 @@ def label_draft(scene_u8, ref_u8, ref_alpha=None, quad=None, outline=None, kind=
     info = {"kind": kind, "support": lo["support"], "bows": lo.get("bows"), "radii": lo["radii"], "sharp": sorted(sharp),
             "from": "mask" if M is not None and quad is None else "quad", "guides": "mask" if M is not None else "bow",
             "cylinder": cyl, "wrap": sorted(wrap), "limb_min": limb_min, "reach": reach, "scale": round(sc, 3),
-            "paper": paper}
+            "paper": paper, "hidden": {"edge_px": hidden, "corners": [CORNERS[i] for i in sorted(hidden_c)]}}
     return {"job": job, "H": H, "points": points, "corners": corners, "props": [], "sil_found": None, "mask_note": None,
             "orient": af.orientation(H, (bx0, by0, bx1, by1)), "white_box": None, "notes": notes,
             "sheet": af.match_sheet(scene, ref, H, points) if points else None, "label": info,

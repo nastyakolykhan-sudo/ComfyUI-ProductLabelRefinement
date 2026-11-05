@@ -57,11 +57,11 @@ def draft(scene_u8, ref_u8, ref_a, quad=None, pairs=(), occluders=(), mask=None,
     (run.py draft writes the mask's file there). model, ink, print_box, bow "auto": decided from the frame, the mask
     and the packshot (imgpost.decide.resolve), the decisions in the lines. label "auto" with label_mask and
     ref_label_mask (SAM 3's "label" on the scene and on the packshot): run.py draft --label auto (decide.label_auto)."""
-    auto, resolved = [], False
+    auto, resolved, body = [], False, None
     if label == "auto":
         label, box, sl, lmodel, auto = dc.label_auto(scene_u8, mask, ref_u8, ref_a, outline, ref_label_mask, label_mask)
         if label:
-            outline, mask = box, sl
+            outline, mask, body = box, sl, mask
             model = lmodel if model == "auto" else model
             ink = print_box = bow = None
     if "auto" in (model, ink, print_box, bow):
@@ -75,7 +75,7 @@ def draft(scene_u8, ref_u8, ref_a, quad=None, pairs=(), occluders=(), mask=None,
     try:
         d = dr.draft(scene_u8, ref_u8, ref_a, quad=quad, pairs=pairs, occluders=occluders, mask=mask,
                      mask_skip=mask_skip, model=model, outline=outline, cylinder=cylinder, relight=relight,
-                     suggest=suggest, label=label)
+                     suggest=suggest, label=label, body_mask=body)
         if ink or bow:
             try:
                 dr.print_on_body(d, scene_u8, mask=mask, ink=ink, print_box=print_box, bow=bow)

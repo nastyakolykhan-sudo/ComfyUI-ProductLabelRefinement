@@ -1,20 +1,20 @@
 {
   "skill": "~/Documents/Claude/product-label-refinement",
-  "imgpost_version": "0.16.0",
-  "synced": "2026-11-02",
+  "imgpost_version": "0.17.0",
+  "synced": "2026-11-04",
   "files": {
-    "__init__.py": "35be7dd982ff744e1300a88d30a5c726dcb67d682f2e227e771b7aefaa7aafe3",
+    "__init__.py": "b3685b31dbf07cb91e27eb554ade398c925604ecc0575bdec0320ce2a900d875",
     "audit.py": "7154d0ab2f5e63137450f2d57ac62677b80acdfa131bd94fa5ccf41e762e0c27",
-    "autofit.py": "92c60d7045eee4be40853a4c35777e739b814044585b7ca343b724c0fdf168e9",
+    "autofit.py": "2cd163f9e2ce68e6e3c04072279ec5db2e73bb862afd08aeb11c6672a5e68d91",
     "bow.py": "56f709307bfe94bf9c96f6e30068586d6f33898202f753a81528b6fe1404b456",
-    "decide.py": "af0746a88c1a1d617221dead516d8ddabfba8aa7b04ca2718dc797c2d0a0e144",
-    "draft.py": "24425a09dde29e1599adf24682378fafd6a4dd43c3df4cdb19b733075fb745eb",
+    "decide.py": "fbdaa9d040de0aa77f2b178b05681d2714f82d8dfe378c3657eebbdc8922daa8",
+    "draft.py": "2941f6263e00be0b3b0141d49a712c1539fbca8e98a019089095b2afa9e3b7dc",
     "fill.py": "4267aca68ce18703a25e1bbdd32670de80bcafd5701b2cd7577f46c93722a4af",
     "finish.py": "ddf6fecf4a3246bf1d931fdcb24ae95a8067230523e72a3ac5ba6399848101f0",
     "geometry.py": "2cc8d23c3d2e140d3ec0dab72b72bd0ef1d046cc73ecbe9fc4dd65f405a273b9",
     "grade.py": "fe0c9d16dbc4c9df56f1cd8e69a88e37f5f87cd976089370a0fcd1e21f728d2b",
     "images.py": "7d2e9e6f77b4f70c555bcf35412a11caa7705afbffff83e8636dbac0604d7e3d",
-    "ink.py": "793c99070f5294d4bdc9aa8ad3f650b7ea70a48bff67d6541c0a464c115a8c55",
+    "ink.py": "22fa0ffe377dcdb82f458df4d430fe0f1bd3e13ed4717b151549ab9a977b2fd1",
     "masks.py": "2f46b382f3b6f0654d603557ed3b2b39f130f7dd825ccacbe0bb725e464b91a9",
     "outline.py": "134de36ca4749f6d58a5d177f2e97f90c6c84400edf6fc30cbd2992d252ad60f",
     "psd.py": "132fdcb5dd9ef88004cdb29c78a5bd67621f395c53b39e47fc8f5b1a0a13f868",
@@ -22,10 +22,10 @@
     "raster.py": "f9dc02da8f3121a741ce1ae906e1f0cea5c65b41c1b963edf032da9742816fd4",
     "warp.py": "b7a19675703d2464867e8c6b7dbd6cb5b3cbbde062aac71403418efec9d6a45e"
   },
-  "run_py": "d3290b9cfb28adda6a5193f3f0fbcba5e61fb57a23e86d68a4c47a89fdba7371",
+  "run_py": "9a6d6d081cc07f368a772738c1c3d44d0a1290e4db4f59b27c40d61d1cdfb779",
   "video_engine": {
-    "synced": "2026-11-02",
-    "imgpost_version": "0.16.0",
+    "synced": "2026-11-04",
+    "imgpost_version": "0.17.0",
     "packages": {
       "imgvideo": {
         "version": "0.13.1",

@@ -32,6 +32,8 @@ DEFAULTS = {
     "gen_near": 5,        # scene px: garbled print only this near the true print's footprint (null: anywhere in the band)
     "gen_inset": 4,       # scene px: ... and this far inside the matte (with gen_near)
     "gen_dilate": 2,      # scene px: the fill reaches this far past the garbled print
+    "gen_glow": None,     # scene px (light print): the fill also takes the garbled strokes' soft glow this far out
+    "glow_thresh": 0.008,  # linear luminance above the body light (off every light stroke) that counts as glow
     "ink_pct": 90,        # percentile of frame / body over the garbled print's core that sets the ink's colour
     "seed": 7,            # the grain over the fill
     "gen_rel": None,      # ... and this share of the body light above (light) or below (dark) it, too
@@ -62,8 +64,9 @@ DARK = dict(DEFAULTS, frame_open="auto", gen_rel=0.15, gen_grow=True, register=T
 # light print, drafted from the frame, the mask and the packshot alone (pitfall 105): a fit to the silhouette put a
 # serum's print 30 px off the generated print, and the garbled print, filled only near the true print's footprint,
 # showed beside it on every frame. It is registered onto the generated print as dark print is (scaled along and across
-# the body's axis only); a print already on it moves by the registration's own residual
-LIGHT = dict(DEFAULTS, register=True, reg_model="scale")
+# the body's axis only); a print already on it moves by the registration's own residual. A generated frame's light print
+# fades into its body over several px (pitfall 108): the fill also takes that glow
+LIGHT = dict(DEFAULTS, register=True, reg_model="scale", gen_glow=6)
 POLARITIES = ("light", "dark")
 
 
@@ -939,6 +942,27 @@ def garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=None
         near3 = ndi.binary_dilation(gen, iterations=3) & ndi.binary_erosion(M, iterations=2)
         fillm |= near3 & ((top > 0.04 * body) | (-top > 0.03 * body))
         rep["halo_px"] = int((near3 & (-top > 0.03 * body)).sum())
+    glow = None
+    if not dark and cfg.get("gen_glow"):
+        # a generated frame's light print fades into its body over several px, past its top-hat and the fill's reach:
+        # filled from there, the fill came out brighter than the body (a serum: +9.5 levels a px out, +4 at 3 px) and
+        # each old letter showed as a soft ghost beside the new one. The glow: px within gen_glow of the fill and
+        # glow_thresh above the body light, the body the local mean of the px off every light stroke by gen_glow
+        # (the opening sits on the glow), joined to the fill
+        r = int(cfg["gen_glow"])
+        lit = M & (top > 0.5 * cfg["gen_thresh"])
+        w = (M & ~ndi.binary_dilation(lit | fillm, iterations=r)).astype(float)
+        den = ndi.gaussian_filter(w, 1.5 * r)
+        bl = ndi.gaussian_filter(_extend(Lf, M) * w, 1.5 * r) / np.maximum(den, 1e-6)
+        glow = ndi.binary_dilation(fillm, iterations=r) & ndi.binary_erosion(M, iterations=2) & (den > 0.02) & \
+            (Lf - bl > cfg["glow_thresh"])
+        if vis is not None:
+            glow &= vis > 0.5
+        lab, _ = ndi.label(glow | fillm)
+        glow &= np.isin(lab, np.unique(lab[fillm]))
+        glow &= ~fillm
+        fillm |= glow
+        rep["glow_px"] = int(glow.sum())
     known = M & ~fillm
     if occ is not None:
         # the fill stays a px off the occluder and never borrows its colour (a fish's bright body showed as blotches
@@ -983,6 +1007,8 @@ def garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=None
     if grown is not None:
         # the blocks of garbled print gen_grow took whole, with the fill's reach round them: check() reads them
         info["grown"] = ndi.binary_dilation(grown, iterations=dil + 3) & fillm
+    if glow is not None:
+        info["glow"] = glow            # the garbled strokes' glow the fill took: check() reads it as theirs
     rep.update({"filled_px": int(fillm.sum()), "garbled_px": int(gen.sum()), "grain_sd_lin": sd.round(5).tolist(),
                 "ink_k": k.round(3).tolist()})
     return filled, info, rep
@@ -1013,6 +1039,8 @@ def check(crop_u8, out_u8, info, cover, cfg, offset):
     grown = info.get("grown")
     if grown is not None:
         foot |= grown
+    if info.get("glow") is not None:
+        foot |= ndi.binary_dilation(info["glow"], iterations=1)
     M = info["matte"]
     rim = M & ~ndi.binary_erosion(M, iterations=4)
     out = []
