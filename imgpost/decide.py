@@ -217,7 +217,51 @@ def paper_label(ref_u8, band, ref_label):
     ly, lx = np.nonzero(L)
     box = [int(lx.min()), int(ly.min()), int(lx.max()) + 1, int(ly.max()) + 1]
     meas.update(kind=kind, box=box)
+    if off >= LABEL_FIELD:
+        outline, trim = paper_outline(lab, box, field, body)
+        if outline is not None:
+            meas["field_outline"] = trim
+            return kind, outline, meas
     return kind, box, meas
+
+
+LABEL_TRIM = 0.04     # SAM 3's label box shrinks to the label's field by at most this share of its size, per side
+
+
+def paper_outline(lab, box, field, body):
+    """The label's own outline on the packshot, when its field stands off the body: SAM 3's label runs a few px past
+    it (a dropper bottle's: 5 rows of amber glass below the paper, and the glass in its rounded corners); laid on the
+    frame, that glass drew a brown line across the new label and fringed its corners. The field: px inside the box not
+    clearly the body's colour (twice as near it as the field's, lightness half-weighted: a white label's shaded edge
+    by a limb, or on a grey tube, sits between the two and stays label), opened (glints on the glass go), its parts
+    over 5 % of the box; the outline is their convex hull, so a rounded corner keeps its round and the glass in it
+    stays out, and the band between a tube's two printed panels is spanned. A hull more than LABEL_TRIM of the box in
+    from a side keeps the box there. -> (polygon [[x, y], ...] in packshot px, or None where the field isn't found;
+    what was trimmed: px per side, left top right bottom)"""
+    from scipy.spatial import ConvexHull
+    x0, y0, x1, y1 = box
+    sub = lab[y0:y1, x0:x1]
+    wt = np.array([0.5, 1.0, 1.0])
+    d_f = np.linalg.norm((sub - field) * wt, axis=-1)
+    d_b = np.linalg.norm((sub - body) * wt, axis=-1)
+    fld = ndi.binary_opening(ndi.binary_fill_holes(ndi.binary_closing(~(2.0 * d_b < d_f), iterations=2)), iterations=2)
+    h, w = fld.shape
+    if h < 20 or w < 20 or fld.mean() < 0.5:
+        return None, None
+    lab_, n = ndi.label(fld)
+    size = ndi.sum(fld, lab_, np.arange(1, n + 1))
+    fld = np.isin(lab_, 1 + np.nonzero(size >= 0.05 * h * w)[0])
+    ys, xs = np.nonzero(fld & ~ndi.binary_erosion(fld))
+    try:
+        Q = np.c_[xs, ys].astype(float)[ConvexHull(np.c_[xs, ys].astype(float)).vertices]
+    except Exception:
+        return None, None
+    m = max(1, int(np.ceil(LABEL_TRIM * max(h, w))))
+    trim = [int(Q[:, 0].min()), int(Q[:, 1].min()), int(w - 1 - Q[:, 0].max()), int(h - 1 - Q[:, 1].max())]
+    if max(trim) > m:
+        return None, {"px": trim, "why": f"the field's hull sits over {m} px in from the box"}
+    pts = Q + [x0, y0]
+    return [[round(float(x), 2), round(float(y), 2)] for x, y in pts], {"px": trim, "hull_points": int(len(Q))}
 
 
 def scene_label(mask, label_mask, min_share=0.05):
@@ -257,10 +301,11 @@ def label_auto(scene_u8, mask, ref_u8, ref_alpha=None, outline=None, ref_label=N
             "label on the frame within the product: drafted without label mode",
             "auto       WARN a close call (see above): look at the keyframe before the clip"]
     model = "affine" if vm["iou"] >= VIEW_IOU else "homography"
+    trim = " trimmed to its field" if "field_outline" in meas else ""
     return kind, box, sl, model, [
         f"auto       label: {kind} (the packshot's print is on a label laid over the body, the same past both its "
-        f"ends; {json.dumps(meas)}): the label only, its outline on the packshot {box}, the generated label SAM 3's "
-        f"within the product ({int(sl.sum())} px)"]
+        f"ends; {json.dumps(meas)}): the label only, its outline on the packshot {meas['box']}{trim}, the generated "
+        f"label SAM 3's within the product ({int(sl.sum())} px)"]
 
 
 def resolve(scene_u8, mask, ref_u8, ref_alpha=None, outline=None, model="auto", ink="auto", print_box="auto",

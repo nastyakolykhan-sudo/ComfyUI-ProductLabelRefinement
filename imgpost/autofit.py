@@ -777,15 +777,22 @@ def fit_to_mask(mask, poly_ref, H0, model="homography", step=3.0, skip=None, ite
     the transform is refitted: rotation + scale first, then affine, then a homography. A mask has no clutter next
     to its edge, so unlike fitting to image edges this can't latch onto a neighbour or print. A last pass snaps to
     the mask's 0.5 crossing for sub-pixel accuracy. `skip(ref_pts) -> bool array` leaves parts of the outline out
-    (a cap the job keeps). -> dict(H, residual px per sample, used share, notes)"""
+    (a cap the job keeps). A mask that runs off the frame ends at the frame's edge, which isn't the product's: that
+    edge isn't contour, and outline points the fit puts past it pair with nothing (a tube running off the bottom of the
+    frame was squeezed into what shows, its cap drawn mid-body). -> dict(H, residual px per sample, used share, notes)"""
     from scipy.spatial import cKDTree
     P = np.asarray(poly_ref, float)
     D = resample(P, step / max(local_scale(H0, P.mean(0)), 1e-6), closed=True)
     use = np.ones(len(D), bool) if skip is None else ~np.asarray(skip(D), bool)
     edge = mask & ~binary_erosion(mask)
+    hh, ww = mask.shape
+    edge[:2], edge[-2:], edge[:, :2], edge[:, -2:] = False, False, False, False   # the frame's edge
     by, bx = np.nonzero(edge)
     tree = cKDTree(np.c_[bx, by].astype(float))
     H, notes = H0 / H0[2, 2], []
+
+    def seen(S):                         # outline points the fit puts inside the frame
+        return (S[:, 0] >= 2) & (S[:, 0] <= ww - 3) & (S[:, 1] >= 2) & (S[:, 1] <= hh - 3)
     stages = [("similarity", iters // 3), ("affine", iters // 3), (model, iters - 2 * (iters // 3))]
     for kind, n_it in stages:
         if kind == "homography" and model == "affine":
@@ -793,7 +800,7 @@ def fit_to_mask(mask, poly_ref, H0, model="homography", step=3.0, skip=None, ite
         for _ in range(n_it):
             S = apply_H(H, D[use])
             dist, idx = tree.query(S)
-            keep = dist <= max(2.5 * float(np.median(dist)), 2.0)
+            keep = (dist <= max(2.5 * float(np.median(dist)), 2.0)) & seen(S)
             src, dst = D[use][keep], tree.data[idx[keep]]
             if kind == "similarity":
                 Hn = _similarity(apply_H(H, src), dst) @ H
