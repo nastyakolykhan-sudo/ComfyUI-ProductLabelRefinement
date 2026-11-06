@@ -4,6 +4,8 @@ image or a clip, optional files, and the switches that run only the branch a job
 - Load Source takes an image or a video from ComfyUI's input folder and says which it is (is_video).
 - Load Optional is a file that may be left at "(none)": a product mask (else SAM 3), a corrected keyframe (else the
   stills branch makes it). `given` says whether it was set.
+- Work Size resizes a small still (and its given mask) up before the fix, so the new letters have pixels enough to
+  read (pitfall 113); clips pass as they are.
 - Switch passes one of two lazy inputs on, so the other branch never runs. Run If passes its input on or blocks
   everything downstream of it, output nodes included (a still never reaches the video nodes).
 - Print Type reads the job: print on the body (ink light or dark) or paper, the two stills graphs.
@@ -151,6 +153,59 @@ class ProductLabelLoadOptional:
             return (None, None, False)
         frames, _fps, _audio, _video = _load(file)
         return (frames, frames[..., 0].clone(), True)
+
+
+def work_factor(h, w, work_size):
+    """The whole factor (1-4) a still's long side is resized by to come near work_size: round(work_size / long side),
+    1 when it is that size or more (or work_size is 0)."""
+    long_ = max(int(h), int(w))
+    if work_size <= 0 or long_ <= 0 or long_ >= work_size:
+        return 1
+    return max(1, min(4, int(work_size / long_ + 0.5)))
+
+
+class ProductLabelWorkSize:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"frames": ("IMAGE",), "is_video": ("BOOLEAN", {"forceInput": True}),
+                             "work_size": ("INT", {"default": 4096, "min": 0, "max": 8192, "step": 64, "tooltip": (
+                                 "A still whose long side is under this is resized up (Lanczos, a whole factor up to "
+                                 "4) to come near it before the fix, so the new letters are drawn with enough pixels "
+                                 "to read; the output keeps that size. 0: off. Clips are never resized.")})},
+                "optional": {"masks": ("MASK",)}}
+
+    RETURN_TYPES = ("IMAGE", "MASK", "INT", "INT")
+    RETURN_NAMES = ("frames", "masks", "factor", "draft_scale")
+    FUNCTION = "resize"
+    CATEGORY = CATEGORY
+    DESCRIPTION = ("The size the fix works at. A small generated still has a label too few pixels tall to read once "
+                   "its letters are right (a 1,024 px frame: 5 px small print), so it is resized up first, a plain "
+                   "Lanczos resize (no upscaling model), and the fix draws the packshot's letters at that size. A "
+                   "given product mask is resized with it. Clips and stills already at work_size pass as they are. "
+                   "draft_scale (for Auto Draft's work_scale): the factor times how many times the frame was already "
+                   "resized up (a chained product's frame is the previous product's result), so the draft measures "
+                   "at the frame's own size.")
+
+    def resize(self, frames, is_video, work_size=4096, masks=None):
+        n, h, w = int(frames.shape[0]), int(frames.shape[1]), int(frames.shape[2])
+        if is_video or n != 1 or int(work_size) <= 0:
+            return (frames, masks, 1, 1)
+        import numpy as np
+        from PIL import Image
+        from .imgpost import workscale
+        f = work_factor(h, w, int(work_size))
+        a = np.clip(frames[0].cpu().numpy() * 255.0 + 0.5, 0, 255).astype(np.uint8)
+        before, _ = workscale.resized_by(a)
+        if f == 1:
+            return (frames, masks, 1, before)
+        big = np.asarray(Image.fromarray(a).resize((w * f, h * f), Image.LANCZOS)).astype(np.float32) / 255.0
+        out = torch.from_numpy(big)[None]
+        mk = masks
+        if masks is not None:
+            mk = torch.nn.functional.interpolate(masks[:, None].float(), size=(h * f, w * f), mode="bilinear",
+                                                 align_corners=False)[:, 0]
+            mk = (mk > 0.5).float()
+        return (out, mk, f, f * before)
 
 
 class ProductLabelSwitch:
@@ -658,7 +713,9 @@ class ProductLabelAuditName:
 class ProductLabelReviewName:
     SHARE = 0.5                  # a check over more than this share of the refined frames
     WRONG = ("double", "ghost")  # the print wrong on the frame (doubled, the old print through it): over SHARE, FAIL
-    HELD = ("slide",)            # the label off the print it lies on, held (the check's own run): any, FAIL
+    HELD = ("slide", "creep", "fade")   # the label off the print it lies on, held (the check's own run), creeping on
+                                        # a still product (V71: the user saw 0.6 px over a still shot), or fading over
+                                        # the old print where the product leaves right after (V72): any, FAIL
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -673,7 +730,8 @@ class ProductLabelReviewName:
     FUNCTION = "name"
     CATEGORY = CATEGORY
     DESCRIPTION = ("A clip's file name from Refine's own review. _REVIEW-FAIL: the print is wrong on most of the refined "
-                   "frames (doubled, or the old print showing through) or the label slid off the print it lies on. "
+                   "frames (doubled, or the old print showing through), the label slid off the print it lies on, or it crept on a "
+                   "still product. "
                    "_REVIEW-CHECK: other checks (light flicker, a step at the label's end, edges, ...) flag most of the "
                    "refined frames: look before delivering. They read approved clips as flagged too, so they don't "
                    "call a clip failed. The clip is always saved; with save_summary, the verdict and each check's "
@@ -1079,6 +1137,7 @@ def _reference_matte(ref, reference_mask):
 NODE_CLASS_MAPPINGS = {
     "ProductLabelLoadSource": ProductLabelLoadSource,
     "ProductLabelLoadOptional": ProductLabelLoadOptional,
+    "ProductLabelWorkSize": ProductLabelWorkSize,
     "ProductLabelSwitch": ProductLabelSwitch,
     "ProductLabelRunIf": ProductLabelRunIf,
     "ProductLabelPrintType": ProductLabelPrintType,
@@ -1101,6 +1160,7 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ProductLabelLoadSource": "Product Label: Load Source (Image or Video)",
     "ProductLabelLoadOptional": "Product Label: Load Optional File",
+    "ProductLabelWorkSize": "Product Label: Work Size (small stills resized up)",
     "ProductLabelSwitch": "Product Label: Switch",
     "ProductLabelRunIf": "Product Label: Run If",
     "ProductLabelPrintType": "Product Label: Print Type",

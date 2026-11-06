@@ -48,7 +48,7 @@ def work_box(job, Hs, Ws):
 
 def draft(scene_u8, ref_u8, ref_a, quad=None, pairs=(), occluders=(), mask=None, mask_skip=None, model="homography",
           outline=None, cylinder=False, relight=True, suggest=False, label=None, ink=None, print_box=None, bow=None,
-          label_mask=None, ref_label_mask=None):
+          label_mask=None, ref_label_mask=None, work_scale=1):
     """run.py draft without its files -> (job without the scene, reference and output paths; the lines run.py prints:
     the draft's summary and the align table; review sheet PIL image or None). run.py then runs the align stage,
     which Fit Warp and Warp Reference do here. label "cylinder" / "flat": run.py draft --label (the label only).
@@ -56,7 +56,13 @@ def draft(scene_u8, ref_u8, ref_a, quad=None, pairs=(), occluders=(), mask=None,
     job's old_silhouette stays the draft's: here the product mask goes into Fill Leftovers' old_silhouette instead
     (run.py draft writes the mask's file there). model, ink, print_box, bow "auto": decided from the frame, the mask
     and the packshot (imgpost.decide.resolve), the decisions in the lines. label "auto" with label_mask and
-    ref_label_mask (SAM 3's "label" on the scene and on the packshot): run.py draft --label auto (decide.label_auto)."""
+    ref_label_mask (SAM 3's "label" on the scene and on the packshot): run.py draft --label auto (decide.label_auto).
+    work_scale f > 1: the scene is the frame resized up f x for the fix (Work Size): drafted at the frame's own size,
+    the job scaled up (run.py draft --work-scale, imgpost.workscale)."""
+    from .imgpost import workscale
+    f_ws = int(work_scale or 1)
+    if f_ws > 1:
+        scene_u8, (mask, label_mask) = workscale.down(scene_u8, [mask, label_mask], f_ws)
     auto, resolved, body = [], False, None
     text = False
     if label == "auto":
@@ -97,6 +103,9 @@ def draft(scene_u8, ref_u8, ref_a, quad=None, pairs=(), occluders=(), mask=None,
                 dr.print_on_body(d, scene_u8, mask=mask, ink=ink, print_box=print_box, bow=None, text=text)
     except dr.DraftError as e:
         raise StageError(str(e)) from e
+    if f_ws > 1:
+        workscale.up_job(d["job"], f_ws)
+        auto.append(f"work size  drafted at the frame's own size, the job scaled {f_ws}x to the frame's work size")
     check_job(d["job"])
     _, rep = fit_warp(d["job"])
     return d["job"], "\n".join(auto + dr.summary(d) + [align_table(rep)]), d["sheet"]

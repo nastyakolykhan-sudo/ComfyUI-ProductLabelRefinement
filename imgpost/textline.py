@@ -81,6 +81,26 @@ def _even(lab, m):
     return bool(np.std(t) <= 0.2 * np.mean(t) and jump <= 1.0)
 
 
+BAND_SPAN = 0.6        # a band runs across this share of the label at least (a line of type blurred solid: 0.47) ...
+BAND_FILL = 0.85       # ... fills this share of its own columns' extent (letters merged by blur leave gaps) ...
+BAND_EVEN = 0.35       # ... at a thickness this even (sd / mean over its columns)
+
+
+def _band_like(lab, m):
+    """A long mark solid down its own columns at an even thickness: a band or rule a little turned or bowed, whose
+    box a turn of 1 deg leaves only 58 % full (pitfall 113: a 4x frame's band failed RULE_SOLID and went as text)."""
+    sub = lab[m["y0"]:m["y1"], m["x0"]:m["x1"]] == m["i"]
+    has = sub.any(0)
+    if has.mean() < 0.95:
+        return False
+    rows = np.arange(sub.shape[0])[:, None]
+    top = np.where(sub, rows, sub.shape[0]).min(0)[has]
+    bot = np.where(sub, rows, -1).max(0)[has]
+    ext = (bot - top + 1).astype(float)
+    fill = float(sub.sum()) / max(ext.sum(), 1.0)
+    return bool(fill >= BAND_FILL and ext.std() <= BAND_EVEN * ext.mean())
+
+
 def classify(lab, ms, sel, sharp=False):
     """Each mark's kind before lines: "rule" (long, thin, solid: a band, a rule, an edge line), "edge" (touching the
     band's edge, long: EDGE_LONG) or None (a candidate letter). In place: sets m["kind"]."""
@@ -96,6 +116,8 @@ def classify(lab, ms, sel, sharp=False):
             m["kind"] = "rule"
         elif sharp and m["w"] >= SHARP_RULE * m["h"] and m["w"] >= 0.1 * bw and _even(lab, m):
             m["kind"] = "rule"
+        elif m["w"] >= BAND_SPAN * bw and thin <= RULE_THIN * long_ and _band_like(lab, m):
+            m["kind"] = "rule"                      # a band turned or bowed a little: solid down its own columns
         elif m["h"] >= RULE_LEN * bw and m["w"] <= RULE_THIN * m["h"] and solid >= RULE_SOLID:
             m["kind"] = "rule"                      # upright: a label's side edge, a seam
         elif m["i"] in touch and max(m["w"], m["h"]) >= EDGE_LONG * typ:
@@ -105,6 +127,9 @@ def classify(lab, ms, sel, sharp=False):
     return ms
 
 
+BAND_FULL = 0.8        # a long generated mark short of this share of the label's width ...
+IN_BLOCK = 0.6         # ... with this share of it inside a block's text area is blurred type, not a band
+RULE_LANDING = 0.5     # a short true line with this share of its cover on the generated rules and bands: left out
 SMALL = 0.5            # a mark under this share of the typical mark's height is a dot, an accent or a comma: it joins
                        # the line beside it after the lines are formed
 
@@ -287,6 +312,52 @@ class LineMap:
         from .geometry import apply_H
         p = np.atleast_2d(np.asarray(pts, float))
         return apply_H(self.Hm, p @ self.A[:2, :2].T + self.A[:2, 2])
+
+
+class StraightLineMap:
+    """A line laid straight (pitfall 113): its LineMap's local affine at the line's centre c (reference px), so a fit
+    that bows rows round a cylinder (a squeeze tube's flat panel fitted as one) lays it as straight as the generator
+    drew it."""
+
+    def __init__(self, lm, c, d=4.0):
+        self.lm = lm
+        c = np.asarray(c, float)
+        self.c = c
+        f0 = lm.forward([c])[0]
+        jx = (lm.forward([c + [d, 0]])[0] - lm.forward([c - [d, 0]])[0]) / (2 * d)
+        jy = (lm.forward([c + [0, d]])[0] - lm.forward([c - [0, d]])[0]) / (2 * d)
+        self.J = np.c_[jx, jy]
+        self.Ji = np.linalg.inv(self.J)
+        self.f0 = f0
+
+    def forward(self, pts):
+        p = np.atleast_2d(np.asarray(pts, float))
+        return self.f0 + (p - self.c) @ self.J.T
+
+    def inverse(self, X, Y):
+        X, Y = np.asarray(X, float), np.asarray(Y, float)
+        dx, dy = X - self.f0[0], Y - self.f0[1]
+        u = self.c[0] + self.Ji[0, 0] * dx + self.Ji[0, 1] * dy
+        v = self.c[1] + self.Ji[1, 0] * dx + self.Ji[1, 1] * dy
+        return u, v, np.ones(np.shape(u), bool)
+
+
+def _path_sharpness(L, mp, P_s, origin, n=48):
+    """How sharp the generated print's row profile is along a true line laid by mapping mp (over its run, a line
+    height above and below): var / mean^2 of the row sums. P_s: the frame's print map in the work box at origin."""
+    h = max(L["h"], 1.0)
+    us = np.linspace(L["x0"], L["x1"], n)
+    vs = np.arange(L["top"] - h, L["bot"] + h + 1e-6, 0.5)
+    U, V = np.meshgrid(us, vs)
+    q = mp.forward(np.c_[U.ravel(), V.ravel()])
+    xs, ys = q[:, 0] - origin[0], q[:, 1] - origin[1]
+    vals = ndi.map_coordinates(P_s, [ys, xs], order=1, mode="constant").reshape(U.shape)
+    prof = vals.sum(1)
+    m = prof.mean()
+    return float(prof.var() / (m * m)) if m > 1e-9 else 0.0
+
+
+STRAIGHT_GAIN = 1.1    # a line goes straight when the generated print's rows are this much sharper along it
 
 
 def measure_rows(lines, M, pad=0.35, wide=1.0):
@@ -644,7 +715,22 @@ def place_print_level(cov_r, band, Hm, roi, crop_u8, in_band, cfg, kw, stroke=No
     Lf = im.lum(im.srgb_to_lin(im.to_float(crop_u8)))
     B = in_band > 0.5
     so = max(7, int(np.ceil(1.5 * stroke)) | 1) if stroke else 15
-    P_s = ink.print_map(Lf, B, so, dark)[0] * B
+    f_px = int(cfg.get("_px_scale") or 1)
+    if f_px > 1:
+        # a frame resized up for the fix (work scale, pitfall 113): its print read at the frame's own size, as the
+        # marks' kinds were tuned (at 4x a wordmark's descender ran into the band under it, and the band went with
+        # the letters), then laid back over the work size
+        H_, W_ = Lf.shape
+        h_, w_ = -(-H_ // f_px), -(-W_ // f_px)
+        Lp = np.pad(Lf, ((0, h_ * f_px - H_), (0, w_ * f_px - W_)), mode="edge")
+        Bp = np.pad(B, ((0, h_ * f_px - H_), (0, w_ * f_px - W_)), mode="edge")
+        Ls = Lp.reshape(h_, f_px, w_, f_px).mean((1, 3))
+        Bs = Bp.reshape(h_, f_px, w_, f_px).mean((1, 3)) > 0.5
+        so_s = max(7, int(np.ceil(so / f_px)) | 1)
+        Pq = ink.print_map(Ls, Bs, so_s, dark)[0] * Bs
+        P_s = ndi.zoom(Pq, f_px, order=1)[:H_, :W_] * B
+    else:
+        P_s = ink.print_map(Lf, B, so, dark)[0] * B
     P_b = pull_back(P_s, Hm, roi, band)
     tl_g = text_lines(P_b, band, thresh=GEN_THRESH)
     lr, lg = tl_r["lines"], tl_g["lines"]
@@ -668,6 +754,11 @@ def place_print_level(cov_r, band, Hm, roi, crop_u8, in_band, cfg, kw, stroke=No
     new_line = np.zeros(cov.shape, np.int32)
     best = np.zeros(cov.shape)
     kw = dict(kw, extra=None)
+    # the generated label's own rules and bands in the work box: a short true "line" (one or two marks) that lands
+    # mostly on them is the packshot's own band end read as a word, not text (pitfall 113: a grey smudge on the
+    # generated band's end)
+    on_rules = push(tl_g["other"], Hm, roi) > 0
+    dropped, straight = [], []
     for L in lr:
         k = L["k"]
         ck = cov_r * (comp == k + 1)
@@ -675,11 +766,21 @@ def place_print_level(cov_r, band, Hm, roi, crop_u8, in_band, cfg, kw, stroke=No
         if not len(ys):
             continue
         lm = LineMap(Hm, A[k])
+        # curved as the fit lays it, or straight where the generator drew the line straight (a flat panel fitted
+        # round a cylinder bowed the lines up at their ends, the user: "skewed", pitfall 113)
+        sm = StraightLineMap(lm, [0.5 * (L["x0"] + L["x1"]), L["cy"]])
+        s_c, s_s = _path_sharpness(L, lm, P_s, roi[:2]), _path_sharpness(L, sm, P_s, roi[:2])
+        if s_s > STRAIGHT_GAIN * s_c:
+            lm = sm
+            straight.append(k)
         sub = _roi_of(lm, [xs.min() - 2, ys.min() - 2, xs.max() + 3, ys.max() + 3], roi, 4)
         if sub is None:
             continue
         c, _ = ink.warp_cover(ck, band, lm, sub, **kw)
         sl = (slice(sub[1] - y0, sub[3] - y0), slice(sub[0] - x0, sub[2] - x0))
+        if len(L.get("members") or []) <= 2 and (c * on_rules[sl]).sum() >= RULE_LANDING * max(c.sum(), 1e-9):
+            dropped.append(k)
+            continue
         cov[sl] += c
         win = c > best[sl]
         new_line[sl] = np.where(win & (c > 0.02), k + 1, new_line[sl])
@@ -728,6 +829,18 @@ def place_print_level(cov_r, band, Hm, roi, crop_u8, in_band, cfg, kw, stroke=No
         share = float((rows_r[m["y0"]:m["y1"], m["x0"]:m["x1"]] & sel_m).sum()) / max(1, int(sel_m.sum()))
         if share < LONG_ON_ROWS:
             long_ids.append(m["i"])
+    # a "rule" short of the label's width lying inside a block's text area is a line of small type blurred solid
+    # (pitfall 113: kept as a rule, the new lines went over it), not a band: bands run across the label between blocks
+    for m in tl_g["marks"]:
+        if m.get("kind") != "rule" or m["w"] >= BAND_FULL * bw_:
+            continue
+        sel_m = tl_g["lab"][m["y0"]:m["y1"], m["x0"]:m["x1"]] == m["i"]
+        inzone = float((zone_r[m["y0"]:m["y1"], m["x0"]:m["x1"]] & sel_m).sum()) / max(1, int(sel_m.sum()))
+        if inzone >= IN_BLOCK:
+            whole = tl_g["lab"] == m["i"]
+            tl_g["other"] = tl_g["other"] & ~whole
+            tl_g["text"] = tl_g["text"] | whole
+            long_ids = [i for i in long_ids if i != m["i"]]
     if long_ids:
         # pixel by pixel: a band the generated wordmark's descender runs into is one mark with it; its letters' part
         # lies on the new lines' rows and goes, the band's stays
@@ -761,6 +874,8 @@ def place_print_level(cov_r, band, Hm, roi, crop_u8, in_band, cfg, kw, stroke=No
                             other=tl_g["other"], edge=tl_g["edge"], lone=tl_g["lone"], text=tl_g["text"],
                             icons=np.isin(tl_g["lab"], icon_ids) if icon_ids else np.zeros(band.shape, bool),
                             rows=rows_r, P_b=P_b)
+    if os.environ.get("PLR_TEXT_DEBUG"):
+        np.savez_compressed(os.environ["PLR_TEXT_DEBUG"].replace(".npz", "_new.npz"), new_line=new_line, roi=np.array(roi))
     gen_lone = push(tl_g["lone"], Hm, roi) > 0
     gen_line = push(tl_g["line_map"], Hm, roi)
     info = {"gen_text": gen_text, "gen_other": gen_other, "gen_lone": gen_lone, "gen_icon": gen_icon,
@@ -772,6 +887,7 @@ def place_print_level(cov_r, band, Hm, roi, crop_u8, in_band, cfg, kw, stroke=No
            "blur": {"frame_px": round(float(sig_f), 3), "packshot_px": round(float(sig_r), 3),
                     "packshot_per_scene_px": round(s_ps, 3), "rows_blur_px": round(sig, 3)},
            "off_text": [k for k in range(len(lr)) if not prep.get(k, {}).get("on_text")],
+           "on_rules_dropped": dropped, "straight": straight,
            "lines": [dict(k=L["k"], rows=[round(L["top"], 1), round(L["bot"], 1)], x=[L["x0"], L["x1"]],
                           **prep.get(L["k"], {})) for L in lr],
            "lines_generated": [dict(k=g["k"], rows=[round(g["top"], 1), round(g["bot"], 1)], x=[g["x0"], g["x1"]])
@@ -787,8 +903,14 @@ SMOOTH = 0.35          # the cost of two neighbouring lines sliding apart, per l
 STEP = 0.5             # px (reference) between the slides tried
 ON_TEXT = 0.5          # a placed line whose rows correlate this well with the generated print's sits on its text
 BLOCK_SCALES = (0.94, 0.97, 1.0, 1.03, 1.06)   # a block's size tried round the fit's
-BLOCK_TURNS = tuple(np.arange(-10.0, 10.01, 0.5))  # deg: a block's turn tried round the fit's (a tilted bottle's
-                                                  # generated lines ran 3-6 deg off its label fit's)
+LINE_TURNS = tuple(np.arange(-20.0, 20.01, 1.0))  # deg: each line's turn tried round the fit's (coarse, then 0.25 deg
+                                                  # round the best): a leaning bottle's generated lines ran 7-15 deg off
+                                                  # its label fit's, a wordmark 12 deg (pitfall 112)
+TURN_CONF = 1.5        # a line's own turn counts when its row profile is this many times sharper at its best turn
+                       # than at the median turn tried (the turn is visible in its rows) ...
+TURN_LEN = 4.0         # ... and it runs this many line heights long (a short word's rows are sharp at many turns)
+TURN_SPREAD = 1.5      # deg: a line's own turn stays within this of the label's trend (a robust line in its height
+                       # down the label: the generated lines' fan); lines whose own turn isn't visible take the trend
 
 
 def _rows_of(M, x0, x1, y0, y1):
@@ -877,12 +999,97 @@ def _viterbi(lines, scores, slides, gaps):
     return idx, float(acc.max())
 
 
+def _line_box(L, G, rad):
+    c = np.array([0.5 * (L["x0"] + L["x1"]), L["cy"]])
+    r = 0.5 * np.hypot(L["x1"] - L["x0"], L["h"]) + rad
+    return c, (int(max(c[0] - r, 0)), int(max(c[1] - r, 0)), int(min(c[0] + r + 1, G.shape[1])),
+               int(min(c[1] + r + 1, G.shape[0])))
+
+
+def _turn_sharpness(L, G, th):
+    """How sharp the generated print's row profile is over a true line's run and the rows round it (its neighbours'
+    included: the local run of the text), read along a turn by th about the line's centre: var / mean^2."""
+    h = max(L["h"], 1.0)
+    c = np.array([0.5 * (L["x0"] + L["x1"]), L["cy"]])
+    # every turn resampled alike (bilinear at a fixed half-pixel offset): read untouched at 0 deg, the level frame was
+    # always the sharpest, and a tube's lines 1.4 deg off read 0 (pitfall 113)
+    t = np.radians(th)
+    ys, xs = np.mgrid[int(np.floor(L["top"] - 1.5 * h)):int(np.ceil(L["bot"] + 1.5 * h)) + 1,
+                      int(L["x0"]):int(L["x1"]) + 1].astype(float)
+    xs, ys = xs + 0.5, ys + 0.5
+    X = c[0] + np.cos(t) * (xs - c[0]) - np.sin(t) * (ys - c[1])
+    Y = c[1] + np.sin(t) * (xs - c[0]) + np.cos(t) * (ys - c[1])
+    p = ndi.map_coordinates(G, [Y, X], order=1, mode="constant").sum(1)
+    p = ndi.gaussian_filter1d(p, 0.5)
+    m = p.mean()
+    return float(p.var() / (m * m)) if m > 1e-9 else 0.0
+
+
+def line_turns(lr, R, G):
+    """Each true line's turn onto the generated print (pitfall 112): the turn about the line's centre at which the
+    generated print's rows there are sharpest (a turned line of text smears its row profile; a normalised match of
+    the rows can't tell, it matched a level product's lines at 6-13 deg), coarse over LINE_TURNS then 0.25 deg round
+    the best; a robust line of the turns in the lines' height down the label (the generated lines' fan: a leaning
+    bottle's ran 12 deg at the top, 2 at the bottom); each line its own turn within TURN_SPREAD of that trend where
+    its rows show it (TURN_CONF, TURN_LEN), else the trend. R: the true print blurred alike, read for its own lines' turn.
+    -> ({k: deg}, {k: report})"""
+    own, conf, tru = {}, {}, {}
+    for L in lr:
+        co = np.array([_turn_sharpness(L, G, th) for th in LINE_TURNS])
+        t0 = LINE_TURNS[int(np.argmax(co))]
+        fine = np.arange(t0 - 1.0, t0 + 1.01, 0.25)
+        cf = np.array([_turn_sharpness(L, G, th) for th in fine])
+        own[L["k"]] = float(fine[int(np.argmax(cf))])
+        med = float(np.median(co))
+        conf[L["k"]] = float(cf.max() / med) if med > 0 else 0.0
+        # the packshot's own line, read the same way: a photo turned against its label's outline (1 deg on a tube's
+        # packshot) has lines that aren't level in its frame, and a line laid level over the generated one leaned
+        # by as much (the user: "the text below the grey line is still skewed a bit", pitfall 113)
+        tt = np.arange(-3.0, 3.01, 0.1)
+        ct = np.array([_turn_sharpness(L, R, th) for th in tt])
+        tru[L["k"]] = float(tt[int(np.argmax(ct))])
+    # the photo's turn is one for its label: the median over its long lines (a short word's rows are sharp at many)
+    lt = [tru[L["k"]] for L in lr if (L["x1"] - L["x0"]) >= TURN_LEN * max(L["h"], 1.0)]
+    t_photo = float(np.median(lt)) if lt else 0.0
+    for L in lr:
+        tru[L["k"]] = t_photo
+        own[L["k"]] -= t_photo
+    ks = [L["k"] for L in lr]
+    ys = np.array([L["cy"] for L in lr])
+    th = np.array([own[k] for k in ks])
+    long_ = np.array([(L["x1"] - L["x0"]) >= TURN_LEN * max(L["h"], 1.0) for L in lr])
+    w = np.array([np.log(max(conf[k], 1e-9) / TURN_CONF) for k in ks]).clip(0, None) * long_
+    ok = w > 0
+    if ok.sum() >= 3 and np.ptp(ys[ok]) > 0:
+        X = np.c_[np.ones(len(ys)), ys - ys[ok].mean()]
+        wt = w.copy()
+        for _ in range(6):                                  # Huber weights: a line read at a wrong turn gets few
+            beta = np.linalg.lstsq(X[ok] * np.sqrt(wt[ok])[:, None], th[ok] * np.sqrt(wt[ok]), rcond=None)[0]
+            r = np.abs(th - X @ beta)
+            sc = 1.4826 * np.median(r[ok]) + 0.5
+            wt = w * np.minimum(1.0, 1.5 * sc / np.maximum(r, 1e-9))
+        trend = X @ beta
+    elif ok.any():
+        trend = np.full(len(ys), float(np.average(th[ok], weights=w[ok])))
+    else:
+        trend = np.zeros(len(ys))
+    out, rep = {}, {}
+    for i, k in enumerate(ks):
+        t = float(trend[i] + np.clip(th[i] - trend[i], -TURN_SPREAD, TURN_SPREAD)) if ok[i] else float(trend[i])
+        out[k] = t
+        rep[k] = {"own_deg": round(own[k], 2), "own_sharp": round(conf[k], 2), "trend_deg": round(float(trend[i]), 2),
+                  "own_counts": bool(ok[i]), "packshot_deg": round(tru[k], 2)}
+    return out, rep
+
+
 def place_blocks(lr, R, G):
     """Each block of true lines (a column: lines whose runs overlap) placed on the generated print G, both in the
-    packshot's frame (R the true print blurred alike): the block's size (BLOCK_SCALES round the fit's) and one shift
-    along the row (column profiles), each line's own slide down the label (row profiles, _viterbi: in order, kept
-    apart, sliding together unless the rows say otherwise). -> ({k: 3 x 3 reference px}, {k: report})"""
+    packshot's frame (R the true print blurred alike): each line turned as the generated line it lands on runs
+    (line_turns), the block's size (BLOCK_SCALES round the fit's) and one shift along the row (column profiles), each
+    line's own slide down the label (row profiles, _viterbi: in order, kept apart, sliding together unless the rows
+    say otherwise). -> ({k: 3 x 3 reference px}, {k: report})"""
     A, rep = {}, {}
+    turns, trep = line_turns(lr, R, G)
     for blk in _blocks(lr):
         lines = sorted([lr[k] for k in blk], key=lambda L: L["cy"])
         hs = np.array([L["h"] for L in lines])
@@ -894,32 +1101,26 @@ def place_blocks(lr, R, G):
         gaps = [lines[i + 1]["top"] - lines[i]["bot"] for i in range(len(lines) - 1)]
         reach = 1.5 * float(np.median(hs))
         c = np.array([0.5 * (min(L["x0"] for L in lines) + max(L["x1"] for L in lines)), float(np.mean(cys))])
-        # the generated print round the block only (its lines' box, the slides and the reach to spare, turned)
         pad = D + 2 * reach + 2 * float(np.max(hs))
         x0b, x1b = min(L["x0"] for L in lines), max(L["x1"] for L in lines)
         y0b, y1b = min(L["top"] for L in lines), max(L["bot"] for L in lines)
         rad = 0.5 * np.hypot(x1b - x0b, y1b - y0b) + pad
         box = (int(max(c[0] - rad, 0)), int(max(c[1] - rad, 0)), int(min(c[0] + rad + 1, G.shape[1])),
                int(min(c[1] + rad + 1, G.shape[0])))
+        th_b = float(np.median([turns[L["k"]] for L in lines]))
+        # the generated print read along each line's own turn (a block's lines can fan), all about the block's centre:
+        # turned about their own centres, a short line and a long one under it closed up at their left ends
+        Gl = {L["k"]: (c, _turned(G, c, turns[L["k"]], box)) for L in lines}
+        Gb = _turned(G, c, th_b, box)
 
-        def trial(th, s_):
-            Gt = _turned(G, c, th, box)
-            dx, cx = _block_dx(lines, R, Gt, s_, reach)
-            sc = np.array([_line_scores(L, R, Gt, s_, dx, slides) for L in lines])
+        def trial(s_):
+            dx, cx = _block_dx(lines, R, Gb, s_, reach)
+            sc = np.array([_line_scores(L, R, Gl[L["k"]][1], s_, dx, slides) for L in lines])
             idx, tot = _viterbi(lines, sc, slides, gaps)
-            # a size or a turn off the fit's needs the rows to say so
-            tot -= 0.5 * len(lines) * (abs(np.log(s_)) / 0.06 + abs(th) / 30.0)
-            return (tot, s_, dx, cx, idx, sc, th)
-        # coarse turns at the fit's size, then finer turns and the sizes round the best
-        best = max((trial(th, 1.0) for th in BLOCK_TURNS[::4]), key=lambda b: b[0])
-        t0 = best[6]
-        for th in [t for t in BLOCK_TURNS if abs(t - t0) <= 1.5]:
-            for s_ in BLOCK_SCALES:
-                b = trial(th, s_)
-                if b[0] > best[0]:
-                    best = b
-        tot, s_, dx, cx, idx, sc, th = best
-        Rt = _rot(c, th)
+            # a size off the fit's needs the rows to say so
+            tot -= 0.5 * len(lines) * abs(np.log(s_)) / 0.06
+            return (tot, s_, dx, cx, idx, sc)
+        tot, s_, dx, cx, idx, sc = max((trial(s_) for s_ in BLOCK_SCALES), key=lambda b: b[0])
         for i, L in enumerate(lines):
             dy = float(slides[idx[i]])
             on = float(sc[i, idx[i]])
@@ -927,10 +1128,11 @@ def place_blocks(lr, R, G):
             M[0, 0] = M[1, 1] = s_
             M[0, 2] = L["x0"] + dx - s_ * L["x0"]
             M[1, 2] = L["cy"] + dy - s_ * L["cy"]
-            A[L["k"]] = Rt @ M
-            rep[L["k"]] = {"scale": round(s_, 3), "dx": round(dx, 2), "dy": round(dy, 2), "turn_deg": round(float(th), 2),
-                           "rows_ncc": round(on, 3), "on_text": bool(on >= ON_TEXT), "block": blk[0],
-                           "block_cols_ncc": round(cx, 3)}
+            A[L["k"]] = _rot(Gl[L["k"]][0], turns[L["k"]]) @ M
+            rep[L["k"]] = dict({"scale": round(s_, 3), "dx": round(dx, 2), "dy": round(dy, 2),
+                                "turn_deg": round(float(turns[L["k"]]), 2), "rows_ncc": round(on, 3),
+                                "on_text": bool(on >= ON_TEXT), "block": blk[0], "block_cols_ncc": round(cx, 3)},
+                               turn=trep[L["k"]])
     return A, rep
 
 

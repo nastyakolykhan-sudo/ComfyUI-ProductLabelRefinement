@@ -18,7 +18,11 @@ body while the source's own print moved 0.1-0.4. Here the label moves the way th
               trail splitting the matte, gets none), zero-lag. edge "mean": a local mean within 2 sigma of the run's
               ends instead (a line extrapolates the next frames' trend there). Added back: the label moves with the
               product frame to frame and lands where the engine places it over a few frames. The edge can be set
-              per end ([start, end]): the review's "ends" check reads the first and last pairs and says which to change
+              per end ([start, end]): the review's "ends" check reads the first and last pairs and says which to change.
+              The smoothing runs on the product's motion clock, not on frames: a frame advances the clock by its
+              motion over still_px (at most 1), so on a still product the offset (and the keyframe's own fix, eased
+              out over 2 sigma) holds, and the label holds with it. On frames counted the label crept 0.6 px on a
+              still bottle after the keyframe and into a cut, and the user saw it (pitfall V71)
 The glued mapping is the placement plus a smooth image-space correction (geometry.Residual through a dense grid over
 the label and a margin). The keyframe's frame stays exact."""
 import numpy as np
@@ -33,7 +37,23 @@ GLUE = {
     "rms_max": 0.9,     # a motion fit's robust rms (over the template's spread) above this falls back
     "dev_max": 6.0,     # px: a motion fit off the placement's own step by more (median) falls back
     "min_px": 400,      # the label's area on a frame under this: the placement's step
+    "still_px": 1.0,    # px a frame: the product's motion (the carried grid's median step) at which the smoothing's
+                        # clock runs at one frame a frame; slower motion runs it slower, a still product stops it
+                        # (0: frames, the clock before V71)
 }
+
+
+def motion_clock(tt, C, still_px):
+    """The smoothing's clock over frames tt: each step advances it by the carried grid's median motion over still_px,
+    at most the frames stepped (C {frame: grid points}). still_px 0: the frames themselves. -> array like tt"""
+    tt = np.asarray(tt, float)
+    if not still_px or len(tt) < 2:
+        return tt.copy()
+    clk = [0.0]
+    for a, b in zip(tt[:-1], tt[1:]):
+        m = float(np.median(np.linalg.norm(C[int(b)] - C[int(a)], axis=1)))
+        clk.append(clk[-1] + min(float(b - a), m / float(still_px)))
+    return np.array(clk) + tt[0]
 
 
 def edges(spec):
@@ -180,13 +200,16 @@ def glue(maps, frame, matte, LP, k, cfg=None):
             C[t] = (C[t + 1] - b) @ Ai.T
     tt = np.array([t for t in ts if t in C])
     e0, e1 = edges(c["edge"])
+    # the product's motion clock (V71): the smoothing's weights, its local line and the keyframe's fix run on it
+    ck = motion_clock(tt, C, float(c.get("still_px", 0) or 0))
     D = np.stack([P[t] - C[t] for t in tt])                       # frames x points x 2
     Ds = np.empty_like(D)
     for i, t in enumerate(tt):
-        w0 = np.exp(-0.5 * ((tt - t) / sigma_t) ** 2)
-        w0[np.abs(tt - t) > 3 * sigma_t] = 0
-        edge = (e0 == "mean" and t - tt[0] < 2 * sigma_t) or (e1 == "mean" and tt[-1] - t < 2 * sigma_t)
-        X = np.ones((len(tt), 1)) if edge else np.c_[np.ones(len(tt)), tt - t]
+        q = ck[i]
+        w0 = np.exp(-0.5 * ((ck - q) / sigma_t) ** 2)
+        w0[np.abs(ck - q) > 3 * sigma_t] = 0
+        edge = (e0 == "mean" and q - ck[0] < 2 * sigma_t) or (e1 == "mean" and ck[-1] - q < 2 * sigma_t)
+        X = np.ones((len(tt), 1)) if edge else np.c_[np.ones(len(tt)), ck - q]
         w = w0.copy()
         for _ in range(3):                                         # Huber weights on the frames
             sw = w[:, None]
@@ -197,11 +220,12 @@ def glue(maps, frame, matte, LP, k, cfg=None):
         Ds[i] = beta[0].reshape(D.shape[1:])
         rep.setdefault(int(t), {})["placement_jitter_px"] = round(float(np.median(np.linalg.norm(D[i] - Ds[i], axis=1))), 2)
         rep[int(t)]["trusted"] = bool(w[i] / max(w0[i], 1e-9) > 0.5)
+        rep[int(t)]["clock"] = round(float(q), 3)
     ik = int(np.nonzero(tt == k)[0][0])
     fix = D[ik] - Ds[ik]                                           # the keyframe's frame stays exact
     S = {}
     for i, t in enumerate(tt):
-        S[int(t)] = C[int(t)] + Ds[i] + fix * np.exp(-0.5 * ((t - k) / (2 * sigma_t)) ** 2)
+        S[int(t)] = C[int(t)] + Ds[i] + fix * np.exp(-0.5 * ((ck[i] - ck[ik]) / (2 * sigma_t)) ** 2)
     for t in ts:
         if t in S:
             rep.setdefault(t, {})["correction_px"] = round(float(np.linalg.norm(S[t] - P[t], axis=1).max()), 2)

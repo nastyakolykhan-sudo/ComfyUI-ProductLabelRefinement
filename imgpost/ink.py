@@ -48,6 +48,8 @@ DEFAULTS = {
                           # bow was given; kept only where the print registers better with it (pitfall 100)
     "reg_model": "affine",  # "scale": stretched along and across the body's axis only (no turn or shear: the print's
                             # lines stay parallel to the body's level edges); "affine": any
+    "reg_aspect": None,   # the registration's two scales at most this share apart (text only: 0.03; the letters keep
+                          # their shape, a white bottle's came out 8.5 % wider and 5 % shorter, pitfall 112)
     "sharpen": None,      # "auto": the warped print's edges sharpened to the frame's own print's
     "sharpen_max": 1.5,   # ... by an unsharp mask of at most this amount (more rings and aliases)
     "inks": None,         # "packshot": each ink in its packshot colour (a white bottle's black text and yellow bar),
@@ -70,6 +72,7 @@ DARK = dict(DEFAULTS, frame_open="auto", gen_rel=0.15, gen_grow=True, register=T
 # fades into its body over several px (pitfall 108): the fill also takes that glow
 LIGHT = dict(DEFAULTS, register=True, reg_model="scale", gen_glow=6)
 POLARITIES = ("light", "dark")
+TEXT_ASPECT = 0.03     # text only: the registration's scales at most this share apart (reg_aspect)
 
 
 class InkError(ValueError):
@@ -91,6 +94,13 @@ def _sub(cfg, pol):
                                                                              "sharpen", "inks", "gen_glow")})
     base.update(polarity=pol, print_box=cfg.get("print_box"), label=cfg.get("label"), text=True, inks=None,
                 gen_grow=False)
+    if base.get("reg_aspect") is None:
+        base["reg_aspect"] = TEXT_ASPECT
+    f = cfg.get("_px_scale") or 1
+    for k in ("frame_open", "gen_glow"):              # the pass's own defaults, at the work scale too
+        if f != 1 and isinstance(base.get(k), int) and not isinstance(base.get(k), bool):
+            base[k] = int(round(base[k] * f))
+    base["_px_scale"] = f
     return base
 
 
@@ -98,15 +108,30 @@ def _sub(cfg, pol):
 light = on_body
 
 
+SCENE_PX = ("frame_open", "gen_inset", "gen_dilate", "gen_near", "gen_glow", "reg_reach")   # scene px reaches
+
+
 def config(matte):
     cfg = dict(DARK if matte.get("polarity") == "dark" else LIGHT)
     cfg.update({k: v for k, v in matte.items() if k in DEFAULTS})
+    f = matte.get("px_scale") or 1
+    if f != 1:
+        # the frame resized up before the fix (work scale, pitfall 113): the garbled print's reaches with it (the old
+        # letters' fill missed their 4x strokes: pale halos round the new letters), the warp's softness not (the new
+        # letters are drawn crisp at the work size)
+        for k in SCENE_PX:
+            if isinstance(cfg.get(k), (int, float)) and not isinstance(cfg.get(k), bool):
+                cfg[k] = int(round(cfg[k] * f)) if isinstance(cfg[k], int) else cfg[k] * f
+    cfg["_px_scale"] = f
     cfg["print_box"] = matte.get("print_box")
     cfg["polarity"] = matte.get("polarity", "light")
     cfg["label"] = matte.get("label")
     if cfg.get("text"):
-        # the generated print's own inks, line by line, and its own blocks: no packshot inks, no whole blocks grown
+        # the generated print's own inks, line by line, and its own blocks: no packshot inks, no whole blocks grown;
+        # the letters keep their shape (the lines are placed one by one after the registration)
         cfg.update(inks=None, gen_grow=False)
+        if cfg.get("reg_aspect") is None:
+            cfg["reg_aspect"] = TEXT_ASPECT
     return cfg
 
 
@@ -753,8 +778,11 @@ def register(crop_u8, cover, in_band, cfg, offset, stroke=None, body=None, rows=
     best = (-2.0, 1.0, 1.0, 0.0, 0.0)
     n_sc = int(round(cfg["reg_scale"] / 0.025))
     steps = 1.0 + 0.025 * np.arange(-n_sc, n_sc + 1)
+    asp = cfg.get("reg_aspect")
     for sy in steps:
         for sx in steps:
+            if asp is not None and abs(sx / sy - 1.0) > float(asp) + 1e-9:
+                continue
             Cs = ndi.affine_transform(Cb, np.diag([1 / sy, 1 / sx]), offset=(c2[1] * (1 - 1 / sy), c2[0] * (1 - 1 / sx)),
                                       order=1)
             ty, tx = np.nonzero(Cs > 0.02)
@@ -845,6 +873,10 @@ def register(crop_u8, cover, in_band, cfg, offset, stroke=None, body=None, rows=
             d = np.linalg.lstsq(np.c_[tuple(cols)], -r, rcond=None)[0]
             if scale_only:
                 sn, sa = sn + d[0], sa + d[1]
+                if asp is not None:
+                    # the letters keep their shape: the two scales' ratio held within reg_aspect
+                    gm, rr = np.sqrt(abs(sn * sa)), np.clip(sn / sa, 1.0 / (1.0 + float(asp)), 1.0 + float(asp))
+                    sn, sa = gm * np.sqrt(rr), gm / np.sqrt(rr)
                 M = (sn * np.outer(nv, nv) + sa * np.outer(axv, axv)) @ Rt
             else:
                 M = M + d[:4].reshape(2, 2)
@@ -1018,25 +1050,36 @@ def _garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=Non
     if text is not None:
         # text only: the generated letters inside the band (any line of them: the packshot's print is the label's
         # whole text) and garbled marks near the new print, never the generated rules, bands, edges or lone marks
+        f_px = cfg.get("_px_scale") or 1          # the work scale (pitfall 113): these reaches are scene px
         inset = ndi.binary_erosion(M, iterations=int(cfg["gen_inset"]))
         if cfg.get("label"):
             # the generated label's measured outline (label mode): its border and what lies past it stay
             from . import masks as mk_
             lab_in = mk_.poly_cover(text["roi"], cfg["label"], ss=2) > 0.5
-            inset &= ndi.binary_erosion(lab_in, iterations=LABEL_INSET)
+            inset &= ndi.binary_erosion(lab_in, iterations=int(round(LABEL_INSET * f_px)))
         # every mark of the generated print in the band (the packshot's print is the label's whole text: garbled
         # lines it has no line for go too), but its rules, bands, edges and icons (marks in no line of text, larger
         # than its letters) unless the new print covers them
-        keep = ndi.binary_dilation(text["gen_other"] | (text["gen_icon"] & ~ndi.binary_dilation(cover > 0.1, iterations=2)),
-                                   iterations=1)
+        keep = ndi.binary_dilation(text["gen_other"] | (text["gen_icon"] & ~ndi.binary_dilation(
+            cover > 0.1, iterations=int(round(2 * f_px)))), iterations=int(round(f_px)))
         # whole marks: a generated letter or word reaching into the text area goes all of it (cut at the area's edge,
         # its rest fed the fill and smudged it)
         # only marks holding letters (or small lone marks) of the generated print: a band's faint end, a label's
         # shading and the paper's grain that read as print near the new print stay
-        lab_g, n_g = ndi.label(work & inset & cand & ~keep, structure=np.ones((3, 3), bool))
+        # marks labelled whole across the inset: a generated word crossing the label's measured outline (a last line
+        # set close to a curved bottom edge) goes whole when most of it lies inside (pitfall 113: cut at the outline,
+        # its lower half stayed under the new last word)
+        body_in = ndi.binary_erosion(M, iterations=int(cfg["gen_inset"]))
+        lab_all, n_g = ndi.label(work & body_in & cand & ~keep, structure=np.ones((3, 3), bool))
+        lab_g = lab_all
+        if n_g:
+            tot = ndi.sum(np.ones_like(lab_all), lab_all, np.arange(1, n_g + 1))
+            ins = ndi.sum(inset, lab_all, np.arange(1, n_g + 1))
+            out_ = np.r_[False, ins < INSET_SHARE * tot]
+            lab_g = np.where(out_[lab_all], 0, lab_all)
         # small lone marks only beside letters (a dot, an accent): elsewhere they are the body's glitter and specks
         letters = text["gen_text"] | (text["gen_lone"] & ~text["gen_icon"] &
-                                      ndi.binary_dilation(text["gen_text"], iterations=3))
+                                      ndi.binary_dilation(text["gen_text"], iterations=int(round(3 * f_px))))
         hit = np.unique(lab_g[text["text_zone"] & letters & (lab_g > 0)])
         # a generated line goes whole once any of its letters go (a block placed a little lower left its top line's
         # first word above the text area)
@@ -1045,6 +1088,14 @@ def _garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=Non
             lines_hit = np.unique(gl[np.isin(lab_g, hit[hit > 0]) & (gl > 0)])
             if len(lines_hit):
                 hit = np.union1d(hit, np.unique(lab_g[np.isin(gl, lines_hit) & letters & (lab_g > 0)]))
+                # ... its marks past the label's measured outline too, inside the product (a corner the draft took
+                # for hidden round the limb cut a last line's end off: it stayed under the new last word)
+                hit = np.union1d(hit, np.unique(lab_all[np.isin(gl, lines_hit) & letters & (lab_all > 0)]))
+        # ... and any generated mark the new letters land on in the text area: new ink never goes over old (a
+        # generated i drawn as one tall stroke stayed under the new i's dot, which came out black, pitfall 113)
+        under = np.unique(lab_all[(cover > 0.1) & text["text_zone"] & (lab_all > 0)])
+        hit = np.union1d(hit, under[under > 0])
+        lab_g = np.where(np.isin(lab_all, hit[hit > 0]), lab_all, lab_g)
         tz = np.isin(lab_g, hit[hit > 0])
         gen = tz
         import os
@@ -1185,6 +1236,7 @@ def _garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=Non
         info["grown"] = ndi.binary_dilation(tz, iterations=dil + 3) & fillm
         info["keep"] = keep & work
         info["text_zone"] = text["text_zone"] & work
+        info["px_scale"] = cfg.get("_px_scale") or 1
         info["k"], rep["text_inks"] = _line_inks(Fl, filled, gen, top, text, k, cfg, dark, a)
         info["text"] = text
     if glow is not None:
@@ -1202,6 +1254,9 @@ def _line_inks(Fl, filled, gen, top, text, k, cfg, dark, a):
     lr = text["lines_true"]
     own = {}
     for L in lr:
+        if len(L.get("members") or []) <= 2 and len(lr) > 1:
+            continue        # a dot or a short mark on its own: too little generated print under it to read its ink (a
+            # wordmark's i dot on bare paper came out black against its letters' dark brown, pitfall 113)
         foot = ndi.binary_dilation(nl == L["k"] + 1, iterations=2)
         sel = gen & foot
         if sel.sum() < 12:
@@ -1614,6 +1669,7 @@ def rim_check(src_u8, out_u8, M, vis, size, offset):
 
 
 LABEL_INSET = 3      # text only: px kept clear inside the generated label's measured outline (its border, its shading)
+INSET_SHARE = 0.5    # ... a generated mark goes whole when this share of it lies inside (a word crossing the outline)
 DOUBLE_FAIL = 0.25   # double_check: the generated print left beside the new print, as a share of the new print's px
 
 
@@ -1650,6 +1706,62 @@ TEXT_ONLY_PX = 20        # ... FAIL from this many such px (the composite's own 
 TEXT_LEFT_FAIL = 0.15    # text_left: generated letters left in the text area, as a share of the new letters' px
 TEXT_PLACED_MIN = 0.85  # text_missing: FAIL when less of the packshot's letters went on (cut at an edge, left out)
 TEXT_OFF_FAIL = 0.4      # text_lines: FAIL when this share of the new lines (by their px) sits off the generated text
+TEXT_SLANT_FAIL = 0.8    # text_slant: the new lines' runs turned this many deg off the generated print's there (their
+                         # median, by letters): FAIL (v11's squeeze tube 1.4, "still skewed a bit"; fixed 0.0; an
+                         # approved amber bottle 0.2, its worst line 1.6) ...
+TEXT_SLANT_WARN = 1.5    # ... one line this far: WARN
+TEXT_INK_SHARE = 0.5     # text_ink: new letters' px darker than this share of the generated letters' darkest ink (2nd
+                         # percentile; dark print) ...
+TEXT_INK_PX = 12         # ... in pieces this big (px at 1x): FAIL
+TEXT_SLANT_MIN_H = 8     # px: lines smaller than this (a 1,024 px frame's small print) aren't measured
+
+
+def dark_any(passes):
+    return any(pol == "dark" for pol, _ in passes)
+
+
+def _run_angle(P, sel, a0, span=3.0, step=0.1):
+    """The direction (deg, image x right, y down) within a0 +- span along which P's row profile over sel is sharpest
+    (P projected across the direction in 0.5 px bins: var / mean^2)."""
+    ys, xs = np.nonzero(sel)
+    w = P[ys, xs]
+    if w.sum() <= 1e-6:
+        return None
+    best = (-1.0, None)
+    for a in np.arange(a0 - span, a0 + span + 1e-9, step):
+        t = np.radians(a)
+        v = -np.sin(t) * xs + np.cos(t) * ys
+        b = np.floor((v - v.min()) * 2).astype(int)
+        prof = np.bincount(b, weights=w)
+        sc = prof.var() / max(prof.mean() ** 2, 1e-12)
+        if sc > best[0]:
+            best = (sc, float(a))
+    return best[1]
+
+
+def _slant(Ps, Po, nl, f_px=1):
+    """text_slant's measure: each new line (nl: the work box's new line map) long enough (4 line heights) to show its
+    run, its direction in the output against the generated print's over the same rows. -> [(line, deg off, px)]"""
+    out = []
+    for k in np.unique(nl[nl > 0]):
+        m = nl == k
+        ys, xs = np.nonzero(m)
+        if len(xs) < 80 * f_px * f_px:
+            continue
+        X = np.c_[xs - xs.mean(), ys - ys.mean()]
+        ev, evec = np.linalg.eigh(X.T @ X)
+        d = evec[:, 1] if evec[0, 1] != 0 or evec[1, 1] != 0 else np.array([1.0, 0.0])
+        d = -d if d[0] < 0 else d
+        across = np.sqrt(ev[0] / len(xs)) * 4.0               # ~ the line's height
+        if np.sqrt(ev[1] / len(xs)) * 3.5 < 4 * across or across < TEXT_SLANT_MIN_H:
+            continue                                           # too short, or too small to read its run (1,024 px)
+        a0 = float(np.degrees(np.arctan2(d[1], d[0])))
+        reg = ndi.binary_dilation(m, iterations=max(1, int(round(0.8 * across))))
+        ao, ag = _run_angle(Po, reg, a0), _run_angle(Ps, reg, a0)
+        if ao is None or ag is None:
+            continue
+        out.append((int(k) - 1, round(ao - ag, 2), int(m.sum())))
+    return out
 
 
 def text_checks(crop_u8, out_u8, info, offset):
@@ -1667,8 +1779,12 @@ def text_checks(crop_u8, out_u8, info, offset):
     src = crop_u8.astype(int)
     changed = np.abs(out_u8.astype(int) - src).max(-1) > TEXT_CHANGE_LEVELS
     a = info["alpha"]
-    letters = ndi.binary_dilation(a > 0.02, iterations=2)
-    allowed = letters | ndi.binary_dilation(info["fill"], iterations=1)
+    f_px = info.get("px_scale") or 1                    # the work scale (pitfall 113): the reaches are scene px
+
+    def it(n):
+        return max(1, int(round(n * f_px)))
+    letters = ndi.binary_dilation(a > 0.02, iterations=it(2))
+    allowed = letters | ndi.binary_dilation(info["fill"], iterations=it(1))
 
     def box(m):
         ys, xs = np.nonzero(m)
@@ -1682,7 +1798,7 @@ def text_checks(crop_u8, out_u8, info, offset):
                         (": the product's own colour, finish or lines moved" if n >= TEXT_ONLY_PX else "")})
     keep = info.get("keep")
     if keep is not None:
-        k = changed & keep & ~ndi.binary_dilation(a > 0.02, iterations=1)
+        k = changed & keep & ~ndi.binary_dilation(a > 0.02, iterations=it(1))
         hit = keep & (a > 0.3)
         nk, nh = int(k.sum()), int(hit.sum())
         lvl = "FAIL" if nk >= TEXT_ONLY_PX or nh >= 4 * TEXT_ONLY_PX else "INFO"
@@ -1698,12 +1814,12 @@ def text_checks(crop_u8, out_u8, info, offset):
         zone = inf.get("text_zone")
         if zone is not None and tx.get("gen_text") is not None:
             # the whole band, not only the text area: generated letters left anywhere on the label
-            zone = zone | (tx["gen_text"] & ndi.binary_erosion(inf["matte"], iterations=4))
+            zone = zone | (tx["gen_text"] & ndi.binary_erosion(inf["matte"], iterations=it(4)))
         if zone is not None:
             size = int(inf.get("frame_size") or 15)
             Ps, Po, _ = _print_maps(crop_u8, out_u8, inf["matte"], size, pol == "dark")
-            foot = ndi.binary_dilation(inf["alpha"] > 0.02, iterations=2)
-            lk = zone & (Po > 0.35) & (Ps > 0.35) & ~changed & ~foot & ~ndi.binary_dilation(keep, iterations=1) \
+            foot = ndi.binary_dilation(inf["alpha"] > 0.02, iterations=it(2))
+            lk = zone & (Po > 0.35) & (Ps > 0.35) & ~changed & ~foot & ~ndi.binary_dilation(keep, iterations=it(1)) \
                 if keep is not None else zone & (Po > 0.35) & (Ps > 0.35) & ~changed & ~foot
             left_px += int(lk.sum())
         place = tx.get("place") or {}
@@ -1715,6 +1831,63 @@ def text_checks(crop_u8, out_u8, info, offset):
             if not r.get("on_text", True):
                 off_px += px
                 off_lines.append(f"{pol} line {L['k']} (rows match {r.get('rows_ncc')})")
+    # text_slant: each new line's run against the generated print's (the user, 2026-11-05: "the text below the grey
+    # line is still skewed a bit -- should be more aligned with the bottom edge of the label like it is in the
+    # original", pitfall 113)
+    sl_ = []
+    for pol, inf in passes:
+        tx = inf.get("text") or {}
+        if tx.get("new_line") is None:
+            continue
+        size = int(inf.get("frame_size") or 15)
+        Ps_, Po_, _ = _print_maps(crop_u8, out_u8, inf["matte"], size, pol == "dark")
+        sl_ += [(pol, k, d, px) for k, d, px in _slant(Ps_, Po_, tx["new_line"], f_px)]
+    if sl_:
+        worst = max(sl_, key=lambda r: abs(r[2]))
+        dv = np.array([abs(r[2]) for r in sl_])
+        wv = np.array([r[3] for r in sl_], float)
+        o_ = np.argsort(dv)
+        med = float(dv[o_][np.searchsorted(np.cumsum(wv[o_]), 0.5 * wv.sum())])
+        lvl = "FAIL" if med > TEXT_SLANT_FAIL else "WARN" if abs(worst[2]) > TEXT_SLANT_WARN else "INFO"
+        out.append({"check": "text_slant", "level": lvl, "deg": round(med, 2), "worst_deg": worst[2],
+                    "lines": [{"pass": p_, "line": k, "deg": d} for p_, k, d, _ in sl_],
+                    "text": f"the new lines run {med:.2f} deg off the generated print's (median by letters; worst "
+                            f"{abs(worst[2]):.2f}, {worst[0]} line {worst[1]})" +
+                            (": the text turned off the generated text (skewed against the label)" if lvl == "FAIL"
+                             else ": one line turned off its generated line" if lvl == "WARN" else "")})
+    # text_ink: new letters inked twice (over generated ink the fill didn't take): darker than anything the generator
+    # drew (a wordmark's i dot came out black, 8 levels, against the generated ink's 45, pitfall 113)
+    stack, stack_lines = 0, []
+    if not dark_any(passes):
+        pass
+    else:
+        lum = out_u8.astype(float).mean(-1)
+        for pol, inf in passes:
+            tx = inf.get("text") or {}
+            nl = tx.get("new_line")
+            if nl is None or pol != "dark":
+                continue
+            core = (inf["alpha"] > 0.6)
+            gt = tx.get("gen_text")
+            src_l = crop_u8.astype(float).mean(-1)
+            gsel = gt & (src_l < 128) if gt is not None else None
+            if gsel is None or gsel.sum() < 30:
+                continue
+            ref = float(np.percentile(src_l[gsel], 2))       # the generated letters' darkest ink
+            for k in np.unique(nl[nl > 0]):
+                m = core & (nl == k)
+                if m.sum() < 30:
+                    continue
+                lab_, n_ = ndi.label(m & (lum < TEXT_INK_SHARE * ref))
+                if n_:
+                    sz = ndi.sum(np.ones_like(lab_), lab_, np.arange(1, n_ + 1))
+                    big = int(sz[sz >= TEXT_INK_PX * f_px * f_px].sum())
+                    if big:
+                        stack += big
+                        stack_lines.append(int(k) - 1)
+    out.append({"check": "text_ink", "level": "FAIL" if stack else "INFO", "px": stack,
+                "text": (f"{stack} px of new letters far darker than the generated ink (lines {stack_lines}): inked twice, "
+                         "over generated print the fill didn't take" if stack else "the new letters' ink is even")})
     v = left_px / float(new_px)
     out.append({"check": "text_left", "level": "FAIL" if v > TEXT_LEFT_FAIL else "INFO", "px": left_px,
                 "share": round(v, 3), "text": f"generated letters still showing in the text area: {left_px} px, "

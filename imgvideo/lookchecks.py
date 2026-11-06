@@ -10,6 +10,12 @@ with pass/fail flags and the setting an agent tries next (summary["actions"]). P
           still_px): on fast moves the measure is blur, not glue.
   ends    the same on the first and last pairs of a run the label holds: the glue's smoothing at a run's ends (edge
           "line" extrapolates the next frames' trend, "mean" doesn't; "mean" helped one product and hurt another).
+  creep   the label creeping on a still product (V71; the user: "the label drifts slightly" over 3-4 frames of a still
+          shot, 0.05-0.15 px a frame, 0.6 px in all): the label's shift less the source print's on the label's box, each by phase
+          correlation (the swim's own search wanders 0.02-0.05 px a pair),
+          summed over each run of still pairs (the body moves at most creep_still px), its spread over creep_px.
+          Pairs where the fix's strength changes (an ease in or out, a fade at a run's end: the print changes, it
+          doesn't move) don't count.
   level   the label's lines against the product's base, both straightened on the body's axis (level.measure: skew by
           point projection, 1 px profile smoothing; bowed lines at the axis, V61). Against 0 where render.level
           levelled to the base, else against the keyframe frame's own level. Only where the base holds steady
@@ -55,6 +61,13 @@ LOOKS = {
     "swim_pairs": 2,         # ... on this many pairs within swim_window pairs: flagged
     "swim_window": 6,
     "ends_frames": 4,        # the pairs within this many frames of a held run's first and last frames: "ends"
+    "creep_still": 0.2,      # px: a pair is still when the source print moves at most this far (on the label's box;
+                             # still frames 0.00-0.03, a bottle's last settling step 0.36: not still) ...
+    "creep_px": 0.3,         # ... and the label's summed shift against it over a run of still pairs spreads over this
+                             # (v11's pump bottle 0.59 px, the user saw it; 0.03 on the motion clock, V71) ...
+    "creep_pairs": 3,        # ... over at least this many pairs in a row
+    "creep_fix": 0.15,       # a pair whose fix strength (mean |output - source| on the label) changes by this share
+                             # is an ease or a fade, not a move: left out
     "level_deg": 1.0,        # deg: the lines off the base (or the keyframe's level), 5-frame median ...
     "level_run_s": 0.25,     # ... held this long
     "lines_deg": 0.3,        # deg: the label's lines turned against the frame's own print beyond their keyframe frame's
@@ -122,6 +135,31 @@ def shift(a, b, m, mx, c=(0, 0)):
     return np.array([ix - mx + fx + cx, iy - mx + fy + cy]), edge
 
 
+def _pc(a, b):
+    """The shift (dx, dy) that maps a onto b by phase correlation (Hann window, a parabola through the peak): exact to
+    a few hundredths of a px on still frames, where the swim's integer search plus parabola wanders 0.02-0.05 px a
+    pair (summed over a still run, a glittery tube read 0.3 px of creep that wasn't there, V71)."""
+    a = a - a.mean()
+    b = b - b.mean()
+    w = np.outer(np.hanning(a.shape[0]), np.hanning(a.shape[1]))
+    Fa, Fb = np.fft.fft2(a * w), np.fft.fft2(b * w)
+    X = Fa * np.conj(Fb)
+    r = np.real(np.fft.ifft2(X / (np.abs(X) + 1e-9)))
+    y, x = np.unravel_index(int(r.argmax()), r.shape)
+    H, W = r.shape
+
+    def sub(c, m, p):
+        d = m - 2 * c + p
+        return 0.0 if d == 0 else (m - p) / (2 * d)
+    yy = y + sub(r[y, x], r[(y - 1) % H, x], r[(y + 1) % H, x])
+    xx = x + sub(r[y, x], r[y, (x - 1) % W], r[y, (x + 1) % W])
+    if yy > H / 2:
+        yy -= H
+    if xx > W / 2:
+        xx -= W
+    return np.array([-xx, -yy])
+
+
 def swim_pair(s0, s1, o0, o1, m0, m1, region, still_px=3.0, mx=8):
     """One pair of frames: the body's shift (source), and the label's against it in the output and in the source on the
     same region (the output's changed pixels on the first frame). -> {"body": [dx, dy], "swim_px", "swim_src_px"}, or
@@ -148,8 +186,25 @@ def swim_pair(s0, s1, o0, o1, m0, m1, region, still_px=3.0, mx=8):
     do = shift(Ao, Bo, lab, mx, cs)
     if ds is None or do is None:
         return None
+    # the fix's strength on both frames (an ease or a fade changes it: the creep check leaves those pairs out)
+    f0 = float(np.abs(o0[sl].astype(np.float32) - s0[sl].astype(np.float32)).max(-1)[lab].mean()) if lab.any() else 0.0
+    f1 = float(np.abs(o1[sl].astype(np.float32) - s1[sl].astype(np.float32)).max(-1)[lab].mean()) if lab.any() else 0.0
+    # creep's measure: the label's box (the output's changed px, 6 px round) in the output against the same box in the
+    # source, each by phase correlation on luminance: the label's own shift less the source print's
+    box = binary_dilation(R, iterations=6)
+    ys_, xs_ = np.nonzero(box)
+    bs = (slice(ys_.min(), ys_.max() + 1), slice(xs_.min(), xs_.max() + 1))
+    ls0, ls1 = lin_lum(s0[sl])[bs], lin_lum(s1[sl])[bs]
+    lo0, lo1 = lin_lum(o0[sl])[bs], lin_lum(o1[sl])[bs]
+    if min(ls0.shape) >= 16:
+        sp = _pc(ls0, ls1)
+        dc = _pc(lo0, lo1) - sp
+    else:
+        sp, dc = ds[0], do[0] - ds[0]
     return {"body": [round(float(v), 2) for v in db[0]], "swim_px": round(float(np.hypot(*(do[0] - db[0]))), 2),
-            "swim_src_px": round(float(np.hypot(*(ds[0] - db[0]))), 2)}
+            "swim_src_px": round(float(np.hypot(*(ds[0] - db[0]))), 2),
+            "d": [round(float(v), 3) for v in dc], "src": [round(float(v), 3) for v in sp],
+            "fix": [round(f0, 2), round(f1, 2)]}
 
 
 # ---------------------------------------------------------------------------------------------------------- tilt
@@ -361,6 +416,29 @@ def evaluate(F, shots, fps=24.0, cfg=None):
                 act("ends", end_hit, "the label swims on a held run's " + " and ".join(
                     w for w, s_ in (("first pairs", first), ("last pairs", last)) if any(t in s_ for t in end_hit)),
                     {"render": {"glue": dict(g if isinstance(g, dict) else {}, edge=e[0] if e[0] == e[1] else e)}})
+            # creep: the label's shift against the source's print summed over each run of still pairs (V71)
+            # still: the source print's own shift on the label's box (exact there; the swim's body search let a
+            # settling bottle's 0.6-0.8 px frames in, and their motion read as creep)
+            still = [t for t in sorted(sw) if "d" in sw[t]
+                     and np.hypot(*sw[t].get("src", sw[t]["body"])) <= c["creep_still"]
+                     and max(sw[t]["fix"]) > 0
+                     and abs(sw[t]["fix"][1] - sw[t]["fix"][0]) <= c["creep_fix"] * max(sw[t]["fix"])]
+            cr, crept = [], []
+            for a, b in _runs(still):
+                if b - a + 1 < c["creep_pairs"]:
+                    continue
+                cum = np.vstack([[0.0, 0.0], np.cumsum([sw[t]["d"] for t in range(a, b + 1)], axis=0)])
+                spread = float(max(np.hypot(*(cum[i] - cum[j])) for i in range(len(cum)) for j in range(i + 1, len(cum))))
+                cr.append({"frames": [a, b + 1], "px": round(spread, 3)})
+                if spread > c["creep_px"]:
+                    crept += list(range(a, b + 2))
+                    for t in range(a, b + 2):
+                        flag(t, "creep", f"the label creeps {spread:.2f} px against the still product over {a}-{b + 1} "
+                                         f"(creep_px {c['creep_px']})")
+            if crept:
+                act("creep", crept, "the label creeps on a still product",
+                    {"render": {"glue": dict(g if isinstance(g, dict) else {}, still_px=2.0)}})
+            S["creep"] = {"runs": cr, "flagged": len(crept)}
             v = np.array(list(ex.values()))
             S["swim"] = {"pairs": len(sw), "median_px": round(float(np.median([s["swim_px"] for s in sw.values()])), 2),
                          "source_median_px": round(float(np.median([s["swim_src_px"] for s in sw.values()])), 2),

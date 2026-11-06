@@ -180,19 +180,22 @@ def definition_all():
             {"value": True}, (0, 2560)),
         84: ("PrimitiveBoolean", "Render the clip (false: only the keyframe, to check it before the clip)",
              {"value": True}, (0, 0)),
+        # a small still resized up first (Lanczos), so its letters are drawn with pixels enough to read (pitfall 113)
+        99: ("ProductLabelWorkSize", "Work size: a small still resized up (Lanczos; clips as they are)", {
+            "frames": L(1, 0), "is_video": L(1, 3), "work_size": 4096, "masks": L(3, 1)}, (0, 0)),
         # the keyframe frame's shot (an edit: between the cuts round it), for SAM 3's track and Refine
         # the keyframe frame: as set, else found (the shot the packshot's product is seen best in, its best frame)
         89: ("ProductLabelFindKeyframe", "Keyframe frame: as set, else found from the clip and the packshot", {
-            "frames": L(1, 0), "keyframe_frame": L(6, 0), "keyframe_given": L(4, 2), "mask_given": L(3, 2),
-            "masks": L(3, 1), "model": L(10, 0), "conditioning": L(11, 0), "reference": L(2, 0),
+            "frames": L(99, 0), "keyframe_frame": L(6, 0), "keyframe_given": L(4, 2), "mask_given": L(3, 2),
+            "masks": L(99, 1), "model": L(10, 0), "conditioning": L(11, 0), "reference": L(2, 0),
             "reference_mask": L(82, 0)}, (0, 0)),
         19: ("ProductLabelShot", "Shot: the keyframe frame's, between cuts (start/end -1 = found)", {
-            "frames": L(85, 0), "keyframe_index": L(89, 0), "start": -1, "end": -1, "masks": L(3, 1)}, (0, 0)),
+            "frames": L(85, 0), "keyframe_index": L(89, 0), "start": -1, "end": -1, "masks": L(99, 1)}, (0, 0)),
         # SAM 3: the product's mask on the keyframe frame (an image: the image), then through the shot both ways
         10: ("CheckpointLoaderSimple", "SAM 3.1 checkpoint", {"ckpt_name": "sam3.1_multiplex_fp16.safetensors"}, (480, 0)),
         11: ("CLIPTextEncode", "SAM 3 prompt: the product (comma-separated; name:N for N objects)",
              {"text": "product", "clip": L(10, 1)}, (480, 160)),
-        12: ("ProductLabelPickFrame", "Keyframe frame", {"index": L(89, 0), "images": L(1, 0)}, (480, 420)),
+        12: ("ProductLabelPickFrame", "Keyframe frame", {"index": L(89, 0), "images": L(99, 0)}, (480, 420)),
         86: ("ProductLabelSAM3Points", "SAM 3 points on the keyframe frame (optional: x,y on the product, -x,y off it)",
              {"points": ""}, (0, 0)),
         87: (SW, "SAM 3 text prompt: left out when points are given", {"when": L(86, 2), "if_false": L(11, 0)}, (0, 0)),
@@ -208,7 +211,7 @@ def definition_all():
         16: (SW, "Product mask: the given one, else SAM 3", {"when": L(3, 2), "if_true": L(19, 1), "if_false": L(15, 0)},
              (480, 1340)),
         18: (SW, "Keyframe frame's mask: the given one, else SAM 3 on that frame", {
-            "when": L(3, 2), "if_true": L(3, 1), "if_false": L(13, 0)}, (480, 1620)),
+            "when": L(3, 2), "if_true": L(99, 1), "if_false": L(13, 0)}, (480, 1620)),
         17: ("ProductLabelPickFrame", "Keyframe frame's mask", {"index": L(89, 0), "masks": L(18, 0)}, (480, 1480)),
         # the packshot's outline when it has no alpha: SAM 3 (always for triage; for the fix where the backdrop's trace
         # takes in more than the product)
@@ -233,7 +236,7 @@ def definition_all():
                                                   "filename_prefix": "product-label-refinement/triage/mask"}, (0, 0)),
         72: (RUN, "Fix: only when the product needs it", {"value": L(12, 0), "when": L(9, 0), "run_when": "true"},
              (0, 0)),
-        73: (RUN, "Video: only when the product needs fixing", {"value": L(1, 0), "when": L(9, 0), "run_when": "true"},
+        73: (RUN, "Video: only when the product needs fixing", {"value": L(99, 0), "when": L(9, 0), "run_when": "true"},
              (0, 0)),
         85: (RUN, "Clip: only when Render the clip is on", {"value": L(73, 0), "when": L(84, 0), "run_when": "true"},
              (0, 0)),
@@ -263,7 +266,8 @@ def definition_all():
             "scene": L(22, 0), "reference": L(2, 0), "quad": "", "model": "auto", "light": "off", "suggest": False,
             "filename_prefix": "product-label-refinement/draft", "product_mask": L(23, 0), "reference_mask": L(83, 0),
             "pairs": "", "occluders": "", "outline": "", "mask_skip": "", "label": "auto", "ink": "auto",
-            "print_box": "auto", "bow": "auto", "label_mask": L(98, 0), "reference_label_mask": L(97, 0)},
+            "print_box": "auto", "bow": "auto", "label_mask": L(98, 0), "reference_label_mask": L(97, 0),
+            "work_scale": L(99, 3)},
             (960, 980)),
         25: ("ImagePostLoadJob", "Load Job (the given job)", {"job_json": L(5, 0), "job_path": ""}, (960, 1800)),
         26: (SW, "Job: the given one, else the draft", {"when": L(5, 0), "if_true": L(25, 0), "if_false": L(24, 0)},
@@ -379,7 +383,7 @@ def definition_all():
 
 
 # the one workflow's layout: columns left to right, nodes top to bottom (heights as the frontend draws them)
-ALL_COLUMNS = [[1, 2, 3, 4, 5, 6, 7, 8, 9, 84], [89, 19, 10, 11, 86, 87, 12, 13, 18, 17, 14, 15, 16],
+ALL_COLUMNS = [[1, 2, 3, 4, 5, 6, 7, 8, 9, 84], [99, 89, 19, 10, 11, 86, 87, 12, 13, 18, 17, 14, 15, 16],
                [81, 82, 83, 70, 71, 76, 77, 72, 73, 85, 74],
                [20, 21, 88, 22, 96, 97, 98, 23, 24], [25, 26, 27, 29, 28, 30],
                [31, 32, 33, 34, 35, 36], [37, 38, 39, 40], [41, 42, 43, 93, 44], [45, 46, 47, 48], [49, 50, 51, 52, 53, 54],
@@ -448,7 +452,7 @@ ALL_GROUPS = [
 
 SIZE = {"LoadImage": (400, 360), "LoadImageMask": (400, 360), "SaveImage": (400, 330), "ImagePostLoadJob": (420, 560), "ImagePostAutoDraft": (460, 760),
         "ImagePostQASheet": (420, 520), "ImagePostFitWarp": (380, 140), "ImagePostSavePSD": (420, 300),
-        "ProductLabelLoadSource": (400, 360), "ProductLabelLoadOptional": (400, 360), "ProductLabelSwitch": (380, 100),
+        "ProductLabelLoadSource": (400, 360), "ProductLabelLoadOptional": (400, 360), "ProductLabelWorkSize": (400, 130), "ProductLabelSwitch": (380, 100),
         "ProductLabelRunIf": (380, 100), "ProductLabelPrintType": (380, 80), "ProductLabelPickFrame": (380, 120),
         "ProductLabelShot": (400, 200), "ProductLabelFindKeyframe": (400, 280), "ProductLabelAuditGate": (380, 100), "ProductLabelSplice": (400, 240), "ProductLabelMaskOverlay": (380, 120),
         "ProductLabelPackshotMatte": (400, 140), "ProductLabelSAM3Points": (400, 100),
