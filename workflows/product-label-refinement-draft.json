@@ -143,6 +143,11 @@
      "name": "reference_label_mask",
      "type": "MASK",
      "link": null
+    },
+    {
+     "name": "work_scale",
+     "type": "INT",
+     "link": null
     }
    ],
    "outputs": [

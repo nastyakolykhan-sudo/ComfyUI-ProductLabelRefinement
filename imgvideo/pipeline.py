@@ -1223,6 +1223,7 @@ def _glue(J, C, fr, res):
     glued = {t: H for t, H in gl.glued_mappings(maps, P, S, a).items() if t in V}
     summ = gl.summary(rep, steps, sorted(maps), J.s0, J.anchor, gc["sigma"])
     summ["per_frame"] = {t + J.s0: v for t, v in rep.items()}
+    C["glue_clock"] = {t: v["clock"] for t, v in rep.items() if "clock" in v}
     e0, e1 = gl.edges(gc["edge"])
     print(f"glue       {len(glued)} frames moved with the product's own motion (sigma {gc['sigma']} frames, edge "
           f"{e0 if e0 == e1 else e0 + ' at the start, ' + e1 + ' at the end'}): correction median {summ['correction_px_median']} px, max {summ['correction_px_max']}; "
@@ -1262,7 +1263,7 @@ def _level(J, C, fr, res):
                 return None
             return None if r is None else r["text_deg"]
     lev, rep = lvl.level(maps, lambda t: J.key(t, maps[t]), J.outline(), J.anchor - J.s0, rc["level"], kf_img=kf,
-                         polarity=rc.get("polarity", "light"), read=read)
+                         polarity=rc.get("polarity", "light"), read=read, clock=C.get("glue_clock"))
     lev = {t: H for t, H in lev.items() if t in V}
     rep = dict(rep, keyframe=J.anchor, moved=len(lev))
     if "per_frame" in rep:
@@ -1415,10 +1416,17 @@ def stage_render(J, rng=None, workers=None):
     n_in, n_out = rc.get("ease", [2, 2])
     Vs = sorted(V)
     ease = {}
-    if Vs[0] > 0:                        # inside the shot range: the tracks were lost, the label is still in view
+    # ... not where the run stops because the product leaves the view or a cut comes (a wipe carrying it out of the
+    # shot): there is nothing to ease into, and an ease there laid the label over the old print, doubled, on the
+    # run's last frames with the product still whole in view (pitfall V72)
+    stops = res.get("stops") or {}
+    gone = ("cut", "product left")
+    ease_in = (stops.get("start") or {}).get("reason") not in gone
+    ease_out = (stops.get("end") or {}).get("reason") not in gone
+    if Vs[0] > 0 and ease_in:            # inside the shot range: the tracks were lost, the label is still in view
         for i in range(n_in):
             ease[Vs[0] + i] = min(ease.get(Vs[0] + i, 1.0), (i + 1) / (n_in + 1))
-    if Vs[-1] < len(fr) - 1:             # (a shot range's own ends are cuts: the next shot has its own fix)
+    if Vs[-1] < len(fr) - 1 and ease_out:  # (a shot range's own ends are cuts: the next shot has its own fix)
         for i in range(n_out):
             ease[Vs[-1] - i] = min(ease.get(Vs[-1] - i, 1.0), (i + 1) / (n_out + 1))
 

@@ -9,6 +9,8 @@ marked and stays quiet on the frames they approved (references/video/workflow.md
           follows a misregistered source).
   shear   a shear spike against the neighbouring frames of the shot (a morph frame the fit followed).
   vanish  the fix stops while the product and its print are still in view (occlusion, an exit, lost tracks).
+  fade    the fix eased on a run's last (or first) frames where the product is gone on the next frame: the label lay
+          doubled over the old print with the product whole in view (V72)
   switch  a hard switch at a fix's end (no ease into the source), or the label jumping against the body where two
           shots meet without a cut.
   bend    the label's side snapped onto a matte edge that isn't the product's limb (an occluder's straight cut, an edge
@@ -53,6 +55,9 @@ DEFAULTS = {
     "vanish_matte": 0.25,        # an unrefined frame still shows the product: matte at least this share ...
     "vanish_detail": 0.6,        # ... and print detail at least this share of the refined frames next to it (median of 5)
     "switch_fix": 0.65,          # the boundary frame's fix at least this share of its run's: not eased
+    "fade_fix": 0.85,            # fade: a run's last fade_n frames under this share of the fix on the fade_ref frames
+    "fade_n": 3,                 # just inside them, the product gone past the run (V72; an eased end: 0.67 and 0.34
+    "fade_ref": 6,               # of its frames before, held: 1.0)
     "jump_px": 3.0,              # the old print, read through both frames' mappings, moves this far in label space
     "bend_slope": 0.6,           # a matte edge running this steep to the axis (px across per px along) over 2 row pairs
     "bend_ends": 0.15,           # ... away from the band's ends (where a crimp or a cap steps the outline on purpose),
@@ -190,6 +195,11 @@ def frame_measures(src_u8, out_u8, matte, prev=None):
     if lab.sum() > 2000:
         r["seam"] = seam_steps(src_u8, out_u8, matte, lab)
         r["fix_levels"] = round(float(np.abs(srgb_lum(out_u8) - srgb_lum(src_u8))[lab].mean()), 3)
+        # the fix's strength over the product (fade, V72): the change summed over the matte, per matte px. Light print
+        # on a light body moves the label's mean luminance 1-2 levels and the source's own light swings it; a mean over
+        # the changed px alone stays put as an ease shrinks them
+        r["fix_strength"] = round(float(np.abs(out_u8.astype(np.int16) - src_u8.astype(np.int16)).max(-1)[matte].sum())
+                                  / max(int(matte.sum()), 1), 4)
     if prev is not None:
         r["hist"] = round(hist_dist(prev[0], src_u8), 4)
         r["overlap"] = round(matte_overlap(prev[1], matte), 3)
@@ -736,6 +746,25 @@ def label_jump(art, H0, H1, src0, src1, m0, m1, step=2.0):
 
 # ---------------------------------------------------------------- the checks
 
+def fade_frames(F, a, b, edge_t, step, c):
+    """fade's frames at one end of a refined run a..b: the run's last (or first) fade_n frames whose fix strength
+    (fix_strength) falls under fade_fix of the frames just inside them (the median over the fade_ref frames before), the
+    product's own level there: against the whole run's median, a still product's frames (a weaker fix than its moving
+    ones) read as a fade (V72). -> [frames]"""
+    n, w = int(c["fade_n"]), int(c["fade_ref"])
+    if step > 0:
+        ends = [u for u in range(edge_t - n + 1, edge_t + 1) if a <= u <= b]
+        refs = [u for u in range(edge_t - n - w + 1, edge_t - n + 1) if a <= u <= b]
+    else:
+        ends = [u for u in range(edge_t, edge_t + n) if a <= u <= b]
+        refs = [u for u in range(edge_t + n, edge_t + n + w) if a <= u <= b]
+    lv = [F[u]["fix_strength"] for u in refs if "fix_strength" in F.get(u, {})]
+    if len(lv) < 3:
+        return []
+    ref = float(np.median(lv))
+    return [u for u in ends if F.get(u, {}).get("fix_strength", ref) < c["fade_fix"] * ref]
+
+
 def _runs(frames):
     out = []
     for t in sorted(frames):
@@ -861,6 +890,14 @@ def evaluate(F, fps=24.0, cfg=None):
         near = {b: range(max(a, b - 4), b + 1), a: range(a, min(b, a + 4) + 1)}     # the run's frames next to each end
         for edge_t, step in ((b, 1), (a, -1)):
             t, ref = edge_t + step, F[edge_t]
+            # fade: the fix eased out (or in) on the run's own frames while the product is gone on the next one:
+            # nothing to ease into, and the label lay doubled over the old print with the product whole in view
+            # (pitfall V72: a wipe carried the product out after the run's last frame)
+            if t in F and F[t].get("matte_px", 0) < c["vanish_matte"] * max(ref.get("matte_px", 0), 1):
+                for u in fade_frames(F, a, b, edge_t, step, c):
+                    flags[u].append(("fade", f"the fix {'eases out' if step > 0 else 'eases in'} at "
+                                             f"{100 * F[u]['fix_levels'] / fix:.0f} % strength with the product whole in "
+                                             f"view, gone on {t}: nothing to ease into (the old print shows through)"))
             det = float(np.median([F[u]["detail"] for u in near[edge_t]]))
             hidden = []
             while t in F and t not in refined and not (cut(t) if step > 0 else cut(t + 1)):
@@ -1015,6 +1052,7 @@ def notes_block(flags, summary, title="Automatic checks"):
              "shear": "Shear or shape spikes against the neighbouring frames",
              "vanish": "Label not refined while the product is in view",
              "switch": "Hard switch at a fix's end, or a jump where two shots meet",
+             "fade": "The fix fades at a run's end though the product leaves right after (the old print shows through)",
              "bend": "The label bends along an occluder's edge (snapped onto it, not onto the product's limb)",
              "body": "The label off the product's body (its ends off the keyframe's proportion, or turned off its axis)",
              "slide": "The label turned round the product off its place on the body (print sliding, or the product turning)",
@@ -1023,6 +1061,7 @@ def notes_block(flags, summary, title="Automatic checks"):
              "step": "The product's step (a band's edge) shown twice at the label's end",
              "swim": "The label slides against the product on near-still frames",
              "ends": "The label slides on a held run's first or last frames (the glue's edge)",
+             "creep": "The label creeps on a still product (it moves, the product doesn't)",
              "level": "The label's lines off the product's base (straightened)",
              "lines": "The label's lines turned against the frame's own print",
              "sharp": "The print softer than the source's own print",
@@ -1037,8 +1076,8 @@ def notes_block(flags, summary, title="Automatic checks"):
         out.append("No frame flagged.")
     else:
         out.append("")
-        for k in ("edges", "step", "ghost", "shear", "bend", "body", "slide", "glitter", "shimmer", "vanish", "switch", "swim",
-                  "ends", "level", "lines", "sharp", "tilt", "spots", "double"):
+        for k in ("edges", "step", "ghost", "shear", "bend", "body", "slide", "glitter", "shimmer", "vanish", "switch", "fade", "swim",
+                  "ends", "creep", "level", "lines", "sharp", "tilt", "spots", "double"):
             if k in summary["checks"]:
                 ex = next(why for t in sorted(flags) for kk, why in flags[t] if kk == k)
                 out.append(f"- **{names[k]}:** frames {summary['checks'][k]} (e.g. {ex}).")

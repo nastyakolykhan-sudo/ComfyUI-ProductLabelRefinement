@@ -12,7 +12,7 @@ own upright axis (body_axis: two passes, so a tilted body's rounded base and sho
           by point projection against the matte's bottom edge, both straightened; bowed lines at the axis, V61), so
           the label sits level with the base on every frame, the keyframe's own included
   smooth  the difference over time: a robust local line (Huber weights, `sigma` frames), so the matte's axis noise
-          doesn't come through
+          doesn't come through; on the glue's motion clock where the glue runs (a still product's correction holds)
   shear   the label sheared along the body's axis about the copy block's centre by minus that: its lines turn to the
           target, its verticals (on the limbs already) stay. A smooth image-space Residual over the mapping (after
           the glue)
@@ -317,13 +317,14 @@ def keyframe_level(kf_img, mattes, k, window, polarity="light"):
                                   "level_deg": round(m["text_deg"] - base, 2)}
 
 
-def level(maps, matte, LP, k, cfg=None, kf_img=None, polarity="light", read=None):
+def level(maps, matte, LP, k, cfg=None, kf_img=None, polarity="light", read=None, clock=None):
     """maps {frame: the mapping (label px -> frame px), glued or placed}; matte(t) the product's matte on frame t; LP
     the label's outline (label px); k the keyframe's frame (in maps); kf_img the keyframe image (offset "base");
     read(t, H): the label's lines as that mapping renders them on frame t (degrees, measure's text_deg) or None. With it
     the label's own print is read, not the mapping's rows: a keyframe's lines carry its bow in the label (the jar's
     sag 40-50 px), so a label turned off the keyframe frame's place puts a sloped stretch of them at the axis, which
-    the rows don't show (V65). Frames it can't read take the rows' read, offset to the frames it can.
+    the rows don't show (V65). Frames it can't read take the rows' read, offset to the frames it can. clock {frame:
+    the glue's motion clock}: the smoothing runs on it (a still product's level correction holds, V71), else frames.
     -> ({frame: levelled mapping} for the frames it moves, report)"""
     c = settings(cfg)
     ts = sorted(t for t in maps if matte(t).any())
@@ -366,7 +367,9 @@ def level(maps, matte, LP, k, cfg=None, kf_img=None, polarity="light", read=None
                 off = -kl
     off = float(off)
     target = ref + off
-    tt = np.array(ts, float)
+    tt = np.array([clock[t] if clock and t in clock else np.nan for t in ts], float)
+    if not np.isfinite(tt).all():
+        tt = np.array(ts, float)
     dl = robust_smooth(tt, lv - target, float(c["sigma"]))
     rep.update(keyframe_level_deg=round(ref, 3), offset_deg=round(off, 3), **({"keyframe_vs_base": kfm} if kfm else {}),
                per_frame={t: {"level_vs_target_deg": round(float(lv[i] - target), 2),

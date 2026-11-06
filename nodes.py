@@ -359,6 +359,9 @@ class ImagePostAutoDraft:
                     "last line of print with a few px to spare, inside the body's frosted rims, seams and lid edge. "
                     "Only print inside it is laid on, so the packshot's own highlights, seams and rims don't go on "
                     "as ink. auto: the packshot's glyphs' extent, kept off its lid, cap, rims and bands.")}),
+                "work_scale": ("INT", {"default": 1, "min": 1, "max": 8, "forceInput": True, "tooltip": (
+                    "Work Size's factor: the scene is the frame resized up this many times for the fix (a small "
+                    "still). The draft is measured at the frame's own size and its job scaled up.")}),
                 "bow": ("STRING", {"default": "", "tooltip": (
                     "A round body seen from above or below: its print bows like its seams (align.bow; needs "
                     "product_mask). t along the product's axis from the mask's centre, px, + down the image: "
@@ -391,7 +394,7 @@ class ImagePostAutoDraft:
 
     def draft(self, scene, reference, quad, model, light, suggest, filename_prefix, product_mask=None,
               reference_mask=None, pairs="", occluders="", outline="", mask_skip="", label="off", ink="off",
-              print_box="", bow="", label_mask=None, reference_label_mask=None):
+              print_box="", bow="", label_mask=None, reference_label_mask=None, work_scale=1):
         su8 = _u8(scene, "scene")
         ru8, ra = _reference({}, reference, reference_mask)
         mask, note = _product_mask(product_mask, su8.shape[:2])
@@ -412,7 +415,7 @@ class ImagePostAutoDraft:
                                            label=None if label == "off" else label,
                                            ink=None if ink == "off" else ink, print_box=pb or None,
                                            bow="auto" if bow.strip().lower() == "auto" else bow.strip() or None,
-                                           label_mask=lmask, ref_label_mask=rlmask)
+                                           label_mask=lmask, ref_label_mask=rlmask, work_scale=int(work_scale or 1))
         if note:
             text = f"note       {note}\n{text}"
         if ink in ("light", "dark"):

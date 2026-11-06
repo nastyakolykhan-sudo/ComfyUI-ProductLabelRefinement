@@ -420,6 +420,7 @@ The ids are the API file's (`workflows/product-label-refinement-all.api.json`), 
 |---|---|---|
 | 1 Load Source | `source` | the image or clip to fix, by its name in `input/` (with a subfolder: `plr/clip.mov`). A video runs the video branch. The template holds ComfyUI's own `example.png` |
 | 2 Packshot (Load Image) | `image` | the real product. A transparent PNG's alpha is its outline. The template holds `example.png` |
+| 99 Work size | `work_size` | 4096: a still smaller than this is resized up (Lanczos, whole factor, at most 4x) before the fix and delivered at that size; 0 keeps every still at its own size |
 | 3 Product mask (Load Optional File) | `file` | `(none)`: SAM 3 finds it. Or a mask file, white = product, the source's size; a mask video for a clip, one frame per frame |
 | 4 Corrected keyframe (Load Optional File) | `file` | clips: `(none)`: the stills branch makes it from the keyframe frame. Or a frame of the clip fixed elsewhere (by hand, an image model), the clip's size |
 | 5 Job JSON (String, multiline) | `value` | empty: Auto Draft drafts the job. Or a measured job.json's text: Load Job runs it, and Auto Draft doesn't run |
@@ -469,6 +470,7 @@ The ids are the API file's (`workflows/product-label-refinement-all.api.json`), 
 |---|---|---|
 | **Load Source (Image or Video)** | `source`: a file in `input/` | `frames` (one for an image), `fps`, `audio`, `is_video`, `frame_count`. Images go through Load Image, videos through Load Video's decoder: the same pixels as those nodes |
 | **Load Optional File** | `file`, or `(none)` | `image` (every frame), `mask` (their red channel, as Load Image (as Mask) and Image To Mask read it), `given` |
+| **Work Size (small stills resized up)** | `frames`, `is_video`, `work_size` (4096; 0 = off), optional `masks` | `frames` and `masks` resized up by a whole factor (Lanczos, at most 4x) when a still's long side is under `work_size`, so its new letters have pixels enough to read (a 1,024 px frame's small print is 5 px tall); clips pass as they are. `factor`, and `draft_scale` for Auto Draft's `work_scale`: the factor times how many times the frame was already resized up (a chained product's frame), so the draft measures at the frame's own size and its job is scaled up |
 | **Switch** | `when`; `if_true`, `if_false` (lazy) | the one picked; only it is computed. `when` is true for true, a non-empty string, a non-zero number or anything given |
 | **Run If** | `value` (lazy), `when`, `run_when` | `value`, or a block: every node after it, output nodes included, is skipped without an error |
 | **Print Type** | `job` | `light` (true for both polarities): the job lays print straight on the body (`matte` ink, polarity light or dark); `print` names it |

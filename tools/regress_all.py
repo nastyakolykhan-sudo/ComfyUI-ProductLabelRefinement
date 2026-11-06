@@ -45,6 +45,9 @@ def cases(empty_mask):
                "--set", f"24.bow={INK_DRAFT_INPUT['bow']}"]
     ink_in = ["--reference", ink / "inkdemo_packshot.png", "--mask", ink / "inkdemo_mask.png"]
     paper_off = ["--mask", empty_mask, "--set", "8.value=false", "--psd"]
+    # the templates fix a still at its own size: the one workflow's Work Size (small stills resized up) off here
+    ink_set += ["--set", "99.work_size=0"]
+    paper_off += ["--set", "99.work_size=0"]
     paper_draft = ["--set", "24.ink=off", "--set", "24.model=homography", "--set", "24.light=relight",
                    "--set", f"24.quad={DRAFT_INPUT['quad']}", "--set", f"24.pairs={DRAFT_INPUT['pairs']}",
                    "--set", f"24.occluders={DRAFT_INPUT['occluders']}", "--set", "24.print_box=", "--set", "24.bow="]
