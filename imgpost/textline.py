@@ -61,6 +61,12 @@ LONG_ON_ROWS = 0.4     # a long generated mark is the label's own (a band) when 
                        # lines' rows (a curved band under a wordmark 0.1-0.3); over it, blurred lines of small type
 EDGE_LONG = 3.0        # a mark touching the band's edge is the edge's (a label's border, its shading, a part of the
                        # product) when this many typical mark heights long; a compact one is a letter cut by the band
+RIM_HUG = 0.8          # a mark by the band's rim with this share of its px within max(3, 0.3 typ) px of the rim follows
+                       # the label's outline (its printed edge, a rounded corner's shading: a 2 px arc at a packshot
+                       # label's corner joined a line of text and was drawn inside the generated label, pitfall 114) ...
+RIM_HUG_LEN = 1.5      # ... when this many typical mark heights long (smaller: a letter's dot or serif cut by the rim)
+EDGE_TALL = 2.8        # a mark by the rim this many typical heights tall is no line of type (a holder's or a cloth's
+                       # shade at a label's corner joined the last line and was painted over, pitfall 114)
 SHARP_RULE = 2.5       # a sharp print's single mark this many times as long as high, even and gapless (_even), is a
                        # rule, not a word (a band's lighter end: 3.4); the generated print's blur smooths words too
 
@@ -108,6 +114,16 @@ def classify(lab, ms, sel, sharp=False):
     rim = sel & ~ndi.binary_erosion(sel, iterations=2)
     touch = set(np.unique(lab[rim]).tolist())
     typ = float(np.median([m["h"] for m in ms])) if ms else 1.0
+    dist = ndi.distance_transform_edt(sel)
+    near_r, hug_r = max(4.0, 0.6 * typ), max(3.0, 0.3 * typ)
+
+    def by_rim(m):
+        sub = lab[m["y0"]:m["y1"], m["x0"]:m["x1"]] == m["i"]
+        d = dist[m["y0"]:m["y1"], m["x0"]:m["x1"]][sub]
+        if not len(d) or d.min() > near_r:
+            return False
+        return (float((d <= hug_r).mean()) >= RIM_HUG and max(m["w"], m["h"]) >= RIM_HUG_LEN * typ) or \
+            m["h"] >= EDGE_TALL * typ
     for m in ms:
         long_ = max(m["w"], m["h"])
         thin = min(m["w"], m["h"])
@@ -121,6 +137,8 @@ def classify(lab, ms, sel, sharp=False):
         elif m["h"] >= RULE_LEN * bw and m["w"] <= RULE_THIN * m["h"] and solid >= RULE_SOLID:
             m["kind"] = "rule"                      # upright: a label's side edge, a seam
         elif m["i"] in touch and max(m["w"], m["h"]) >= EDGE_LONG * typ:
+            m["kind"] = "edge"
+        elif by_rim(m):
             m["kind"] = "edge"
         else:
             m["kind"] = None
@@ -786,6 +804,12 @@ def place_print_level(cov_r, band, Hm, roi, crop_u8, in_band, cfg, kw, stroke=No
         new_line[sl] = np.where(win & (c > 0.02), k + 1, new_line[sl])
         best[sl] = np.maximum(best[sl], c)
     cov = np.clip(cov, 0, 1)
+    # text_rim's measure: the placed lines' packshot letters within max(3, 0.3 letter heights) of the packshot label's
+    # own outline (its printed edge or a corner's shading read as a letter, pitfall 114)
+    typ_r = float(np.median([m["h"] for m in tl_r["marks"]])) if tl_r["marks"] else 1.0
+    rim_r = ndi.distance_transform_edt(band) <= max(3.0, 0.3 * typ_r)
+    placed_k = [L["k"] + 1 for L in lr if L["k"] not in dropped]
+    rim_px = float((cov_r * np.isin(comp, placed_k) * rim_r).sum())
     # how much of the packshot's letters went on: the new cover's px against the true letters' px at each line's
     # scale (packshot px per scene px squared), lines cut off at the band's or the work box's edge falling short
     expect = sum(float((cov_r * (comp == L["k"] + 1)).sum()) * (A[L["k"]][0, 0] / s_ps) ** 2 for L in lr)
@@ -882,8 +906,9 @@ def place_print_level(cov_r, band, Hm, roi, crop_u8, in_band, cfg, kw, stroke=No
             "text_zone": text_zone, "roi": list(roi),
             "gen_line": gen_line,
             "new_line": new_line,
-            "pairs": pairs, "lines_true": lr, "lines_gen": lg, "place": prep, "placed_share": placed}
+            "pairs": pairs, "lines_true": lr, "lines_gen": lg, "place": prep, "placed_share": placed, "rim_px": rim_px}
     rep = {"true": summary(tl_r), "generated": summary(tl_g), "placed_share": round(placed, 3), "matched": len(pairs),
+           "rim_px": round(rim_px, 1),
            "blur": {"frame_px": round(float(sig_f), 3), "packshot_px": round(float(sig_r), 3),
                     "packshot_per_scene_px": round(s_ps, 3), "rows_blur_px": round(sig, 3)},
            "off_text": [k for k in range(len(lr)) if not prep.get(k, {}).get("on_text")],

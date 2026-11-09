@@ -480,6 +480,8 @@ def _fit_cylinder(spec, pr, ps, pw, Yo, Xo, lines, reg):
     # limbs: the scene's silhouette (a label wrapping past it ends there), as rows of the reference
     limbs = [(l["side"], Curve(l["scene"]), float(l.get("w", 1.0)), np.linspace(*l.get("rows", (pr[:, 1].min(), pr[:, 1].max())), 40),
               l.get("label", f"{l['side']} limb")) for l in spec.get("limbs", [])]
+    # limb_min holds the print off the silhouette it wraps to; a bare silhouette beside a label (draft: "bare") has none
+    wrap_sides = {l["side"] for l in spec.get("limbs", []) if not l.get("bare")}
     lmin = cy.get("limb_min")
     lmin = None if lmin is None else float(lmin)
     lw = float(cy.get("limb_w", 3.0))
@@ -502,7 +504,7 @@ def _fit_cylinder(spec, pr, ps, pw, Yo, Xo, lines, reg):
         for side, L, w, v, _ in limbs:
             r.append(w * L.dist(H.limb_points(side, v)))
         if lmin is not None:             # print may not be turned into the silhouette: |limb angle| >= limb_min
-            for side in {l[0] for l in limbs} or {"right"}:
+            for side in wrap_sides or {"right"}:
                 deg = abs(float(np.degrees(H.limb_angle(side))))
                 r.append(np.array([lw * max(0.0, lmin - deg)]))
         if persp and reg:
