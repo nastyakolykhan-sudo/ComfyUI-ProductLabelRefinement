@@ -672,6 +672,71 @@ def _off_line(P, tol=3.0):
     return off
 
 
+BARE_TRIM = 0.15     # the bare silhouette beside a label: read over its rows less this share at each end (shoulder, base)
+BARE_GAP = 1.5       # px: the silhouette at least this far out from the label's side (bare body between them) ...
+BARE_REACH = 0.25    # ... and at most this share of the label's width out
+BARE_TOL = 1.5       # px: its samples this near one straight line (a cloth's or a holder's edge isn't)
+BARE_KEEP = 0.6      # ... and this share of its rows kept, at least BARE_MIN samples
+BARE_MIN = 8
+BARE_W = 0.5         # the bare silhouette's weight in the fit (the label's own edges 2.0): it decides what they leave open
+
+
+def bare_silhouette(body, side, CS, E_side, vis=None, vb=None):
+    """The product's own silhouette beside a label side that doesn't wrap (pitfall 114): on a cylinder, the bare body
+    (glass, plastic) between the label's side and the silhouette. Only the label's sides and the silhouette it wraps to
+    went into the fit, and with one silhouette the turn about the body's axis traded against the print's scale: a
+    corner measured 4 px low on a 1,024 px frame turned a bottle 17 deg and set its letters 8-21 % narrow (the user:
+    "a bit distorted, especially the logo and upper text"). Each row between the label's corners on that side (less
+    BARE_TRIM at each end), the product's mask walked out from the label's side to where it ends; kept when it ends
+    BARE_GAP px or more out, within BARE_REACH of the label's width, clear of occluders, and the samples run straight
+    (BARE_TOL, BARE_KEEP). -> scene points (n x 2) or None"""
+    if body is None or E_side is None or len(E_side) < 3:
+        return None
+    H_, W_ = body.shape
+    i0, i1 = (0, 3) if side == "left" else (1, 2)
+    ya, yb = float(CS[i0][1]), float(CS[i1][1])
+    span = yb - ya
+    if span < 10:
+        return None
+    width = float(np.linalg.norm(CS[1] - CS[0]))
+    sg = -1 if side == "left" else 1
+    Es = np.asarray(E_side, float)
+    Es = Es[np.argsort(Es[:, 1])]
+    out = []
+    for y in np.arange(np.ceil(ya + BARE_TRIM * span), np.floor(yb - BARE_TRIM * span) + 1):
+        yi = int(y)
+        if not 0 <= yi < H_:
+            continue
+        xe = float(np.interp(y, Es[:, 1], Es[:, 0]))
+        x = int(round(xe))
+        if not 0 <= x < W_ or not body[yi, x]:
+            continue
+        lim = int(round(BARE_REACH * width))
+        k = 0
+        while k < lim and 0 <= x + sg * (k + 1) < W_ and body[yi, x + sg * (k + 1)]:
+            k += 1
+        if k >= lim or not 0 <= x + sg * (k + 1) < W_:
+            continue
+        xb = x + sg * (k + 0.5)                   # the mask's edge: between its last px in and the first out
+        if abs(xb - xe) < BARE_GAP:
+            continue
+        if vis is not None:
+            xv, yv = int(round(xb)) - vb[0], yi - vb[1]
+            if not (0 <= yv < vis.shape[0] and 0 <= xv < vis.shape[1]) or \
+                    vis[max(0, yv - 2):yv + 3, max(0, xv - 2):xv + 3].min() < 0.5:
+                continue
+        out.append([xb, float(yi)])
+    n_rows = max(1, int(np.floor(yb - BARE_TRIM * span) - np.ceil(ya + BARE_TRIM * span) + 1))
+    if len(out) < BARE_MIN:
+        return None
+    P = np.asarray(out, float)
+    off = _off_line(P, tol=BARE_TOL)
+    P = P[~off]
+    if len(P) < max(BARE_MIN, BARE_KEEP * n_rows):
+        return None
+    return P
+
+
 HIDE_RUN = (3, 0.05)  # hidden samples count in runs of this many or more, and this share of the edge's samples
 END_SHARE = 0.15    # a corner is hidden when the top or bottom edge's px nearest it (this share of the edge) ...
 END_HIDDEN = 0.6    # ... are this share or more where the product's mask ends right past them
@@ -874,7 +939,7 @@ def label_draft(scene_u8, ref_u8, ref_alpha=None, quad=None, outline=None, kind=
                 continue
             raise DraftError(f"the generated label's {k} side has too little edge left to fit (an occluder over it?)")
     rt = lambda A: [[round(float(x), 2), round(float(y), 2)] for x, y in A]
-    lines, limbs, corners = [], [], []
+    lines, limbs, corners, bare_limbs = [], [], [], []
     if kind == "cylinder":
         ax, r = cyl["axis_x"], cyl["radius"]
         top, bot = np.asarray(S["top"], float), np.asarray(S["bottom"], float)
@@ -900,6 +965,16 @@ def label_draft(scene_u8, ref_u8, ref_alpha=None, quad=None, outline=None, kind=
             else:
                 Rs = S[side]
                 lines.append({"label": f"label {side} edge", "ref": rt([Rs[0], Rs[-1]]), "w": 2.0, "scene": rt(E[side])})
+                bare = bare_silhouette(body_mask, side, CS, E[side], vis, vb if vis is not None else None)
+                if bare is not None:
+                    # the bottle's silhouette beside the label, its rows the label's own on that side (trimmed alike):
+                    # kept aside, the fit's fallback where the print doesn't register on the fit (print_on_body)
+                    va, vb_ = float(C["TL" if side == "left" else "TR"][1]), float(C["BL" if side == "left" else "BR"][1])
+                    sp = vb_ - va
+                    bare_limbs.append({"label": f"the bottle's {side} silhouette beside the label (bare body)",
+                                       "side": side, "bare": True,
+                                       "rows": [round(va + BARE_TRIM * sp, 2), round(vb_ - BARE_TRIM * sp, 2)],
+                                       "w": BARE_W, "scene": rt(bare)})
         for i, c in enumerate(CORNERS):
             if i in hidden_c:            # the generated label's corner is hidden: the hull's is the occluder's
                 continue
@@ -993,7 +1068,8 @@ def label_draft(scene_u8, ref_u8, ref_alpha=None, quad=None, outline=None, kind=
     info = {"kind": kind, "support": lo["support"], "bows": lo.get("bows"), "radii": lo["radii"], "sharp": sorted(sharp),
             "from": "mask" if M is not None and quad is None else "quad", "guides": "mask" if M is not None else "bow",
             "cylinder": cyl, "wrap": sorted(wrap), "limb_min": limb_min, "reach": reach, "scale": round(sc, 3),
-            "paper": paper, "hidden": {"edge_px": hidden, "corners": [CORNERS[i] for i in sorted(hidden_c)]}}
+            "paper": paper, "hidden": {"edge_px": hidden, "corners": [CORNERS[i] for i in sorted(hidden_c)]},
+            "bare_limbs": bare_limbs}
     return {"job": job, "H": H, "points": points, "corners": corners, "props": [], "sil_found": None, "mask_note": None,
             "orient": af.orientation(H, (bx0, by0, bx1, by1)), "white_box": None, "notes": notes,
             "sheet": af.match_sheet(scene, ref, H, points) if points else None, "label": info,
@@ -1074,7 +1150,79 @@ def print_on_body(d, scene_u8, mask=None, ink=None, print_box=None, bow=None, te
                           for s in rep.get("seams", []))
         d["notes"].append("bow " + (seams or ", ".join(f"t {t:g}: {b:g}" for t, b in filled["b"])) +
                           " px: the print bows like the body's seams (check the outer print lines at 6x)")
+    if text and ink not in (None, "off"):
+        _bare_fallback(d, scene_u8)
     return d
+
+
+def _registered(rep):
+    """The ink step's registration verdicts in a prepare() report (each pass's, its retry's): -> [kept], [ncc_after]"""
+    kept, ncc = [], []
+
+    def walk(x):
+        if isinstance(x, dict):
+            if "kept" in x and "ncc_after" in x:
+                kept.append(bool(x["kept"]))
+                ncc.append(float(x["ncc_after"]))
+                return
+            for v in x.values():
+                walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+    walk(rep)
+    return kept, ncc
+
+
+def _register_test(d, scene_u8, align):
+    """The text job's print registered onto the frame's print under `align`'s fit, at the draft's own size: -> (H,
+    registered, best correlation after)"""
+    from . import ink as ik
+    from . import outline as ol
+    job = d["job"]
+    H = geo.fit(align)[0]
+    refmask = ol.RefMask(job["reference_outline"], d["ref_u8"], d.get("ref_alpha"))
+    P = np.asarray(refmask.polygon, float) if refmask.polygon else np.array(refmask.bbox(d["ref_u8"].shape)).reshape(2, 2)
+    pre = 0.6 if af.local_scale(H, P.mean(0)) < 1.0 else 0.0
+    x0, y0, x1, y1 = job["roi"]
+    try:
+        prep = ik.prepare(d["ref_u8"], refmask, ik.config(job["matte"]), H, job["roi"], scene_u8[y0:y1, x0:x1],
+                          ss=job.get("supersample", 4), prefilter=pre)
+    except ik.InkError:
+        return H, False, 0.0
+    kept, ncc = _registered(prep["report"])
+    return H, bool(kept) and kept[-1], max(ncc) if ncc else 0.0
+
+
+def _bare_fallback(d, scene_u8):
+    """The fit's fallback on a cylinder (pitfall 114): where the text job's print doesn't register on the label's fit
+    (the generated print isn't where the fit puts the packshot's), the fit again with the bottle's bare silhouette
+    beside the label (bare_silhouette), kept when the print then registers. A fit to the label's sides and the one
+    silhouette it wraps to leaves the turn about the body's axis to trade against the scale: one corner measured 4 px
+    low turned a bottle 17 deg and set its letters 8-21 % narrow, and the print didn't register (0.03). Where the
+    print registers, the fit stands as it is (the silhouette changed approved fits: a squeeze tube's isn't a
+    cylinder's)."""
+    lab = d.get("label") or {}
+    bare = lab.get("bare_limbs") or []
+    job = d["job"]
+    if not bare or job.get("align", {}).get("model") != "cylinder" or d.get("ref_u8") is None:
+        return
+    _, ok, n0 = _register_test(d, scene_u8, job["align"])
+    if ok:
+        return
+    align2 = dict(job["align"], limbs=list(job["align"].get("limbs") or []) + bare)
+    H2, ok2, n2 = _register_test(d, scene_u8, align2)
+    sides = " and ".join(b["side"] for b in bare)
+    if ok2:
+        job["align"] = align2
+        d["H"] = H2
+        d["notes"].append(f"fit        the print didn't register on the label's fit (correlation {n0:.2f}): fitted "
+                          f"again with the bottle's {sides} silhouette beside the label, the print registers "
+                          f"({n2:.2f})")
+    else:
+        d["notes"].append(f"fit        the print doesn't register on the label's fit ({n0:.2f}), nor with the "
+                          f"bottle's {sides} silhouette beside the label ({n2:.2f}): the letters' size and place come "
+                          "from the label's outline alone (text_fit)")
 
 
 def summary(d):

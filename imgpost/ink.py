@@ -730,6 +730,11 @@ def _prepare(ref_u8, refmask, cfg, H, roi, crop_u8, ss=4, prefilter=0.6, body=No
         from . import textline as tl
         cov, text, crep["text"] = tl.place_print(cov_r, band, Hfin, roi, crop_u8, in_band, cfg, kw,
                                                  frame_stroke(crep, cov, cov_r))
+        # text_fit: whether the letters' size and place were checked against the generated print (the registration
+        # kept) or come from the label's outline alone
+        rg = crep.get("register") or {}
+        text["register"] = {"run": bool(cfg.get("register")), "kept": bool(rg.get("kept")),
+                            "ncc_after": rg.get("ncc_after"), "why": rg.get("why")}
     if cfg["sharpen"] == "auto":
         cov, crep["sharpen"] = sharpen_cover(cov, crop_u8, in_band, cfg, frame_stroke(crep, cov, cov_r))
     return {"cover": cov, "band": in_band, "box": ex.get("box"), "inks": ex.get("inks"), "report": crep,
@@ -1714,6 +1719,15 @@ TEXT_INK_SHARE = 0.5     # text_ink: new letters' px darker than this share of t
                          # percentile; dark print) ...
 TEXT_INK_PX = 12         # ... in pieces this big (px at 1x): FAIL
 TEXT_SLANT_MIN_H = 8     # px: lines smaller than this (a 1,024 px frame's small print) aren't measured
+# text_fit: FAIL where the text job's print didn't register onto the generated print (the
+#   letters' size and place from the label's outline alone): the user's two "needs work" stills of v11-v12 on text
+#   mode both had it (a right dropper bottle "a bit distorted, especially the logo and upper text": correlation 0.03,
+#   letters 8-21 % narrow; a white bottle "applied completely wrong": 0.02); the three approved registered (0.32-0.46),
+#   pitfall 114
+TEXT_RIM_FAIL = 10       # text_rim: new letters' px (packshot px) taken from the packshot label's own edge (within
+                         # max(3, 0.3 letter heights) of its outline): FAIL (the user, 2026-11-06: "I can see the label
+                         # corner in lower left": a corner arc of 26 px drawn inside the label; every other label 0,
+                         # pitfall 114)
 
 
 def dark_any(passes):
@@ -1888,6 +1902,20 @@ def text_checks(crop_u8, out_u8, info, offset):
     out.append({"check": "text_ink", "level": "FAIL" if stack else "INFO", "px": stack,
                 "text": (f"{stack} px of new letters far darker than the generated ink (lines {stack_lines}): inked twice, "
                          "over generated print the fill didn't take" if stack else "the new letters' ink is even")})
+    # text_fit: the letters' size and place checked against the generated print (the registration kept)
+    unreg = [(pol, (inf.get("text") or {}).get("register") or {}) for pol, inf in passes]
+    unreg = [(pol, r) for pol, r in unreg if r.get("run") and not r.get("kept")]
+    out.append({"check": "text_fit", "level": "FAIL" if unreg else "INFO",
+                "text": ("the " + ", ".join(pol for pol, _ in unreg) + " print didn't register onto the generated "
+                         "print (" + "; ".join(str(r.get("why")) for _, r in unreg) + "): the letters' size and place "
+                         "come from the label's outline alone, unchecked (distorted letters, lines off the label)")
+                if unreg else "the letters' size and place registered onto the generated print"})
+    # text_rim: new letters taken from the packshot label's own edge (its outline, a rounded corner's shading)
+    rim_px = sum(float((inf.get("text") or {}).get("rim_px") or 0.0) for _, inf in passes)
+    out.append({"check": "text_rim", "level": "FAIL" if rim_px >= TEXT_RIM_FAIL else "INFO", "px": round(rim_px, 1),
+                "text": f"{rim_px:.0f} px of the new letters come from the packshot label's own edge" +
+                        (": the label's outline or corner drawn as print inside the generated label"
+                         if rim_px >= TEXT_RIM_FAIL else "")})
     v = left_px / float(new_px)
     out.append({"check": "text_left", "level": "FAIL" if v > TEXT_LEFT_FAIL else "INFO", "px": left_px,
                 "share": round(v, 3), "text": f"generated letters still showing in the text area: {left_px} px, "
