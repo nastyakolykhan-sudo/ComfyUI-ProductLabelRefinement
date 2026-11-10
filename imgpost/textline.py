@@ -332,6 +332,25 @@ class LineMap:
         return apply_H(self.Hm, p @ self.A[:2, :2].T + self.A[:2, 2])
 
 
+class BentLineMap(LineMap):
+    """A line bent onto its generated row's course (pitfall 115): a vertical offset b(u) in the packshot's rows, per
+    packshot column u of the line, before its placement A and the mapping (the row's curve less its slope, which the
+    turn carries)."""
+
+    def __init__(self, Hm, A, bend):
+        super().__init__(Hm, A)
+        self.bend = bend                      # callable: u (packshot px, before A) -> rows
+
+    def inverse(self, X, Y):
+        u, v, ok = super().inverse(X, Y)
+        return u, v - self.bend(u), ok
+
+    def forward(self, pts):
+        p = np.atleast_2d(np.asarray(pts, float)).copy()
+        p[:, 1] = p[:, 1] + self.bend(p[:, 0])
+        return super().forward(p)
+
+
 class StraightLineMap:
     """A line laid straight (pitfall 113): its LineMap's local affine at the line's centre c (reference px), so a fit
     that bows rows round a cylinder (a squeeze tube's flat panel fitted as one) lays it as straight as the generator
@@ -762,6 +781,7 @@ def place_print_level(cov_r, band, Hm, roi, crop_u8, in_band, cfg, kw, stroke=No
         if np.isfinite(sig_f) else 0.0
     R_b = ndi.gaussian_filter(cov_r * (comp > 0), sig) if sig > 0.3 else cov_r * (comp > 0)
     A, prep = place_blocks(lr, R_b, P_b)
+    bends = row_courses(lr, R_b, P_b, A, prep)
     pairs = {}
     import os
     if os.environ.get("PLR_TEXT_DEBUG"):
@@ -784,13 +804,17 @@ def place_print_level(cov_r, band, Hm, roi, crop_u8, in_band, cfg, kw, stroke=No
         if not len(ys):
             continue
         lm = LineMap(Hm, A[k])
-        # curved as the fit lays it, or straight where the generator drew the line straight (a flat panel fitted
-        # round a cylinder bowed the lines up at their ends, the user: "skewed", pitfall 113)
-        sm = StraightLineMap(lm, [0.5 * (L["x0"] + L["x1"]), L["cy"]])
-        s_c, s_s = _path_sharpness(L, lm, P_s, roi[:2]), _path_sharpness(L, sm, P_s, roi[:2])
-        if s_s > STRAIGHT_GAIN * s_c:
-            lm = sm
-            straight.append(k)
+        if k in bends:
+            # onto its generated row's own course: turned (A) and bent as that row runs (pitfall 115)
+            lm = BentLineMap(Hm, A[k], lambda uu, c_=bends[k]: np.polyval(c_, np.asarray(uu, float)))
+        else:
+            # curved as the fit lays it, or straight where the generator drew the line straight (a flat panel fitted
+            # round a cylinder bowed the lines up at their ends, the user: "skewed", pitfall 113)
+            sm = StraightLineMap(lm, [0.5 * (L["x0"] + L["x1"]), L["cy"]])
+            s_c, s_s = _path_sharpness(L, lm, P_s, roi[:2]), _path_sharpness(L, sm, P_s, roi[:2])
+            if s_s > STRAIGHT_GAIN * s_c:
+                lm = sm
+                straight.append(k)
         sub = _roi_of(lm, [xs.min() - 2, ys.min() - 2, xs.max() + 3, ys.max() + 3], roi, 4)
         if sub is None:
             continue
@@ -1105,6 +1129,90 @@ def line_turns(lr, R, G):
         rep[k] = {"own_deg": round(own[k], 2), "own_sharp": round(conf[k], 2), "trend_deg": round(float(trend[i]), 2),
                   "own_counts": bool(ok[i]), "packshot_deg": round(tru[k], 2)}
     return out, rep
+
+
+def _robust_quad(u, e, it=4, order=2):
+    """Quadratic (order 1: straight) e(u), refitted on the samples within 2.5 robust sigmas (+1 px) -> 3 coefficients
+    (np.polyval)"""
+    keep = np.ones(len(u), bool)
+    c = np.zeros(3)
+    for _ in range(it):
+        if keep.sum() < 6:
+            break
+        c = np.polyfit(u[keep], e[keep], order if np.ptp(u[keep]) > 20 else 1)
+        if len(c) == 2:
+            c = np.r_[0.0, c]
+        r = np.abs(e - np.polyval(c, u))
+        keep = r <= 2.5 * 1.4826 * np.median(r[keep]) + 1.0
+    return c
+
+
+COURSE_LEN = 4.0       # a line's own course onto its generated row: lines this many line heights long or more ...
+COURSE_COVER = 0.6     # ... with generated ink under this share of their columns
+COURSE_WIN = 0.4       # rows read this share of a line height past the line's own, above and below
+COURSE_TURN = 2.5      # deg: the course's turn at most this, its offset and bow at most COURSE_SHIFT line heights
+COURSE_SHIFT = 0.35
+
+
+def _course_of(L, R, G, A):
+    """One placed line's course against its generated row (pitfall 115): column by column over the line's run, the
+    centre row of the true letters (R) and of the generated print (G) where the placement A lays those rows; their
+    difference as a robust quadratic in the line's own columns. -> (coefficients, report) or (None, report)"""
+    h = max(L["h"], 1.0)
+    us = np.arange(int(np.ceil(L["x0"])), int(np.floor(L["x1"])) + 1, dtype=float)
+    vs = np.arange(L["top"] - COURSE_WIN * h, L["bot"] + COURSE_WIN * h + 1e-6, 0.5)
+    U, V = np.meshgrid(us, vs)
+    rt = ndi.map_coordinates(R, [V, U], order=1, mode="constant")
+    q = np.c_[U.ravel(), V.ravel(), np.ones(U.size)] @ np.asarray(A, float).T
+    gt = ndi.map_coordinates(G, [q[:, 1].reshape(U.shape), q[:, 0].reshape(U.shape)], order=1, mode="constant")
+    mt, mg = rt.sum(0), gt.sum(0)
+    ok = (mt > 0.15 * np.median(mt[mt > 0])) & (mg > 0.15 * np.median(mg[mg > 0])) if (mt > 0).any() and (mg > 0).any() \
+        else np.zeros(len(us), bool)
+    rep = {"cover": round(float(ok.mean()), 2)}
+    if ok.mean() < COURSE_COVER or np.ptp(us) < COURSE_LEN * h:
+        return None, rep
+    ct = (rt * vs[:, None]).sum(0) / np.maximum(mt, 1e-9)
+    cg = (gt * vs[:, None]).sum(0) / np.maximum(mg, 1e-9)
+    c = _robust_quad(us[ok], (cg - ct)[ok])
+    rep["fit_rms"] = round(float(np.sqrt(np.mean((np.polyval(c, us[ok]) - (cg - ct)[ok]) ** 2))), 2)
+    return c, rep
+
+
+def row_courses(lr, R, G, A, prep):
+    """Each long line laid onto its own generated row's course (pitfall 115; the user, 2026-11-10: "generated rows are
+    actually pretty lined up almost all the time ... they can be a good reference for mapping"): one turn per line
+    left a block's top line arched over a straighter generated row, the last lines bent into the line above, and a
+    wordmark off the band its generated row runs with. The course's slope at the line's centre turns the line (A, in
+    place); its offset and curve bend it (rows per packshot column, BentLineMap). Turn, offset and bow capped
+    (COURSE_TURN, COURSE_SHIFT). -> {k: bend coefficients (np.polyval, rows by packshot column)}"""
+    bends = {}
+    for L in lr:
+        k = L["k"]
+        if k not in A:
+            continue
+        if not prep.get(k, {}).get("on_text", True):
+            # a line off the generated text (the generated block has fewer lines): its "row" is its neighbours'
+            prep.setdefault(k, {})["course"] = {"off_text": True}
+            continue
+        c, r = _course_of(L, R, G, A[k])
+        prep.setdefault(k, {})["course"] = r
+        if c is None:
+            continue
+        h = max(L["h"], 1.0)
+        uc = 0.5 * (L["x0"] + L["x1"])
+        half = 0.5 * (L["x1"] - L["x0"])
+        lim = COURSE_SHIFT * h
+        c = np.array(c, float)
+        c[0] = np.clip(c[0], -lim / max(half * half, 1.0), lim / max(half * half, 1.0))      # the bow
+        d1 = float(np.clip(2 * c[0] * uc + c[1], -np.tan(np.radians(COURSE_TURN)), np.tan(np.radians(COURSE_TURN))))
+        e0 = float(np.clip(np.polyval(c, uc), -lim, lim))
+        turn = float(np.degrees(np.arctan(d1)))
+        A[k] = np.asarray(A[k], float) @ _rot(np.array([uc, L["cy"]]), turn)
+        # the bend: the course's offset and curve about the centre, its slope taken by the turn
+        bends[k] = np.array([c[0], -2 * c[0] * uc, c[0] * uc * uc + e0], float)
+        r.update(turn_deg=round(turn, 2), offset_px=round(e0, 2), bow_px=round(float(c[0] * half * half), 2))
+        prep[k]["turn_deg"] = round(float(prep[k].get("turn_deg", 0.0)) + turn, 2)
+    return bends
 
 
 def place_blocks(lr, R, G):

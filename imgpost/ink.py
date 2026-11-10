@@ -1711,14 +1711,17 @@ TEXT_ONLY_PX = 20        # ... FAIL from this many such px (the composite's own 
 TEXT_LEFT_FAIL = 0.15    # text_left: generated letters left in the text area, as a share of the new letters' px
 TEXT_PLACED_MIN = 0.85  # text_missing: FAIL when less of the packshot's letters went on (cut at an edge, left out)
 TEXT_OFF_FAIL = 0.4      # text_lines: FAIL when this share of the new lines (by their px) sits off the generated text
-TEXT_SLANT_FAIL = 0.8    # text_slant: the new lines' runs turned this many deg off the generated print's there (their
-                         # median, by letters): FAIL (v11's squeeze tube 1.4, "still skewed a bit"; fixed 0.0; an
-                         # approved amber bottle 0.2, its worst line 1.6) ...
-TEXT_SLANT_WARN = 1.5    # ... one line this far: WARN
+TEXT_COURSE_FAIL = 0.35  # text_course: the new lines run off their generated rows by this many deg (median by letters,
+                         # each line's straight slope against its row's along its own run): FAIL. Calibrated on the user's
+                         # calls: v11's squeeze tube 1.20 ("still skewed a bit"), v13's right dropper bottle 0.40 ("lines
+                         # aren't aligned very well"); fixed 0.11 and 0.17. An approved bottle read 0.41 in v13: the gate
+                         # is stricter than the eye (pitfall 115)
+TEXT_COURSE_WARN = 0.6   # ... one line this far: WARN
+TEXT_BOW_WARN = 0.15     # ... or bent against its row by this many line heights (v13's arched top line: 0.19): WARN
 TEXT_INK_SHARE = 0.5     # text_ink: new letters' px darker than this share of the generated letters' darkest ink (2nd
                          # percentile; dark print) ...
 TEXT_INK_PX = 12         # ... in pieces this big (px at 1x): FAIL
-TEXT_SLANT_MIN_H = 8     # px: lines smaller than this (a 1,024 px frame's small print) aren't measured
+TEXT_COURSE_MIN_H = 8    # px: lines smaller than this (a 1,024 px frame's small print) aren't measured
 # text_fit: FAIL where the text job's print didn't register onto the generated print (the
 #   letters' size and place from the label's outline alone): the user's two "needs work" stills of v11-v12 on text
 #   mode both had it (a right dropper bottle "a bit distorted, especially the logo and upper text": correlation 0.03,
@@ -1734,47 +1737,42 @@ def dark_any(passes):
     return any(pol == "dark" for pol, _ in passes)
 
 
-def _run_angle(P, sel, a0, span=3.0, step=0.1):
-    """The direction (deg, image x right, y down) within a0 +- span along which P's row profile over sel is sharpest
-    (P projected across the direction in 0.5 px bins: var / mean^2)."""
-    ys, xs = np.nonzero(sel)
-    w = P[ys, xs]
-    if w.sum() <= 1e-6:
-        return None
-    best = (-1.0, None)
-    for a in np.arange(a0 - span, a0 + span + 1e-9, step):
-        t = np.radians(a)
-        v = -np.sin(t) * xs + np.cos(t) * ys
-        b = np.floor((v - v.min()) * 2).astype(int)
-        prof = np.bincount(b, weights=w)
-        sc = prof.var() / max(prof.mean() ** 2, 1e-12)
-        if sc > best[0]:
-            best = (sc, float(a))
-    return best[1]
-
-
-def _slant(Ps, Po, nl, f_px=1):
-    """text_slant's measure: each new line (nl: the work box's new line map) long enough (4 line heights) to show its
-    run, its direction in the output against the generated print's over the same rows. -> [(line, deg off, px)]"""
+def _course(Ps, Po, nl):
+    """text_course's measure (pitfall 115): each new line (nl: the work box's new line map) 4 line heights long and
+    TEXT_COURSE_MIN_H tall or more, along its own run (its principal axis, so a tilted label reads alike), the centre of
+    the output's print (Po) and of the generated print (Ps) across the run, in bins of half a line height; their
+    difference's straight slope (deg) and bow (line heights). -> [(line, deg, bow, px)]"""
     out = []
     for k in np.unique(nl[nl > 0]):
         m = nl == k
         ys, xs = np.nonzero(m)
-        if len(xs) < 80 * f_px * f_px:
+        if len(xs) < 40:
             continue
-        X = np.c_[xs - xs.mean(), ys - ys.mean()]
-        ev, evec = np.linalg.eigh(X.T @ X)
-        d = evec[:, 1] if evec[0, 1] != 0 or evec[1, 1] != 0 else np.array([1.0, 0.0])
+        X = np.c_[xs - xs.mean(), ys - ys.mean()].astype(float)
+        ev, ec = np.linalg.eigh(X.T @ X)
+        d, n = ec[:, 1], ec[:, 0]
         d = -d if d[0] < 0 else d
-        across = np.sqrt(ev[0] / len(xs)) * 4.0               # ~ the line's height
-        if np.sqrt(ev[1] / len(xs)) * 3.5 < 4 * across or across < TEXT_SLANT_MIN_H:
-            continue                                           # too short, or too small to read its run (1,024 px)
-        a0 = float(np.degrees(np.arctan2(d[1], d[0])))
-        reg = ndi.binary_dilation(m, iterations=max(1, int(round(0.8 * across))))
-        ao, ag = _run_angle(Po, reg, a0), _run_angle(Ps, reg, a0)
-        if ao is None or ag is None:
+        h = np.sqrt(ev[0] / len(xs)) * 3.5
+        if np.sqrt(ev[1] / len(xs)) * 3.46 < 4 * h or h < TEXT_COURSE_MIN_H:
             continue
-        out.append((int(k) - 1, round(ao - ag, 2), int(m.sum())))
+        reg = ndi.binary_dilation(m, iterations=max(1, int(0.35 * h)))
+        ry, rx = np.nonzero(reg)
+        t = (rx - xs.mean()) * d[0] + (ry - ys.mean()) * d[1]
+        s_ = (rx - xs.mean()) * n[0] + (ry - ys.mean()) * n[1]
+        b = np.floor((t - t.min()) / (0.5 * h)).astype(int)
+        cen, mass = [], []
+        for P in (Po, Ps):
+            w = P[ry, rx]
+            mass.append(np.bincount(b, weights=w))
+            cen.append(np.bincount(b, weights=w * s_) / np.maximum(mass[-1], 1e-9))
+        ok = (mass[0] > 0.3 * np.median(mass[0])) & (mass[1] > 0.3 * np.median(mass[1]))
+        if ok.sum() < 6:
+            continue
+        tc = ((np.arange(len(ok)) + 0.5) * 0.5 * h + t.min())[ok]
+        diff = (cen[0] - cen[1])[ok]
+        deg = float(np.degrees(np.arctan(np.polyfit(tc, diff, 1)[0])))
+        bow = float(np.polyfit(tc - tc.mean(), diff, 2)[0] * (np.ptp(tc) / 2) ** 2 / h)
+        out.append((int(k) - 1, round(deg, 2), round(bow, 3), int(m.sum())))
     return out
 
 
@@ -1845,30 +1843,35 @@ def text_checks(crop_u8, out_u8, info, offset):
             if not r.get("on_text", True):
                 off_px += px
                 off_lines.append(f"{pol} line {L['k']} (rows match {r.get('rows_ncc')})")
-    # text_slant: each new line's run against the generated print's (the user, 2026-11-05: "the text below the grey
-    # line is still skewed a bit -- should be more aligned with the bottom edge of the label like it is in the
-    # original", pitfall 113)
-    sl_ = []
+    # text_course: each new line along its generated row (the user, 2026-11-10: "lines aren't aligned very well, they
+    # should be straightened to match the top and bottom edge of the label"; "generated rows are actually pretty lined
+    # up almost all the time", pitfall 115)
+    co = []
     for pol, inf in passes:
         tx = inf.get("text") or {}
         if tx.get("new_line") is None:
             continue
         size = int(inf.get("frame_size") or 15)
         Ps_, Po_, _ = _print_maps(crop_u8, out_u8, inf["matte"], size, pol == "dark")
-        sl_ += [(pol, k, d, px) for k, d, px in _slant(Ps_, Po_, tx["new_line"], f_px)]
-    if sl_:
-        worst = max(sl_, key=lambda r: abs(r[2]))
-        dv = np.array([abs(r[2]) for r in sl_])
-        wv = np.array([r[3] for r in sl_], float)
+        off = {k for k, r in (tx.get("place") or {}).items() if not r.get("on_text", True)}     # text_lines' own
+        co += [(pol,) + r for r in _course(Ps_, Po_, tx["new_line"]) if r[0] not in off]
+    if co:
+        dv = np.array([abs(r[2]) for r in co])
+        wv = np.array([r[4] for r in co], float)
         o_ = np.argsort(dv)
         med = float(dv[o_][np.searchsorted(np.cumsum(wv[o_]), 0.5 * wv.sum())])
-        lvl = "FAIL" if med > TEXT_SLANT_FAIL else "WARN" if abs(worst[2]) > TEXT_SLANT_WARN else "INFO"
-        out.append({"check": "text_slant", "level": lvl, "deg": round(med, 2), "worst_deg": worst[2],
-                    "lines": [{"pass": p_, "line": k, "deg": d} for p_, k, d, _ in sl_],
-                    "text": f"the new lines run {med:.2f} deg off the generated print's (median by letters; worst "
-                            f"{abs(worst[2]):.2f}, {worst[0]} line {worst[1]})" +
-                            (": the text turned off the generated text (skewed against the label)" if lvl == "FAIL"
-                             else ": one line turned off its generated line" if lvl == "WARN" else "")})
+        wa = max(co, key=lambda r: abs(r[2]))
+        wb = max(co, key=lambda r: abs(r[3]))
+        lvl = "FAIL" if med > TEXT_COURSE_FAIL else \
+            "WARN" if abs(wa[2]) > TEXT_COURSE_WARN or abs(wb[3]) > TEXT_BOW_WARN else "INFO"
+        out.append({"check": "text_course", "level": lvl, "deg": round(med, 2), "worst_deg": wa[2],
+                    "worst_bow_lh": wb[3], "lines": [{"pass": p_, "line": k, "deg": d, "bow_lh": bw}
+                                                     for p_, k, d, bw, _ in co],
+                    "text": f"the new lines run {med:.2f} deg off their generated rows (median by letters; worst "
+                            f"{abs(wa[2]):.2f}, {wa[0]} line {wa[1]}; most bent {abs(wb[3]):.2f} line heights, "
+                            f"{wb[0]} line {wb[1]})" +
+                            (": the text runs off the generated lines (skewed against the label)" if lvl == "FAIL"
+                             else ": a line off or bent against its generated row" if lvl == "WARN" else "")})
     # text_ink: new letters inked twice (over generated ink the fill didn't take): darker than anything the generator
     # drew (a wordmark's i dot came out black, 8 levels, against the generated ink's 45, pitfall 113)
     stack, stack_lines = 0, []
