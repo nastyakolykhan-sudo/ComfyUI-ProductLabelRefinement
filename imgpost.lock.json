@@ -1,9 +1,9 @@
 {
   "skill": "~/Documents/Claude/product-label-refinement",
-  "imgpost_version": "0.20.0",
+  "imgpost_version": "0.21.0",
   "synced": "2026-11-09",
   "files": {
-    "__init__.py": "a363db43a4cf7eab2678e6e8f80f0896127788d1d00f1f28ea721577dc000db4",
+    "__init__.py": "9f741684929761f264fcab12e3f44da208ed179d94038b27047250867f8139cb",
     "audit.py": "7154d0ab2f5e63137450f2d57ac62677b80acdfa131bd94fa5ccf41e762e0c27",
     "autofit.py": "2cd163f9e2ce68e6e3c04072279ec5db2e73bb862afd08aeb11c6672a5e68d91",
     "bow.py": "56f709307bfe94bf9c96f6e30068586d6f33898202f753a81528b6fe1404b456",
@@ -14,13 +14,13 @@
     "geometry.py": "fed88b4454a5fea93ce4f69cee4efb4ca11ed92532df13b7718ffcb0530b439e",
     "grade.py": "fe0c9d16dbc4c9df56f1cd8e69a88e37f5f87cd976089370a0fcd1e21f728d2b",
     "images.py": "7d2e9e6f77b4f70c555bcf35412a11caa7705afbffff83e8636dbac0604d7e3d",
-    "ink.py": "c864adac748c12c1669a8b2a337636213ae5da2b2f5f982a959c8ab8269a31b4",
+    "ink.py": "4d10fb79cf1add4bf3f90a25113d94e4e8c4cf0803911dee5eea92ace2c63348",
     "masks.py": "2f46b382f3b6f0654d603557ed3b2b39f130f7dd825ccacbe0bb725e464b91a9",
     "outline.py": "134de36ca4749f6d58a5d177f2e97f90c6c84400edf6fc30cbd2992d252ad60f",
     "psd.py": "132fdcb5dd9ef88004cdb29c78a5bd67621f395c53b39e47fc8f5b1a0a13f868",
     "qa.py": "7fc25ec208b9fc73a7c650ce7ed7230628749b8724081305dc27b96c2138bbf4",
     "raster.py": "f9dc02da8f3121a741ce1ae906e1f0cea5c65b41c1b963edf032da9742816fd4",
-    "textline.py": "cebeb5de4548ca23391653ee58f0de2ccc0c568360cbfeae326328640eddb725",
+    "textline.py": "90bce8cb39cea48c43fa4ecf2218a3b25cf6a214454b1cc0cf41b6db5729aa9c",
     "warp.py": "b7a19675703d2464867e8c6b7dbd6cb5b3cbbde062aac71403418efec9d6a45e",
     "workscale.py": "3276264d3af10e2a3f1864e99eab0b025aaacbca2325441d8d4f9e6554c6500a"
   },
