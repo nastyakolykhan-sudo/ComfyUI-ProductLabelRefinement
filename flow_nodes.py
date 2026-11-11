@@ -508,6 +508,9 @@ class ProductLabelFindKeyframe:
     TIE = 0.01                               # keypick scores this close to the best are a tie
     CLOSE = 0.7                              # another shot scoring this share of the best one's: a warning
     ALSO = 0.5                               # ... this share: reported as likely showing the product too (not fixed)
+    WHOLE = 0.90                             # a frame whose product outline matches the packshot's under this share of
+                                             # the shot's (90th percentile) shows part of it only (a hand, a holder)
+    PARTIAL = 0.6                            # ... and keypick's score is multiplied by this (as an occluded frame)
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -535,7 +538,8 @@ class ProductLabelFindKeyframe:
         "SAM 3 on three frames (its detection that matches the packshot best); the shot whose product matches the "
         "packshot best (silhouette, colour, size on screen); in that shot, SAM 3's track and, of the frames where the "
         "product is in view, the one where it shows largest, sharpest and most frontal, off morph frames and the "
-        "shot's ends (the engine's keypick). With a corrected keyframe, -1 "
+        "shot's ends (the engine's keypick), and whole: a frame whose product outline matches the packshot's well "
+        "under the shot's own (a hand placing it, something in front of it) is passed over. With a corrected keyframe, -1 "
         "passes on (Refine finds its frame); an image is frame 0. report: JSON with every shot's score, the pick and "
         "its runner-up; a margin under 5 % or a weak match is flagged.")
 
@@ -616,6 +620,24 @@ class ProductLabelFindKeyframe:
         # the shot's ends are cuts (penalised as edges) unless they are the clip's own first or last frame; so are the
         # frames where the product comes into view or leaves it
         ranking = keypick.score(stats, bnds, view, open_ends=[t for t, c in ((0, s == 0), (n - 1, e == T - 1)) if c])
+        # whole: the product's outline against the packshot's on each frame in view, against the shot's own (its 90th
+        # percentile). A hand placing the product or something in front of it for many frames on end isn't seen by
+        # keypick's occlusion (it compares a frame with its neighbours, as hidden as it is), and a keyframe there leaves
+        # the hidden part out of the label's draft (a spray bottle's trigger under the hand: 0.64 of the free frames'
+        # 0.98, and Auto Draft stopped). Under WHOLE of the shot's: flagged partial, its score times PARTIAL
+        Rk = max(1, int(round(max(Rm.shape) / max(M2.shape[1:]))))
+        Rs = Rm[::Rk, ::Rk]
+        whole = {t: refangle.shape_iou(Rs, M2[t]) for t in view}
+        ref_w = float(np.percentile(list(whole.values()), 90))
+        for r in ranking:
+            w = whole.get(r["t"])
+            if w is None or ref_w <= 0:
+                continue
+            r["terms"]["whole"] = round(w / ref_w, 2)
+            if w < self.WHOLE * ref_w:
+                r["flags"].append("partial")
+                r["score"] = round(r["score"] * self.PARTIAL, 3)
+        ranking.sort(key=lambda r: -r["score"])
         top_s = ranking[0]["score"]
         # frames keypick can't tell apart (within TIE of the best): the one nearest the middle of the product's time in
         # view, so the label's track runs the shortest way to either end (its error grows with the distance)
@@ -713,6 +735,7 @@ class ProductLabelAuditName:
 class ProductLabelReviewName:
     SHARE = 0.5                  # a check over more than this share of the refined frames
     WRONG = ("double", "ghost")  # the print wrong on the frame (doubled, the old print through it): over SHARE, FAIL
+    CARRIED = 0.6                # under this share of the keyframe's corrected print in the rendered band: FAIL (V74)
     HELD = ("slide", "creep", "fade")   # the label off the print it lies on, held (the check's own run), creeping on
                                         # a still product (V71: the user saw 0.6 px over a still shot), or fading over
                                         # the old print where the product leaves right after (V72): any, FAIL
@@ -753,6 +776,11 @@ class ProductLabelReviewName:
         for k in cls.HELD:
             if k in per:
                 reasons.append(f"{k} on {len(per[k])} frames ({(rv.get('checks') or {}).get(k, '')})")
+        if rv.get("carried") is not None and float(rv["carried"]) < cls.CARRIED:
+            # the rendered band holds too little of the keyframe's corrected print: the rest stays garbled on every
+            # frame (V74: a sleeve's band was its base, 0.45)
+            reasons.append(f"carried: the clip renders {100 * float(rv['carried']):.0f} % of the keyframe's corrected "
+                           "print (the rest of its lines stay garbled)")
         f = int(rv.get("flagged") or 0)
         if reasons:
             return "FAIL", reasons, per

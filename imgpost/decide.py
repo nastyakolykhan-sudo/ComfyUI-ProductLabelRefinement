@@ -82,6 +82,9 @@ TEXT_ONLY = True
 
 # the packshot's outline, fitted to the product's mask, overlaps it this much or more: the frame shows the product from
 # the packshot's view (front on, as packshots are taken)
+PRINTED_COVER = 0.10  # light print over this share of the packshot's product: a body printed all over (a sleeve of rays,
+                      # icons and glints: 0.155), not light letters on a plain body (approved frosted bottle and tube:
+                      # 0.035, 0.042)
 VIEW_IOU = 0.97
 VIEW_BORDER = 0.01   # within this of VIEW_IOU the call is close: the report says so
 
@@ -147,6 +150,16 @@ def settings(scene_u8, mask, ref_u8, ref_alpha=None, outline=None):
         why.append(f"route: {pol} print on the body (ink {pol}), print box {box} ({brep.get('glyphs', 0)} glyphs, "
                    f"{brep.get('pad_px', 0)} px spare), bow from the matte's ends" +
                    (", registered onto the generated print" if pol == "dark" else ""))
+        if pol == "light" and TEXT_ONLY:
+            # a body printed all over (a sleeve of rays, icons and glints, no plain label): its light print isn't
+            # only letters, and the light ink route laid every light mark (a sleeve repainted 42 %): text only,
+            # the garbled lines only
+            cover = float(glyphs(ref_u8, band, False)[0].sum()) / max(float(band.sum()), 1.0)
+            out["printed"] = cover >= PRINTED_COVER
+            prep["light_cover"] = round(cover, 3)
+            if out["printed"]:
+                why.append(f"printed body: light print over {100 * cover:.1f} % of it (a printed sleeve from "
+                           f"{100 * PRINTED_COVER:g} %): text only, its garbled lines only (ink light, text)")
     why.append(f"fit: {out['model']}")
     out.update(why=why, close=close or prep["mixed"],
                measures={"view_iou": vm["iou"], "polarity": pol, **prep})
@@ -314,12 +327,13 @@ def label_auto(scene_u8, mask, ref_u8, ref_alpha=None, outline=None, ref_label=N
         f"label SAM 3's within the product ({int(sl.sum())} px)"]
 
 
-def text_route(ink, label=False):
+def text_route(ink, label=False, printed=False):
     """Text only for an auto-decided route: a label (label mode) and dark or mixed print on the body go on as letters
     only (matte text); light print on the body keeps the light ink route, which already lays only the print on the
     generated body, registered onto the generated print (the approved frosted bottle and tube; text mode on them
-    dropped a vertical wordmark's letter and left lines garbled)."""
-    return TEXT_ONLY and (bool(label) or ink in ("dark", "mixed"))
+    dropped a vertical wordmark's letter and left lines garbled), except on a body printed all over (printed:
+    settings()' light cover, pitfall 116), whose light print isn't only letters: text, its garbled lines only."""
+    return TEXT_ONLY and (bool(label) or ink in ("dark", "mixed") or (ink == "light" and bool(printed)))
 
 
 def label_text(ref_u8, box):
@@ -342,7 +356,7 @@ def label_text(ref_u8, box):
 
 
 def resolve(scene_u8, mask, ref_u8, ref_alpha=None, outline=None, model="auto", ink="auto", print_box="auto",
-            bow="auto"):
+            bow="auto", with_printed=False):
     """Auto Draft's model, ink, print_box and bow with each "auto" decided (settings()) and the rest as given.
     print_box "auto" with ink given: that polarity's glyph box; bow "auto": warped whole "print", on the body the
     matte's ends (dark print: the engine's own default, None here; light: the profile, measured now).
@@ -377,6 +391,9 @@ def resolve(scene_u8, mask, ref_u8, ref_alpha=None, outline=None, model="auto", 
                                              if bow else "none: the matte's ends are level (seen from level)"))
         else:
             bow = None                       # dark print: the engine's own (the matte's ends, kept where it registers)
+    if with_printed:
+        # whether the body is printed all over (settings()), for text_route(): only when its ink was decided here
+        return model, (None if ink == "off" else ink), print_box, bow, notes, bool(s.get("printed")) and ink == s["ink"]
     return model, (None if ink == "off" else ink), print_box, bow, notes
 
 

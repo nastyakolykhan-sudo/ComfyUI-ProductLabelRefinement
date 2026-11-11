@@ -32,6 +32,15 @@ ROW_GAP = 3.0          # ... and the gap between them along the row is at most t
                        # column beside it starts 4-6 away)
 ROW_SIZE = 2.2         # ... and are within this many times of each other's height (the line's core's)
 WORD_ASPECT = 1.8      # a line of one mark is a word (merged letters) when this many times as long as high
+GATE = True            # garbled type only (2026-11-10): lines already legible and marks that aren't type stay generated
+TURNS = True           # blocks of lines running at a turn on the packshot read in their own frame (2026-11-10)
+
+
+def printed_body(cfg):
+    """Text straight on the product's body, no label (a body printed all over: a sleeve, a glossy tube): its print
+    holds graphics and type set every way, so the gate, the turned blocks and the grouping beside big marks apply. A
+    label's text (label mode) keeps the reading its approvals were made on."""
+    return bool(cfg.get("text")) and not cfg.get("label")
 
 
 def marks(P, sel, thresh=MARK_THRESH, min_px=MIN_MARK):
@@ -148,6 +157,9 @@ def classify(lab, ms, sel, sharp=False):
 BAND_FULL = 0.8        # a long generated mark short of this share of the label's width ...
 IN_BLOCK = 0.6         # ... with this share of it inside a block's text area is blurred type, not a band
 RULE_LANDING = 0.5     # a short true line with this share of its cover on the generated rules and bands: left out
+LOCAL_N = 4            # a turned block's lines join a mark by the rows of their last this many marks (a curved line)
+TINY = 0.6             # a mark beside a line over ROW_SIZE times its height waits to join it (a full stop) only when
+                       # under this share of the typical mark's height
 SMALL = 0.5            # a mark under this share of the typical mark's height is a dot, an accent or a comma: it joins
                        # the line beside it after the lines are formed
 
@@ -160,7 +172,7 @@ def _core(L, by_i):
     return float(np.median([m["y0"] for m in full])), float(np.median([m["y1"] for m in full]))
 
 
-def group(ms):
+def group(ms, local=False, beside=False):
     """Candidate letters (kind None) grouped into lines: a mark joins the line whose core rows (its full-height marks'
     median top and bottom) it shares (ROW_OVERLAP) and that it sits next to along the row (ROW_GAP line heights); small
     marks (dots, accents, commas: under SMALL of the typical height) then join the line beside them.
@@ -179,6 +191,10 @@ def group(ms):
         tiny = False
         for L in lines:
             ct, cb = L["core"]
+            if local and len(L["members"]) > LOCAL_N:
+                # a turned block's line may curve: its rows where it has got to (its last marks), not its median
+                last = [by_i[i] for i in L["members"][-LOCAL_N:]]
+                ct, cb = float(np.median([q["y0"] for q in last])), float(np.median([q["y1"] for q in last]))
             ov = min(cb, m["y1"]) - max(ct, m["y0"])
             hh = min(cb - ct, m["h"])
             if hh <= 0 or ov < ROW_OVERLAP * hh:
@@ -186,7 +202,10 @@ def group(ms):
             if m["h"] / max(cb - ct, 1.0) > ROW_SIZE:
                 continue                    # a mark of another size: a shaded patch, a badge beside a line
             if m["h"] / max(cb - ct, 1.0) < 1.0 / ROW_SIZE:
-                tiny = True                 # a full stop after a wordmark: it joins the line beside it later
+                # a full stop after a wordmark: it joins the line beside it later; a letter of the label's typical
+                # size beside a big figure or a glint starts its own line (deferred, a line of small type beside a
+                # figure was left as lone marks and erased)
+                tiny = tiny or not beside or m["h"] < TINY * typ
                 continue
             gap = m["x0"] - L["x1"]
             if gap > ROW_GAP * max(cb - ct, 1):
@@ -243,13 +262,13 @@ def group(ms):
     return out
 
 
-def text_lines(P, sel, thresh=MARK_THRESH, min_px=MIN_MARK, sharp=False):
+def text_lines(P, sel, thresh=MARK_THRESH, min_px=MIN_MARK, sharp=False, local=False, beside=False):
     """A print map's lines of text and its other marks. -> {"lab": marks' label image, "marks": [...], "lines": [...],
     "text": bool mask of the letters, "other": bool mask of the marks that aren't (rules, edges, lone marks),
     "line_map": int image, the line number + 1 of each letter's px (0 elsewhere)}"""
     lab, ms = marks(P, sel, thresh, min_px)
     classify(lab, ms, sel, sharp)
-    lines = group(ms)
+    lines = group(ms, local, beside)
     lut = np.zeros(lab.max() + 1, np.int32)
     rule = np.zeros(lab.max() + 1, bool)
     edge = np.zeros(lab.max() + 1, bool)
@@ -724,20 +743,247 @@ def orientation(cov_r, band):
 ORIENT_RATIO = 1.5     # the quarter turn only when its profile separates lines this much more sharply
 
 
+class Rotated:
+    """A block of the packshot read turned by theta deg (its lines of text run at theta on it: a slanted headline
+    block): text-frame px to the packshot's (x = R x' + t), then the fit. forward() / inverse() as a fit's."""
+
+    def __init__(self, Hm, R, t):
+        self.Hm, self.R, self.t = Hm, np.asarray(R, float), np.asarray(t, float)
+
+    def to_ref(self, pts):
+        p = np.atleast_2d(np.asarray(pts, float))
+        return p @ self.R.T + self.t
+
+    def forward(self, pts):
+        from .geometry import apply_H
+        return apply_H(self.Hm, self.to_ref(pts))
+
+    def inverse(self, X, Y):
+        x, y, ok = _inverse(self.Hm, X, Y)
+        dx, dy = x - self.t[0], y - self.t[1]
+        R = self.R
+        return R[0, 0] * dx + R[1, 0] * dy, R[0, 1] * dx + R[1, 1] * dy, ok
+
+
+def _turn_frame(shape, band, theta):
+    """The text frame of lines running at theta deg on the packshot (image rows down): R, t and the frame's shape
+    covering the band's box. -> (R, t, (h, w))"""
+    th = np.deg2rad(theta)
+    c, s_ = np.cos(th), np.sin(th)
+    R = np.array([[c, -s_], [s_, c]])
+    ys, xs = np.nonzero(band)
+    P = np.array([[xs.min(), ys.min()], [xs.max(), ys.min()], [xs.max(), ys.max()], [xs.min(), ys.max()]], float)
+    q = P @ R                        # R^T p for each corner (rows)
+    off = q.min(0) - 2
+    size = np.ceil(q.max(0) - off).astype(int) + 3
+    return R, R @ off, (int(size[1]), int(size[0]))
+
+
+def _turn(M, R, t, shape, order=1):
+    """An array read in the text frame: out[y', x'] = M[R (x', y') + t]."""
+    # (row, col) order: [y, x] = [[c, s], [-s, c]] [y', x'] + [ty, tx]
+    Mrc = np.array([[R[1, 1], R[1, 0]], [R[0, 1], R[0, 0]]])
+    return ndi.affine_transform(M.astype(float) if order else M, Mrc, offset=[t[1], t[0]], output_shape=shape,
+                                order=order, mode="constant")
+
+
+def _back(Mt, R, t, shape, order=0):
+    """A text-frame array read back on the packshot: out[y, x] = Mt[R^T ((x, y) - t)]."""
+    Ri = R.T
+    Mrc = np.array([[Ri[1, 1], Ri[1, 0]], [Ri[0, 1], Ri[0, 0]]])
+    o = -Ri @ t
+    return ndi.affine_transform(Mt.astype(float) if order else Mt, Mrc, offset=[o[1], o[0]], output_shape=shape,
+                                order=order, mode="constant")
+
+
+BLOCK_TURNS = tuple(a for a in range(-30, 31, 2) if abs(a) >= 4)   # deg: the turns a block of lines is read at
+TURN_GAIN = 1.5        # a block's lines read at a turn hold this many times the marks of the longest level piece
+TURN_MIN = 4           # ... and this many marks at least
+TURN_BIN = 10.0        # deg: blocks whose turns lie this close are read in one frame (their lines keep their own turn)
+TURN_SPREAD = 2.0      # a turned line's letters' centres spread over this many times more rows read level than turned
+
+
+def angle_groups(cov_r, band):
+    """Blocks of the packshot whose lines of text run at a turn (a slanted headline block): read level, a slanted
+    line falls apart into short level pieces; read at its own turn it is one long line. Each level mark goes to the
+    turn at which its line holds the most marks, when that is TURN_GAIN times its longest level piece (by marks, the
+    level line it is in) and TURN_MIN marks or more. -> (level text_lines, [{"theta", "marks": level mark ids}], report)"""
+    t0 = text_lines(cov_r, band, sharp=True, beside=True)
+    lab0 = t0["lab"]
+    n_lv = np.zeros(lab0.max() + 1, int)
+    for L in t0["lines"]:
+        n_lv[L["members"]] = len(L["members"])
+    best_n = np.zeros(lab0.max() + 1, int)
+    best_th = np.zeros(lab0.max() + 1, float)
+    cands = []
+    ys, xs = np.nonzero(band)
+    sub = (slice(ys.min(), ys.max() + 1), slice(xs.min(), xs.max() + 1))
+    for th in BLOCK_TURNS:
+        R, t, shp = _turn_frame(cov_r.shape, band, th)
+        C = _turn(cov_r, R, t, shp)
+        B = _turn(band, R, t, shp) > 0.5
+        tt = text_lines(C, B, sharp=True, local=True, beside=True)
+        by_t = {m["i"]: m for m in tt["marks"]}
+        good = []
+        for L in tt["lines"]:
+            if len(L["members"]) < TURN_MIN or not type_like(L, tt)[0]:
+                continue
+            # its letters run on one row at this turn, and spread over rows read level (a level word read turned:
+            # the other way round)
+            ms = [by_t[i] for i in L["members"]]
+            cx = np.array([0.5 * (m["x0"] + m["x1"]) for m in ms])
+            cy = np.array([0.5 * (m["y0"] + m["y1"]) for m in ms])
+            lv = np.c_[cx, cy] @ R.T + t
+            if np.std(lv[:, 1]) < TURN_SPREAD * np.std(cy) + 0.25 * L["h"]:
+                continue
+            good.append(L)
+        if not good:
+            continue
+        lut = np.zeros(tt["lab"].max() + 1, np.int32)
+        for j, L in enumerate(good, 1):
+            lut[L["members"]] = j
+        back = _back(lut[tt["lab"]], R, t, cov_r.shape)
+        a, b = lab0[sub].ravel(), back[sub].ravel()
+        on = (a > 0) & (b > 0)
+        if not on.any():
+            continue
+        # each turned line's level marks (the level marks under its letters), and its length against theirs read
+        # level: the median of their level lines' (a curved headline's first word sat in a level line with the
+        # next word's end and an icon)
+        for j, L in enumerate(good, 1):
+            mine = np.unique(a[on & (b == j)])
+            if not len(mine):
+                continue
+            n = len(L["members"])
+            if n < TURN_GAIN * max(float(np.median(np.maximum(n_lv[mine], 1))), 1.0):
+                continue
+            cands.append((n, -abs(th), th, mine))
+    cands.sort(key=lambda c: (c[0], c[1]), reverse=True)
+    for n, _, th, mine in cands:
+        free = mine[best_n[mine] == 0]
+        if len(free) < TURN_MIN:
+            continue
+        best_n[free] = n
+        best_th[free] = th
+    ids = np.nonzero(best_n > 0)[0]
+    groups = []
+    for i in ids:
+        for g in groups:
+            if abs(g["theta"] - best_th[i]) <= TURN_BIN:
+                g["marks"].append(int(i))
+                g["thetas"].append(float(best_th[i]))
+                break
+        else:
+            groups.append({"theta": float(best_th[i]), "marks": [int(i)], "thetas": [float(best_th[i])]})
+    for g in groups:
+        g["theta"] = float(np.median(g["thetas"]))
+        del g["thetas"]
+    groups = [g for g in groups if len(g["marks"]) >= TURN_MIN]
+    rep = [{"theta": round(g["theta"], 1), "marks": len(g["marks"])} for g in groups]
+    return t0, groups, rep
+
+
+def _merge_placed(parts, shape):
+    """place_print_level()'s results for several frames (level, then each turned block), as one: the text maps of the
+    block a work-box px lies in (its text zone), the level frame's elsewhere; line numbers renumbered in order."""
+    cov = np.zeros(shape)
+    info, rep = None, None
+    off = 0
+    own = np.zeros(shape, bool)
+    for j, (c, inf, rp, theta) in enumerate(parts):
+        cov += c
+        nl = np.where(inf["new_line"] > 0, inf["new_line"] + off, 0)
+        gl = np.where(inf["gen_line"] > 0, inf["gen_line"] + off, 0)
+        lr = [dict(L, k=L["k"] + off, theta=theta) for L in inf["lines_true"]]
+        place = {k + off: v for k, v in (inf.get("place") or {}).items()}
+        gated = {k + off: v for k, v in (inf.get("gated") or {}).items()}
+        if info is None:
+            info = dict(inf, new_line=nl, gen_line=gl, lines_true=lr, place=place, gated=gated,
+                        placed_px=float(c.sum()), expect_px=float(c.sum()) / max(inf["placed_share"], 1e-6))
+            rep = dict(rp, turns=[])
+        else:
+            z = inf["text_zone"] & ~own
+            for key in ("gen_text", "gen_other", "gen_lone", "gen_icon"):
+                info[key] = np.where(z, inf[key], info[key])
+            info["gen_line"] = np.where(z, gl, info["gen_line"])
+            info["new_line"] = np.where(nl > 0, nl, info["new_line"])
+            info["text_zone"] = info["text_zone"] | inf["text_zone"]
+            for key in ("gen_kept", "gen_kept_type", "gen_kept_gfx"):
+                info[key] = info[key] | inf[key]
+            info["lines_true"] = info["lines_true"] + lr
+            info["place"].update(place)
+            info["gated"].update(gated)
+            info["rim_px"] = info["rim_px"] + inf["rim_px"]
+            info["placed_px"] += float(c.sum())
+            info["expect_px"] += float(c.sum()) / max(inf["placed_share"], 1e-6)
+            rep["turns"].append({"theta": theta, "lines": rp.get("lines"), "gated": rp.get("gated"), "legible": rp.get("legible"),
+                                 "true": rp.get("true"), "off_text": rp.get("off_text")})
+        if j:
+            own |= inf["text_zone"]
+        off += len(inf["lines_true"])
+    info["placed_share"] = info["placed_px"] / max(info["expect_px"], 1e-6)
+    rep["placed_share"] = round(info["placed_share"], 3)
+    return np.clip(cov, 0, 1), info, rep
+
+
 def place_print(cov_r, band, Hm, roi, crop_u8, in_band, cfg, kw, stroke=None):
     """place_print_level() in the frame where the packshot's lines of text run level (orientation()): a quarter turn
     round when they run up its columns; the cover comes back in the work box either way. -> as place_print_level()"""
     k, score = orientation(cov_r, band)
     if k:
-        cov, info, rep = place_print_level(np.ascontiguousarray(np.rot90(cov_r)), np.ascontiguousarray(np.rot90(band)),
-                                           Turned90(Hm, cov_r.shape[1]), roi, crop_u8, in_band, cfg, kw, stroke)
+        C, Bd, Hb = (np.ascontiguousarray(np.rot90(cov_r)), np.ascontiguousarray(np.rot90(band)),
+                     Turned90(Hm, cov_r.shape[1]))
     else:
-        cov, info, rep = place_print_level(cov_r, band, Hm, roi, crop_u8, in_band, cfg, kw, stroke)
-    rep["orientation"] = dict(score, turned=bool(k))
+        C, Bd, Hb = cov_r, band, Hm
+    groups, grep = [], []
+    if TURNS and printed_body(cfg):
+        t0, groups, grep = angle_groups(C, Bd)
+    if not groups:
+        cov, info, rep = place_print_level(C, Bd, Hb, roi, crop_u8, in_band, cfg, kw, stroke)
+    else:
+        # the level frame without the turned blocks' marks, then each turned block in its own frame (its marks only)
+        lab0 = t0["lab"]
+        turned = np.isin(lab0, [i for g in groups for i in g["marks"]])
+        turned = ndi.binary_dilation(turned, iterations=2) & (C > 0)
+        parts = [place_print_level(np.where(turned, 0.0, C), Bd, Hb, roi, crop_u8, in_band, cfg, kw, stroke) + (0.0,)]
+        for g in groups:
+            R, t, shp = _turn_frame(C.shape, Bd, g["theta"])
+            mine = ndi.binary_dilation(np.isin(lab0, g["marks"]), iterations=2) & (C > 0)
+            Cg = _turn(np.where(mine, C, 0.0), R, t, shp)
+            Bg = _turn(Bd, R, t, shp) > 0.5
+            parts.append(place_print_level(Cg, Bg, Rotated(Hb, R, t), roi, crop_u8, in_band, cfg, kw, stroke,
+                                           local=True) + (g["theta"],))
+        cov, info, rep = _merge_placed(parts, parts[0][0].shape)
+    if info.get("gen_kept") is not None and info["gen_kept"].any():
+        cov, rep["on_kept_dropped"] = _drop_on_kept(cov, info)
+        # graphics are kept where no new letter goes: a generated mark under a new line there was its garbled
+        # letters run into a ray or a glint
+        info["gen_kept_gfx"] = info["gen_kept_gfx"] & ~ndi.binary_dilation(cov > 0.05, iterations=2)
+        info["gen_kept"] = info["gen_kept_type"] | info["gen_kept_gfx"]
+    rep["orientation"] = dict(score, turned=bool(k), blocks=grep)
     return cov, info, rep
 
 
-def place_print_level(cov_r, band, Hm, roi, crop_u8, in_band, cfg, kw, stroke=None):
+ON_KEPT = 0.3          # a placed line with this share of its letters on generated marks the gate kept (the legible
+                       # rest of its word, read in another frame or part) stays as generated too
+
+
+def _drop_on_kept(cov, info):
+    """Placed lines landing on the generated print the gate kept: taken off again (one word isn't half redrawn over
+    itself). -> (cover, [line numbers dropped])"""
+    nl, kept = info["new_line"], info["gen_kept_type"]
+    out = []
+    for j in np.unique(nl[nl > 0]):
+        m = nl == j
+        if (m & kept).sum() >= ON_KEPT * m.sum():
+            cov = np.where(ndi.binary_dilation(m, iterations=1), 0.0, cov)
+            nl[m] = 0
+            info["gen_kept_type"] = info["gen_kept_type"] | m
+            out.append(int(j) - 1)
+    return cov, out
+
+
+def place_print_level(cov_r, band, Hm, roi, crop_u8, in_band, cfg, kw, stroke=None, local=False):
     """The packshot's print, letters only, placed line by line onto the generated print (ink.prepare's text step).
     cov_r: the packshot's print as coverage (ref_cover); Hm: the fit with the print's registration over it; kw:
     warp_cover's arguments. The frame's print map is read inside the warped band and pulled back to the packshot's
@@ -747,7 +993,8 @@ def place_print_level(cov_r, band, Hm, roi, crop_u8, in_band, cfg, kw, stroke=No
     from . import images as im
     from . import ink
     dark = cfg["polarity"] == "dark"
-    tl_r = text_lines(cov_r, band, sharp=True)
+    pb = printed_body(cfg)
+    tl_r = text_lines(cov_r, band, sharp=True, local=local, beside=pb)
     comp = _comp_lines(cov_r, tl_r)
     Lf = im.lum(im.srgb_to_lin(im.to_float(crop_u8)))
     B = in_band > 0.5
@@ -769,7 +1016,7 @@ def place_print_level(cov_r, band, Hm, roi, crop_u8, in_band, cfg, kw, stroke=No
     else:
         P_s = ink.print_map(Lf, B, so, dark)[0] * B
     P_b = pull_back(P_s, Hm, roi, band)
-    tl_g = text_lines(P_b, band, thresh=GEN_THRESH)
+    tl_g = text_lines(P_b, band, thresh=GEN_THRESH, local=local, beside=pb)
     lr, lg = tl_r["lines"], tl_g["lines"]
     # both prints blurred alike for their rows: the frame's print edge blur (scene px) in packshot px, over the
     # packshot's own
@@ -785,6 +1032,8 @@ def place_print_level(cov_r, band, Hm, roi, crop_u8, in_band, cfg, kw, stroke=No
     pairs = {}
     import os
     if os.environ.get("PLR_TEXT_DEBUG"):
+        os.environ["PLR_TEXT_DEBUG"] = os.environ["PLR_TEXT_DEBUG"].split("@")[0].replace(".npz", "") + \
+            f"@{cfg['polarity']}.npz"
         np.savez_compressed(os.environ["PLR_TEXT_DEBUG"], P_b=P_b, R_b=R_b, cov_r=cov_r, band=band,
                             gl=tl_g["line_map"], go=tl_g["other"], rl=tl_r["line_map"], ro=tl_r["other"])
     x0, y0, x1, y1 = roi
@@ -797,6 +1046,13 @@ def place_print_level(cov_r, band, Hm, roi, crop_u8, in_band, cfg, kw, stroke=No
     # generated band's end)
     on_rules = push(tl_g["other"], Hm, roi) > 0
     dropped, straight = [], []
+    leg = {}
+    placed_h = []
+    gate = GATE and printed_body(cfg)
+    gated = {}
+    kept_wb = np.zeros(cov.shape, bool)
+    kept_gfx = np.zeros(cov.shape, bool)
+    gen_lab = ndi.label(P_s > GEN_THRESH, structure=np.ones((3, 3), bool))[0] if gate else None
     for L in lr:
         k = L["k"]
         ck = cov_r * (comp == k + 1)
@@ -823,20 +1079,74 @@ def place_print_level(cov_r, band, Hm, roi, crop_u8, in_band, cfg, kw, stroke=No
         if len(L.get("members") or []) <= 2 and (c * on_rules[sl]).sum() >= RULE_LANDING * max(c.sum(), 1e-9):
             dropped.append(k)
             continue
+        hs_ = float(np.ptp(np.nonzero(c > 0.3)[0]) + 1) if (c > 0.3).any() else 4.0
+        leg[k] = legibility(c, P_s, sl, hs_)
+        if gate:
+            # garbled type only: a line the generator already drew legibly, or a "line" that isn't type (glints,
+            # rays, icons on a fully printed body), stays as generated, its footprint kept from the fill; a line
+            # whose parts stand apart (a word, an icon after it) is decided part by part
+            segs = segments(L, tl_r)
+            dec = []
+            for sg in segs:
+                if len(segs) == 1:
+                    cs, sls, lg_ = c, sl, leg[k]
+                else:
+                    mk = (comp == k + 1) & (ndi.binary_dilation(np.isin(tl_r["lab"], sg["members"]), iterations=2))
+                    cs, _ = ink.warp_cover(ck * mk, band, lm, sub, **kw)
+                    sls = sl
+                    hs2 = float(np.ptp(np.nonzero(cs > 0.3)[0]) + 1) if (cs > 0.3).any() else hs_
+                    lg_ = legibility(cs, P_s, sl, hs2)
+                is_type, feats = type_like(sg, tl_r)
+                if len(sg["members"]) == 1:
+                    m1 = tl_r["marks"][[q["i"] for q in tl_r["marks"]].index(sg["members"][0])]
+                    is_type = is_type and m1["w"] >= WORD_ASPECT * m1["h"]
+                why = None if is_type else "not type"
+                if why is None and lg_ is not None and lg_[0] >= LEGIBLE:
+                    why = "legible"
+                dec.append((sg, cs, lg_, why, feats))
+            if any(d[3] for d in dec):
+                c = np.zeros_like(c)
+                for sg, cs, lg_, why, feats in dec:
+                    if not why:
+                        c = c + cs
+                        continue
+                    gated.setdefault(k, []).append(
+                        {"why": why, "legible": lg_[0] if lg_ else None, "x": [sg["x0"], sg["x1"]],
+                         **{q: feats[q] for q in ("stroke_w", "h_rel_med", "fill_w")}})
+                    dy_, dx_ = (lg_[2] if lg_ else (0, 0))
+                    fp = ndi.shift((cs > 0.2).astype(np.uint8), (dy_, dx_), order=0) > 0
+                    reach = fp
+                    if why == "not type":
+                        # graphics the generator drew its own way (an icon off the packshot's place): the marks near
+                        reach = ndi.binary_dilation(fp, iterations=int(max(2, round(0.3 * hs_))))
+                    if why == "legible":
+                        kept_wb[sls] |= _kept_marks(reach, gen_lab[sls]) | fp
+                    else:
+                        kept_gfx[sls] |= _kept_marks(reach, gen_lab[sls], inside=True,
+                                                     min_px=GFX_SIZE * fp.sum() / max(len(sg["members"]), 1))
+                if c.sum() <= 0:
+                    continue
+        placed_h.append(hs_)
         cov[sl] += c
         win = c > best[sl]
         new_line[sl] = np.where(win & (c > 0.02), k + 1, new_line[sl])
         best[sl] = np.maximum(best[sl], c)
     cov = np.clip(cov, 0, 1)
+    if gated:
+        # the kept marks' own soft edges and glow with them (filled, a halo showed round a kept headline)
+        e_ = int(round(KEPT_EDGE * (cfg.get("_px_scale") or 1)))
+        kept_wb = ndi.binary_dilation(kept_wb, iterations=e_)
+        kept_gfx = ndi.binary_dilation(kept_gfx, iterations=e_)
     # text_rim's measure: the placed lines' packshot letters within max(3, 0.3 letter heights) of the packshot label's
     # own outline (its printed edge or a corner's shading read as a letter, pitfall 114)
     typ_r = float(np.median([m["h"] for m in tl_r["marks"]])) if tl_r["marks"] else 1.0
     rim_r = ndi.distance_transform_edt(band) <= max(3.0, 0.3 * typ_r)
-    placed_k = [L["k"] + 1 for L in lr if L["k"] not in dropped]
+    placed_k = [L["k"] + 1 for L in lr if L["k"] not in dropped and L["k"] not in gated]
     rim_px = float((cov_r * np.isin(comp, placed_k) * rim_r).sum())
     # how much of the packshot's letters went on: the new cover's px against the true letters' px at each line's
     # scale (packshot px per scene px squared), lines cut off at the band's or the work box's edge falling short
-    expect = sum(float((cov_r * (comp == L["k"] + 1)).sum()) * (A[L["k"]][0, 0] / s_ps) ** 2 for L in lr)
+    expect = sum(float((cov_r * (comp == L["k"] + 1)).sum()) * (A[L["k"]][0, 0] / s_ps) ** 2 for L in lr
+                 if L["k"] not in gated)
     placed = float(cov.sum()) / max(expect, 1e-6)
     # where text is: each block of true lines' box, a line height to spare along the row (garbled lines run longer)
     # and most of a pitch above and below, inside the band clear of its edge (a label's own border, its shaded edge)
@@ -927,7 +1237,9 @@ def place_print_level(cov_r, band, Hm, roi, crop_u8, in_band, cfg, kw, stroke=No
     gen_lone = push(tl_g["lone"], Hm, roi) > 0
     gen_line = push(tl_g["line_map"], Hm, roi)
     info = {"gen_text": gen_text, "gen_other": gen_other, "gen_lone": gen_lone, "gen_icon": gen_icon,
-            "text_zone": text_zone, "roi": list(roi),
+            "line_h_px": float(np.median(placed_h)) if placed_h else None,
+            "text_zone": text_zone, "roi": list(roi), "gen_kept": kept_wb | kept_gfx, "gen_kept_type": kept_wb,
+            "gen_kept_gfx": kept_gfx, "gated": gated,
             "gen_line": gen_line,
             "new_line": new_line,
             "pairs": pairs, "lines_true": lr, "lines_gen": lg, "place": prep, "placed_share": placed, "rim_px": rim_px}
@@ -936,13 +1248,157 @@ def place_print_level(cov_r, band, Hm, roi, crop_u8, in_band, cfg, kw, stroke=No
            "blur": {"frame_px": round(float(sig_f), 3), "packshot_px": round(float(sig_r), 3),
                     "packshot_per_scene_px": round(s_ps, 3), "rows_blur_px": round(sig, 3)},
            "off_text": [k for k in range(len(lr)) if not prep.get(k, {}).get("on_text")],
-           "on_rules_dropped": dropped, "straight": straight,
+           "on_rules_dropped": dropped, "straight": straight, "legible": leg, "gated": gated,
            "lines": [dict(k=L["k"], rows=[round(L["top"], 1), round(L["bot"], 1)], x=[L["x0"], L["x1"]],
                           **prep.get(L["k"], {})) for L in lr],
            "lines_generated": [dict(k=g["k"], rows=[round(g["top"], 1), round(g["bot"], 1)], x=[g["x0"], g["x1"]])
                                for g in lg]}
     rep.pop("matched", None)
     return cov, info, rep
+
+
+LEGIBLE = 0.5          # a true line the generated print already draws (its letters' column structure correlating
+                       # this well, legibility()) stays as generated: a fully printed sleeve's wordmark 0.71, headline
+                       # 0.87, figure 0.88 against its garbled lines' 0.06-0.39
+TYPE_STROKE = 0.35     # a true "line" whose marks' stroke (twice the widest inscribed radius, px-weighted) is this
+                       # share of its core height or more is graphics (glints 0.44, rays 0.41, icons 0.52), not type
+                       # (garbled lines 0.18-0.30)
+TYPE_CORE = 0.5        # ... or whose marks' median height is under this share of its core (its core is a few big
+                       # marks: rays, icons among their specks 0.17-0.2; type 0.93-1.18)
+TYPE_MARKS = 3         # ... or holds fewer marks than this (a glossy body's specks paired into "lines": 2-3 specks) ...
+TYPE_LEN = 1.5         # ... or runs shorter than this many core heights (specks: under one; a word of three letters 1.6)
+TYPE_FILL = 0.35       # ... or whose marks fill under this share of their boxes (a glint's points 0.26; type 0.49-0.64)
+
+
+SEG_GAP = 0.6          # a line's marks this many core heights apart or more are parts decided apart (the gate)
+
+
+KEPT_EDGE = 2          # px (scene, at 1x): the kept marks' soft edges kept with them
+KEPT_INSIDE = 0.6      # graphics kept: a generated mark this much inside their reach
+GFX_SIZE = 0.3         # ... and at least this share of the graphic's mean mark area
+KEPT_SHARE = 0.3       # a generated mark is a kept line's when this share of it lies under the line's letters
+
+
+def _kept_marks(fp, lab, inside=False, min_px=0.0):
+    """The generated print's marks (labels in the same window) a kept true line's letters lie on, whole: the share of
+    each under the footprint KEPT_SHARE or more, or most of the footprint on it. inside (graphics, a footprint reaching
+    round the true marks): only marks mostly inside it (KEPT_INSIDE; a garbled line merged into one long mark beside
+    an icon was kept whole, and the new line over it dropped)."""
+    ids = np.unique(lab[fp & (lab > 0)])
+    if not len(ids):
+        return fp & False
+    tot = ndi.sum(np.ones_like(lab), lab, ids)
+    on = ndi.sum(fp, lab, ids)
+    if inside:
+        # ... of a graphic's size: garbled letters by a ray lie inside its reach too
+        keep = ids[(on >= KEPT_INSIDE * tot) & (tot >= min_px)]
+        return np.isin(lab, keep)
+    keep = ids[(on >= KEPT_SHARE * tot) | (on >= 0.5 * max(fp.sum(), 1))]
+    return np.isin(lab, keep)
+
+
+def segments(L, tl_r):
+    """A true line's parts: its marks along the row, split where they stand SEG_GAP core heights apart.
+    -> [{"members", "x0", "x1", "h"}]"""
+    by_i = {m["i"]: m for m in tl_r["marks"]}
+    ms = sorted([by_i[i] for i in L["members"]], key=lambda m: m["x0"])
+    out, cur, right = [], [], None
+    for m in ms:
+        if cur and m["x0"] - right > SEG_GAP * L["h"]:
+            out.append(cur)
+            cur = []
+        cur.append(m)
+        right = max(right, m["x1"]) if right is not None and len(cur) > 1 else m["x1"]
+    if cur:
+        out.append(cur)
+    return [{"members": [m["i"] for m in sg], "x0": min(m["x0"] for m in sg), "x1": max(m["x1"] for m in sg),
+             "h": L["h"]} for sg in out]
+
+
+def type_like(L, tl_r):
+    """Whether a true line is a line of type (its marks letter-shaped, its core their height), from line_feats()."""
+    f = line_feats(L, tl_r)
+    return (f["stroke_w"] < TYPE_STROKE and f["h_rel_med"] >= TYPE_CORE and f["fill_w"] >= TYPE_FILL and
+            (f["n"] >= TYPE_MARKS and f["len_h"] >= TYPE_LEN or f["n"] == 1)), f
+
+
+def _ncc_shift(T, G, r):
+    """The best normalised correlation of T against G shifted by up to r px each way (G is T's window padded by r)."""
+    h, w = T.shape
+    t = T - T.mean()
+    tn = np.sqrt((t * t).sum())
+    if tn < 1e-9:
+        return -1.0, (0, 0)
+    best, at = -1.0, (0, 0)
+    for dy in range(0, 2 * r + 1):
+        for dx in range(0, 2 * r + 1):
+            g = G[dy:dy + h, dx:dx + w]
+            g = g - g.mean()
+            gn = np.sqrt((g * g).sum())
+            if gn < 1e-9:
+                continue
+            v = float((t * g).sum() / (tn * gn))
+            if v > best:
+                best, at = v, (dy - r, dx - r)
+    return best, at
+
+
+def line_feats(L, tl_r):
+    """The shape of a true line's marks: heights against its core, fill, stroke, holes."""
+    by_i = {m["i"]: m for m in tl_r["marks"]}
+    lab = tl_r["lab"]
+    hs, fills, strokes, holes, pxs = [], [], [], [], []
+    for i in L["members"]:
+        m = by_i[i]
+        sub = lab[m["y0"]:m["y1"], m["x0"]:m["x1"]] == i
+        hs.append(m["h"] / max(L["h"], 1.0))
+        fills.append(m["px"] / float(m["w"] * m["h"]))
+        dt = ndi.distance_transform_edt(np.pad(sub, 1))
+        strokes.append(2 * float(dt.max()) / max(L["h"], 1.0))
+        filled = ndi.binary_fill_holes(sub)
+        holes.append(int(ndi.label(filled & ~sub)[1]))
+        pxs.append(m["px"])
+    w = np.asarray(pxs, float)
+    return {"n": len(hs), "len_h": round((L["x1"] - L["x0"]) / max(L["h"], 1.0), 2),
+            "h_rel_med": round(float(np.median(hs)), 2), "h_rel_max": round(float(np.max(hs)), 2),
+            "fill_w": round(float(np.average(fills, weights=w)), 2),
+            "stroke_w": round(float(np.average(strokes, weights=w)), 3),
+            "holes": int(sum(holes)), "big_px_share": round(float(w[np.asarray(hs) > 1.5].sum() / w.sum()), 2)}
+
+
+def legibility(c, P_s, sl, h):
+    """How well the generated print already draws a placed true line: the placed line's cover c (work-box slice sl)
+    against the generated print map P_s over the same window, each with its row band taken out (the column
+    structure: letters' shapes, which a garbled line of the same size and run doesn't share), shifted up to a quarter
+    line height. -> (score, raw score, shift)"""
+    ys, xs = np.nonzero(c > 0.05)
+    if not len(ys):
+        return None
+    r = int(max(2, round(0.25 * h)))
+    pad = int(max(2, round(0.4 * h)))
+    H0, W0 = P_s.shape
+    oy, ox = sl[0].start, sl[1].start
+    a0, a1 = oy + ys.min() - pad, oy + ys.max() + 1 + pad
+    b0, b1 = ox + xs.min() - pad, ox + xs.max() + 1 + pad
+    if a0 - r < 0 or b0 - r < 0 or a1 + r > H0 or b1 + r > W0:
+        a0, b0 = max(a0, r), max(b0, r)
+        a1, b1 = min(a1, H0 - r), min(b1, W0 - r)
+        if a1 - a0 < 3 or b1 - b0 < 3:
+            return None
+    T = np.zeros((a1 - a0, b1 - b0))
+    cy0, cx0 = a0 - oy, b0 - ox
+    ch, cw = c.shape
+    ty0, tx0 = max(0, -cy0), max(0, -cx0)
+    sy0, sx0 = max(0, cy0), max(0, cx0)
+    sy1, sx1 = min(ch, cy0 + T.shape[0]), min(cw, cx0 + T.shape[1])
+    T[ty0:ty0 + sy1 - sy0, tx0:tx0 + sx1 - sx0] = c[sy0:sy1, sx0:sx1]
+    G = P_s[a0 - r:a1 + r, b0 - r:b1 + r]
+    raw, at = _ncc_shift(T, G, r)
+    sx = max(1.0, 0.6 * h)
+    Tc = T - ndi.gaussian_filter1d(T, sx, axis=1)
+    Gc = G - ndi.gaussian_filter1d(G, sx, axis=1)
+    col, at2 = _ncc_shift(Tc, Gc, r)
+    return round(col, 3), round(raw, 3), list(at2)
 
 
 # ---- placement v2: each block of true lines onto the generated print's own rows ----
