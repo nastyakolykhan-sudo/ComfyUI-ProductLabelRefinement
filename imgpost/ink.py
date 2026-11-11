@@ -1001,6 +1001,11 @@ def _garbled_mixed(crop_u8, M, in_band, cfg, vis, text):
             "passes": [("dark", idk), ("light", il)]}
     if il.get("glow") is not None:
         info["glow"] = il["glow"]
+    if idk.get("ink_abs") is not None or il.get("ink_abs") is not None:
+        # a printed body: each pass's absolute inks (the ratio's ink where a pass has none)
+        ad = idk["ink_abs"] if idk.get("ink_abs") is not None else np.clip(fd * kd, 0, 1)
+        al = il["ink_abs"] if il.get("ink_abs") is not None else np.clip(fl * kl, 0, 1)
+        info["ink_abs"] = np.where((a_d >= a_l)[..., None], ad, al)
     rep = {"mixed_fill": {"dark": rd, "light": rl}, "garbled_px": rd["garbled_px"] + rl["garbled_px"],
            "filled_px": rd["filled_px"] + rl["filled_px"], "ink_k": [rd["ink_k"], rl["ink_k"]]}
     return fl, info, rep
@@ -1067,6 +1072,9 @@ def _garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=Non
         # than its letters) unless the new print covers them
         keep = ndi.binary_dilation(text["gen_other"] | (text["gen_icon"] & ~ndi.binary_dilation(
             cover > 0.1, iterations=int(round(2 * f_px)))), iterations=int(round(f_px)))
+        if text.get("gen_kept") is not None:
+            # the generated print's own lines the gate kept (legible already, or not type): never filled
+            keep |= text["gen_kept"]
         # whole marks: a generated letter or word reaching into the text area goes all of it (cut at the area's edge,
         # its rest fed the fill and smudged it)
         # only marks holding letters (or small lone marks) of the generated print: a band's faint end, a label's
@@ -1100,6 +1108,34 @@ def _garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=Non
         # generated i drawn as one tall stroke stayed under the new i's dot, which came out black, pitfall 113)
         under = np.unique(lab_all[(cover > 0.1) & text["text_zone"] & (lab_all > 0)])
         hit = np.union1d(hit, under[under > 0])
+        if text.get("gen_kept") is not None and not cfg.get("label"):
+            # a printed body (the gate's text on the body): only the generated marks by the new letters go, never a
+            # mark the gate kept or a mark no new line replaces (its whole text isn't the packshot's lines: a glossy
+            # tube's legible wordmark was erased with nothing put back)
+            lh = float(text.get("line_h_px") or 8.0)
+            reach = int(max(2, round(NEAR_NEW * lh)))
+            near_new = ndi.binary_dilation(cover > 0.1, iterations=reach)
+            # ... and past each new line's ends along its own run (a garbled line runs longer than the copy)
+            nl_ = text.get("new_line")
+            if nl_ is not None:
+                for j in np.unique(nl_[nl_ > 0]):
+                    yy, xx = np.nonzero(nl_ == j)
+                    if len(yy) < 8:
+                        continue
+                    P_ = np.c_[xx - xx.mean(), yy - yy.mean()]
+                    ax = np.linalg.svd(P_, full_matrices=False)[2][0]
+                    base_ = ndi.binary_dilation(nl_ == j, iterations=reach)
+                    for t_ in np.linspace(-NEAR_RUN * lh, NEAR_RUN * lh, 9):
+                        near_new |= ndi.shift(base_.astype(np.uint8), (t_ * ax[1], t_ * ax[0]), order=0) > 0
+            ok = np.unique(lab_all[near_new & (lab_all > 0)])
+            hit = np.intersect1d(hit, ok)
+            if gl is not None and len(hit):
+                # ... and the rest of a generated line most of which goes (its tail curving off the new line's)
+                gone = np.isin(lab_all, hit) & (gl > 0)
+                for g_ in np.unique(gl[gone]):
+                    line_px = (gl == g_) & letters & (lab_all > 0)
+                    if (gone & (gl == g_)).sum() >= LINE_WHOLE * max(line_px.sum(), 1):
+                        hit = np.union1d(hit, np.unique(lab_all[line_px]))
         lab_g = np.where(np.isin(lab_all, hit[hit > 0]), lab_all, lab_g)
         tz = np.isin(lab_g, hit[hit > 0])
         gen = tz
@@ -1242,8 +1278,12 @@ def _garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=Non
         info["keep"] = keep & work
         info["text_zone"] = text["text_zone"] & work
         info["px_scale"] = cfg.get("_px_scale") or 1
-        info["k"], rep["text_inks"] = _line_inks(Fl, filled, gen, top, text, k, cfg, dark, a)
+        info["k"], rep["text_inks"], KA = _line_inks(Fl, filled, gen, top, text, k, cfg, dark, a)
         info["text"] = text
+        if KA is not None:
+            # a printed body: the letters in the generated letters' own colour (as a ratio over the body, letters on
+            # a near-black base came out speckled and fringed, the ratio 300-950)
+            info["ink_abs"] = KA
     if glow is not None:
         info["glow"] = glow            # the garbled strokes' glow the fill took: check() reads it as theirs
     rep.update({"filled_px": int(fillm.sum()), "garbled_px": int(gen.sum()), "grain_sd_lin": sd.round(5).tolist(),
@@ -1254,10 +1294,13 @@ def _garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=Non
 def _line_inks(Fl, filled, gen, top, text, k, cfg, dark, a):
     """Text only: each new line's ink from the generated print under it (frame / filled body over the most covered
     garbled px within 2 px of the line, as k), a line with too few the nearest line's with enough, else the print's k.
-    -> (k per pixel, h x w x 3; report)"""
+    On a printed body (no label) the ink is absolute: the generated letters' own colour (their most covered px), a
+    line with too few taking the nearest line's in the frame (a turned block's lines borrowed by row number across
+    frames took a glint's and a blue ink). -> (k per pixel, h x w x 3; report; absolute ink per pixel or None)"""
     nl = text["new_line"]
     lr = text["lines_true"]
-    own = {}
+    absolute = not cfg.get("label") and text.get("gen_kept") is not None
+    own, own_abs = {}, {}
     for L in lr:
         if len(L.get("members") or []) <= 2 and len(lr) > 1:
             continue        # a dot or a short mark on its own: too little generated print under it to read its ink (a
@@ -1270,25 +1313,44 @@ def _line_inks(Fl, filled, gen, top, text, k, cfg, dark, a):
         ratio = Fl[core] / np.maximum(filled[core], 1e-4)
         own[L["k"]] = (np.minimum(np.percentile(ratio, 100 - cfg["ink_pct"], axis=0), 1.0) if dark else
                        np.maximum(np.percentile(ratio, cfg["ink_pct"], axis=0), 1.0))
-    kl = {}
+        own_abs[L["k"]] = np.median(Fl[core], 0)
+    cen = {}
+    if absolute:
+        for L in lr:
+            ys, xs = np.nonzero(nl == L["k"] + 1)
+            if len(ys):
+                cen[L["k"]] = np.array([ys.mean(), xs.mean()])
+
+    def nearest(j):
+        if absolute and j in cen:
+            have = [q for q in own if q in cen]
+            if have:
+                return min(have, key=lambda q: float(np.hypot(*(cen[q] - cen[j]))))
+        return min(own, key=lambda q: abs(lr[q]["cy"] - lr[j]["cy"]))
+    kl, ka = {}, {}
+    by_k = {L["k"]: L for L in lr}
     for L in lr:
-        if L["k"] in own:
-            kl[L["k"]] = own[L["k"]]
-        elif own:
-            near = min(own, key=lambda j: abs(lr[j]["cy"] - L["cy"]))
-            kl[L["k"]] = own[near]
-        else:
-            kl[L["k"]] = k
+        j = L["k"]
+        src = j if j in own else (nearest(j) if own else None)
+        kl[j] = own[src] if src is not None else k
+        if src is not None:
+            ka[j] = own_abs[src]
     K = np.broadcast_to(np.asarray(k, float), Fl.shape).copy()
+    KA = None
     if (nl > 0).any():
         iy, ix = ndi.distance_transform_edt(nl == 0, return_distances=False, return_indices=True)
         idn = nl[iy, ix]
         on = a > 0
         for j, kj in kl.items():
             K[on & (idn == j + 1)] = kj
-    rep = {"own": len(own), "lines": len(lr),
+        if absolute and ka:
+            KA = np.zeros(Fl.shape)
+            KA[...] = np.median(np.stack(list(ka.values())), 0)
+            for j, kj in ka.items():
+                KA[on & (idn == j + 1)] = kj
+    rep = {"own": len(own), "lines": len(lr), "absolute": bool(KA is not None),
            "k_lines": {int(j): np.asarray(v).round(3).tolist() for j, v in kl.items()}}
-    return K, rep
+    return K, rep, KA
 
 
 def composite(filled, crop_u8, info):
@@ -1296,7 +1358,7 @@ def composite(filled, crop_u8, info):
     and inside it only the band and the fill change."""
     Fl = im.srgb_to_lin(im.to_float(crop_u8))
     a = info["alpha"]
-    ink = np.clip(filled * info["k"], 0, 1)
+    ink = np.clip(info["ink_abs"], 0, 1) if info.get("ink_abs") is not None else np.clip(filled * info["k"], 0, 1)
     out_l = filled * (1 - a[..., None]) + ink * a[..., None]
     out_l = np.where(info["region"][..., None], out_l, Fl)
     out = np.clip(np.round(im.lin_to_srgb(np.clip(out_l, 0, 1)) * 255), 0, 255).astype(np.uint8)
@@ -1706,6 +1768,11 @@ def double_check(src_u8, out_u8, M, size, offset, dark=True, share=DOUBLE_FAIL):
     return [{"check": "ink_double", "level": "INFO", "px": int(old.sum()), "share": round(v, 3), "text": text}]
 
 
+TEXT_HUE_FAIL = 25.0    # text_hue: a new line's letters this far (dE76, medians) from the generated letters they replace
+TEXT_KEPT_WARN = 0.6    # text_kept: a line the gate kept as legible under this score (textline.LEGIBLE 0.5) is worth a look
+LINE_WHOLE = 0.5        # text on a printed body: a generated line with this share of its letters gone goes whole
+NEAR_RUN = 2.0          # ... and within this many line heights past a new line's ends, along its run
+NEAR_NEW = 0.6          # text on a printed body: generated marks within this many new-line heights of the new letters go
 TEXT_CHANGE_LEVELS = 2   # text_only: a pixel changed by more than this (8-bit) outside the letters and the fill moved
 TEXT_ONLY_PX = 20        # ... FAIL from this many such px (the composite's own linear-light round trip moves 0-1)
 TEXT_LEFT_FAIL = 0.15    # text_left: generated letters left in the text area, as a share of the new letters' px
@@ -1774,6 +1841,11 @@ def _course(Ps, Po, nl):
         bow = float(np.polyfit(tc - tc.mean(), diff, 2)[0] * (np.ptp(tc) / 2) ** 2 / h)
         out.append((int(k) - 1, round(deg, 2), round(bow, 3), int(m.sum())))
     return out
+
+
+def _lab_u8(u8):
+    from .decide import _lab
+    return _lab(u8)
 
 
 def text_checks(crop_u8, out_u8, info, offset):
@@ -1932,6 +2004,48 @@ def text_checks(crop_u8, out_u8, info, offset):
                     "text": f"{100 * v_:.0f} % of the packshot's {pol} letters went on" +
                             (f" (under {100 * TEXT_PLACED_MIN:.0f} %): part of the copy is cut off at the label's or "
                              "the frame's edge, or left out" if v_ < TEXT_PLACED_MIN else "")})
+    # text_hue (a printed body): new letters off the generated letters' colour (a turned block's line took a glint's
+    # ink: yellow, lavender)
+    hue = []
+    src_lab = _lab_u8(crop_u8)
+    out_lab = _lab_u8(out_u8)
+    for pol, inf in passes:
+        tx = inf.get("text") or {}
+        nl = tx.get("new_line")
+        if tx.get("gen_kept") is None or nl is None or inf.get("grown") is None:
+            continue
+        a_p = inf["alpha"]
+        lit = pol != "dark"
+        for j in np.unique(nl[nl > 0]):
+            mine = (nl == j) & (a_p > 0.5)
+            old_ = inf["grown"] & ndi.binary_dilation(nl == j, iterations=it(2)) & inf["matte"]
+            if mine.sum() < 12 or old_.sum() < 12:
+                continue
+            L_old = src_lab[..., 0][old_]
+            core = old_.copy()
+            core[old_] = (L_old >= np.percentile(L_old, 75)) if lit else (L_old <= np.percentile(L_old, 25))
+            L_new = out_lab[..., 0][mine]
+            mcore = mine.copy()
+            mcore[mine] = (L_new >= np.percentile(L_new, 75)) if lit else (L_new <= np.percentile(L_new, 25))
+            de = float(np.linalg.norm(np.median(out_lab[mcore], 0) - np.median(src_lab[core], 0)))
+            if de > TEXT_HUE_FAIL:
+                hue.append(f"{pol} line {int(j) - 1} (dE {de:.0f})")
+    if any((inf.get("text") or {}).get("gen_kept") is not None for _, inf in passes):
+        out.append({"check": "text_hue", "level": "FAIL" if hue else "INFO",
+                    "text": ("new lines off the generated letters' colour: " + ", ".join(hue[:6])) if hue else
+                            "the new lines in the generated letters' colour"})
+    # text_kept (a printed body's gate): lines kept as generated because they already read as the packshot's, the
+    # nearer the cut the likelier a letter of them is still wrong (a headline drawn with one wrong letter: 0.56)
+    near = []
+    for pol, inf in passes:
+        for k, es in ((inf.get("text") or {}).get("gated") or {}).items():
+            for e in (es if isinstance(es, list) else [es]):
+                if e.get("why") == "legible" and (e.get("legible") or 0) < TEXT_KEPT_WARN:
+                    near.append(f"{pol} line {k} ({e['legible']})")
+    if near:
+        out.append({"check": "text_kept", "level": "WARN",
+                    "text": f"{len(near)} line(s) kept as generated, reading only partly like the packshot's (under "
+                            f"{TEXT_KEPT_WARN:g}): " + ", ".join(near[:6]) + ": check their letters against the copy"})
     if off_lines:
         sh = off_px / float(max(tot_px, 1))
         out.append({"check": "text_lines", "level": "FAIL" if sh > TEXT_OFF_FAIL else "WARN", "share": round(sh, 3),
@@ -2014,7 +2128,8 @@ def layers(filled, out_u8, info):
     """For the PSD: the filled body and the ink in sRGB, and an sRGB-space alpha that flattens to `out_u8` (the
     composite blends in linear light). -> (base, card, alpha)"""
     base = im.lin_to_srgb(np.clip(filled, 0, 1))
-    card = im.lin_to_srgb(np.clip(filled * info["k"], 0, 1))
+    card = im.lin_to_srgb(np.clip(info["ink_abs"], 0, 1) if info.get("ink_abs") is not None else
+                          np.clip(filled * info["k"], 0, 1))
     out = out_u8.astype(float) / 255.0
     lb, lc, lo = im.lum(base), im.lum(card), im.lum(out)
     pol = info.get("polarity")

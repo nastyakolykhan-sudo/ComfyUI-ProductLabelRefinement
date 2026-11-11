@@ -2269,6 +2269,8 @@ BAND_OVER_PRINT = {
     "line": 0.25,       # a strip is part of a line of print when it holds this share of the band's median strip's
                         # corrected print or more (the jar's glass base under its last line: 1-16 %, its lines 60-200 %)
     "gap": 8,           # px: a line starting this close past the band's end (or the last line) is carried too
+    "all_print": 0.6,   # under this share of the corrected print in the stretched band, the band takes every corrected
+                        # line (a printed sleeve: 0.45 in its base's band; a label's corrected lines lie in its band)
     "inset": 4,         # px: corrected print this far inside the matte (a limb's re-render isn't print)
     "trim": 4,          # px: the band stays this far inside the matte's ends
     "step": 20.0,       # levels: the room stops where the keyframe's body steps this far off the body under the last
@@ -2280,7 +2282,7 @@ BAND_OVER_PRINT = {
 }
 
 
-def band_over_print(band, changed, mask, kf, polarity, stroke, c=None, src=None):
+def band_over_print(band, changed, mask, kf, polarity, stroke, c=None, src=None, cover=None):
     """The measured band (the product profile's: the segment between a cap, collar or base step that carries the most
     print) stretched over the lines of print the keyframe corrected that run past it, plus `room` px, within the
     matte's ends (V54). Corrected print: the keyframe's changed px on its strokes or on its source frame's `src` (a
@@ -2350,6 +2352,8 @@ def band_over_print(band, changed, mask, kf, polarity, stroke, c=None, src=None)
         return band, None
     cen, ax, nrm = product_axis(mask)
     t = (np.c_[xs, ys] - cen) @ ax
+    if cover is not None:
+        cover["in_band"] = round(float(((t >= band[0]) & (t <= band[1])).mean()), 3)
     my, mx = np.nonzero(mask)
     tm = (np.c_[mx, my] - cen) @ ax
     st = float(c["strip"])
@@ -2410,9 +2414,21 @@ def band_over_print(band, changed, mask, kf, polarity, stroke, c=None, src=None)
         b0 = min(b0, max(int(np.floor(p0 - room(p0, -1))), int(np.ceil(tm.min())) + int(c["trim"])))
     if p1 > band[1]:
         b1 = max(b1, min(int(np.ceil(p1 + room(p1, 1))), int(np.floor(tm.max())) - int(c["trim"])))
+    allp = None
+    if float(((t >= b0) & (t <= b1)).mean()) < float(c["all_print"]) and dense.any():
+        # most of the corrected print lies off the band and its neighbouring lines (a body printed all over: a
+        # sleeve's corrected lines run up its shoulder, the profile's band was its base): every corrected line
+        allp = [float(lo_e[dense].min()), float(lo_e[dense].max() + st)]
+        b0 = min(b0, max(int(np.floor(allp[0] - room(allp[0], -1))), int(np.ceil(tm.min())) + int(c["trim"])))
+        b1 = max(b1, min(int(np.ceil(allp[1] + room(allp[1], 1))), int(np.floor(tm.max())) - int(c["trim"])))
+    if cover is not None:
+        # the review's `carried`: the share of the corrected print the rendered band holds
+        cover["in_band"] = round(float(((t >= b0) & (t <= b1)).mean()), 3)
     if [b0, b1] == [int(band[0]), int(band[1])]:
         return band, None
     share = float(((t >= band[0]) & (t <= band[1])).mean())
+    if allp is not None:
+        p0, p1 = min(p0, allp[0]), max(p1, allp[1])
     return [b0, b1], {"from": [int(band[0]), int(band[1])], "print": [round(float(p0), 1), round(float(p1), 1)],
                       "print_in_band": round(share, 3),
                       "room_px": [round(float(p0 - b0), 1), round(float(b1 - p1), 1)]}
@@ -2529,8 +2545,12 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
             if band:
                 # the label carries every line the keyframe corrected, with room for its end fade; the tube is still
                 # fitted on the profile's band (V54)
+                cov_ = {}
                 b2, over = band_over_print(band, changed, m, kf, polarity, stroke,
-                                           over_print if isinstance(over_print, dict) else None, src=frames[f])
+                                           over_print if isinstance(over_print, dict) else None, src=frames[f],
+                                           cover=cov_)
+                if "in_band" in cov_:
+                    d["band_carries"] = cov_["in_band"]
                 if over:
                     binfo["over_print"] = over
                     anc.setdefault("fit_band", list(band))
@@ -2642,6 +2662,11 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
         geometry = summary.pop("geometry", None)
         _apply_review(rows, rep, flags, summary)
         review = rep.get("review")
+        carries = [d_.get("band_carries") for d_ in decisions if isinstance(d_, dict) and d_.get("band_carries") is not None]
+        if review is not None and carries:
+            # the share of a keyframe's corrected print the rendered band holds, the lowest (V74: 0.45, the sleeve's
+            # shoulder left garbled): the pack's review name fails the clip under 0.9
+            review["carried"] = min(carries)
         if rows:
             plot = root / "label-qa.png"
             if not plot_qa(rows, rep, plot):

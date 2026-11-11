@@ -81,9 +81,9 @@ def draft(scene_u8, ref_u8, ref_a, quad=None, pairs=(), occluders=(), mask=None,
     if "auto" in (model, ink, print_box, bow):
         ink_auto = ink == "auto"
         try:
-            model, ink, print_box, bow, more = dc.resolve(scene_u8, mask, ref_u8, ref_a, outline, model, ink or "off",
-                                                          print_box, bow)
-            text = text or (ink_auto and dc.text_route(ink))
+            model, ink, print_box, bow, more, printed = dc.resolve(scene_u8, mask, ref_u8, ref_a, outline, model,
+                                                                   ink or "off", print_box, bow, with_printed=True)
+            text = text or (ink_auto and dc.text_route(ink, printed=printed))
             auto += more
             resolved = True
         except ValueError as e:
