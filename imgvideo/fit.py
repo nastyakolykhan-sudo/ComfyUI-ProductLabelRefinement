@@ -9,6 +9,8 @@ import numpy as np
 
 from imgpost import geometry as geo
 
+from .surface import Profile, with_camera
+
 
 def _rebuild_residual(state):
     obj = object.__new__(geo.Residual)
@@ -304,7 +306,7 @@ def fit_shot(base, H0, xy0, tracks, vis, wmin=0.5, reject=2.5, half=3, cuts=(), 
                 sc = np.trace(np.diag(Ds) @ Dm) / ((wt * (Xc ** 2).sum(1)).sum() / wt.sum())
                 M, tv = sc * Rm, my - sc * Rm @ mx
                 morph_source[t] = sm[t]            # where the source's own print is (render reads its light there)
-                sm[t] = type(Hi)(Hi.u0, Hi.Ru, Hi.R, Hi.k, M @ Hi.A, M @ Hi.a + tv)
+                sm[t] = with_camera(Hi, M @ Hi.A, M @ Hi.a + tv)
                 Cs[t] = geo.apply_H(sm[t], G)
     err = []
     for t in range(T):
@@ -345,7 +347,7 @@ def silhouette_snap(H, matte, v_range, step=24.0, max_px=30.0, inner=(-1.0, -0.6
     m = matte.astype(float)
     rows, eL, eR, geo_rows = [], [], [], []
     for v in np.arange(v_range[0], v_range[1] + 1e-6, step):
-        nd = np.sin(ths) * d[0] - Hb.k * d[1] + np.cos(ths) * d[2]
+        nd = Hb.grazing(ths, v, d) if isinstance(Hb, Profile) else np.sin(ths) * d[0] - Hb.k * d[1] + np.cos(ths) * d[2]
         i = np.nonzero(np.diff(np.sign(nd)))[0]
         if len(i) < 2:
             continue
@@ -701,14 +703,20 @@ def body_snapped(H, p, f, roll_deg, pivot, du=0.0):
     correction."""
     import copy
     from .surface import Tube
-    if hasattr(H, "base"):
+    if isinstance(H, geo.Residual):
         R = copy.copy(H)
         R.__dict__["base"] = body_snapped(H.base, p, f, roll_deg, pivot, du)
         return R
+    if not isinstance(H, Tube):
+        # a flat face (a homography: a numpy array, whose own .base is None, read as a wrapped mapping before):
+        # placed by its tracks, no tube to move along its axis
+        return H
     A = H.A.copy()
     a = H.a + H.A[:, 1] * p
     A[:, 1] = A[:, 1] * f
     c, s = np.cos(np.radians(roll_deg)), np.sin(np.radians(roll_deg))
     Rm = np.array([[c, -s], [s, c]])
     pv = np.asarray(pivot, float)
+    if isinstance(H, Profile):
+        return H.moved(du, p, f).with_camera(Rm @ A, Rm @ (a - pv) + pv)
     return Tube(H.u0 + du, H.Ru, H.R + H.k * p, H.k * f, Rm @ A, Rm @ (a - pv) + pv)

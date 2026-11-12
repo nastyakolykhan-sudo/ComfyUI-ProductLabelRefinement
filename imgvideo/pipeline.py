@@ -100,7 +100,8 @@ def pitched(H, sag, polygon, quiet=False):
     a = H.a - ax * sag
     if not quiet:
         print(f"pitched    the re-acquired tube toward the camera: {sag:+g} px of sag at the label's middle")
-    return Tube(H.u0, H.Ru, H.R, H.k, A, a)
+    from .surface import with_camera
+    return with_camera(H, A, a)
 
 
 def auto_pitch(H, label_img, polygon, frame, matte, rows=None):
@@ -208,7 +209,8 @@ class Job:
             if self.tube:                # label space: the keyframe unrolled onto the tube
                 self.label_img = im.load_u8(self.work / "label_texture.png")[0]
                 tb = self.kmeta["tube"]
-                self.ajob = {"align": {"model": "tube", "tube": {k: tb[k] for k in ("u0", "Ru", "R", "k")}},
+                self.ajob = {"align": {"model": "tube", "tube": {k: tb[k] for k in ("u0", "Ru", "R", "k", "prof")
+                                                                 if k in tb}},
                              "reference": str(self.work / "label_texture.png"),
                              "reference_outline": {"type": "polygon", "pts": self.kmeta["label_polygon"]}}
             else:                        # label space: the keyframe's own pixels
@@ -274,6 +276,8 @@ class Job:
                 "model": anc.get("model", "homography"), "theta_lim": anc.get("theta_lim", 75.0)}
         if anc.get("fit_band"):                  # (only when given: older jobs keep their cache)
             spec["fit_band"] = anc["fit_band"]
+        if anc.get("profile"):                   # (V76; only when on: older jobs keep their cache)
+            spec["profile"] = True
         if cache.exists():
             m = json.loads(cache.read_text())
             if m.get("spec") == spec:
@@ -290,8 +294,14 @@ class Job:
         if spec["model"] == "tube":
             from . import surface
             fb = anc.get("fit_band")
-            T, W, Hh, info = surface.from_keyframe(self.masks()[k - self.s0], fb or anc["band"], spec["theta_lim"])
-            if fb:
+            if spec.get("profile"):
+                # a body printed all over (V76): the surface follows the body's own outline over the whole band
+                T, W, Hh, info = surface.profile_from_keyframe(self.masks()[k - self.s0], fb or anc["band"], anc["band"],
+                                                               spec["theta_lim"])
+                info["fit_band"] = [int(x) for x in (fb or anc["band"])]
+            else:
+                T, W, Hh, info = surface.from_keyframe(self.masks()[k - self.s0], fb or anc["band"], spec["theta_lim"])
+            if fb and not spec.get("profile"):
                 # the tube fitted on the body's own band, the label over the whole anchor.band (V54): v = 0 at its start
                 T = rd.shift_ref(T, 0.0, float(anc["band"][0] - fb[0]))
                 Hh = int(np.ceil(anc["band"][1] - anc["band"][0])) + 1
@@ -301,9 +311,15 @@ class Job:
             Image.fromarray(surface.unroll_mask(self.masks()[k - self.s0], T, W, Hh).astype(np.uint8) * 255).save(
                 self.work / "label_valid.png")
             m.update(tube=T.to_json(), label_polygon=lpoly, tube_info=info)
-            print(f"unrolled   the keyframe onto a tube: radius {info['R0']} px, taper {info['taper']} px/px (half-width "
-                  f"misfit {info['fit_half_width_rms']} px), label {W} x {Hh} px, texture within {spec['theta_lim']} deg of "
-                  f"facing the camera")
+            if spec.get("profile"):
+                pf = info["profile"]
+                print(f"unrolled   the keyframe onto the body's own profile (V76): radius {pf['radius_px'][0]}-"
+                      f"{pf['radius_px'][1]} px, centre {pf['centre_px'][0]} to {pf['centre_px'][1]} px off the axis over "
+                      f"{pf['rows']} rows, label {W} x {Hh} px, texture within {spec['theta_lim']} deg of facing the camera")
+            else:
+                print(f"unrolled   the keyframe onto a tube: radius {info['R0']} px, taper {info['taper']} px/px (half-width "
+                      f"misfit {info['fit_half_width_rms']} px), label {W} x {Hh} px, texture within {spec['theta_lim']} deg of "
+                      f"facing the camera")
         cache.write_text(json.dumps(m))
         print(f"keyframe   {self.kf_path.name} is frame {k}" + (f" (mean |diff| outside the matte {d} levels; next best "
               f"frame {d2})" if d is not None else ""))
@@ -380,9 +396,8 @@ class Job:
         if self.H_reacq is not None:
             return self.H_reacq
         if self.tube:
-            from .surface import Tube
-            tb = self.kmeta["tube"]
-            return Tube(tb["u0"], tb["Ru"], tb["R"], tb["k"], tb["A"], tb["a"])
+            from .surface import tube_from
+            return tube_from(self.kmeta["tube"])
         return geo.fit(self.ajob["align"])[0]
 
     def base(self):
@@ -891,12 +906,12 @@ def _print_setup(J, C, fr, frames):
     re-acquired shot: its keyframe's frame is in another shot), the render's own print stands in (ink "render").
     -> (settings, ink label px N x 2 or None, report)"""
     rc = C["rc"]
-    if rc.get("polarity", "light") != "light":
+    if rc.get("polarity", "light") != "light" and pa.settings(rc.get("print_alpha"))["ink"] != "edit":
         raise ValueError(f"render.alpha \"print\" carries light print (white ink on a body) only for now; this job's "
                          f"print polarity is {rc.get('polarity')!r}")
     c = pa.settings(rc.get("print_alpha"))
     rep, pts = {"ink": c["ink"]}, None
-    if c["ink"] == "keyframe":
+    if c["ink"] in ("keyframe", "edit"):
         a = J.anchor - J.s0
         anc = J.v["anchor"]
         why = None
@@ -906,7 +921,8 @@ def _print_setup(J, C, fr, frames):
             why = f"the tracks don't hold the keyframe's frame {J.anchor}"
         else:
             H = _place(C, J, a)[0]
-            pts, n = pa.keyframe_ink(J.kf, fr[a], J.key(a, H), H, J.label_img.shape[:2], c)
+            read = pa.keyframe_edit if c["ink"] == "edit" else pa.keyframe_ink
+            pts, n = read(J.kf, fr[a], J.key(a, H), H, J.label_img.shape[:2], c)
             rep["ink_px"] = n
             if not n:
                 pts, why = None, "no ink found on the keyframe (ink_levels, ink_p90)"
@@ -1015,6 +1031,10 @@ def _render_one(C, J, t, frame, extras=None):
                                        if pr["pts"] is not None else None) if ch.any() else None
         if ch.any():
             ink = pa.ink_mask(H, pr["pts"], ch.shape) if pr["pts"] is not None else None
+            if pr.get("Hf") is not None:
+                # ink "edit" (V76): the keyframe's own pixels, sampled once through this frame's mapping and the
+                # keyframe frame's, under the render's light
+                out = pa.carry_keyframe(J.kf, out, ch, H, pr["Hf"])
             g, bl = float(ex.get("gain", 1.0)), ex.get("blur")
             out, pi = pa.composite(frame, out, ch, J.key(t, H), pr["c"], ink, gain=g, blur=bl)
             if ink is None:                  # (lost print is measured against the keyframe's own ink only)
@@ -1488,6 +1508,9 @@ def stage_render(J, rng=None, workers=None):
         # print-only compositing (V40): the keyframe's ink read once, here, after the body snap placed the keyframe frame
         pc, pts, print_rep = _print_setup(J, C, fr, V)
         rc["_print"] = C["print"] = {"c": pc, "pts": pts}
+        if pc["ink"] == "edit" and pts is not None:
+            # the keyframe frame's mapping: the edit carry samples the keyframe itself through it (V76)
+            C["print"]["Hf"] = _place(C, J, J.anchor - J.s0)[0]
         if rc.get("_sparkles_asked") is not None:
             print(f"print      the sparkle re-add asked for (render.sparkles {rc['_sparkles_asked']}) stays off with "
                   f"render.alpha \"print\": it ghosts the garbled print (V37); the source's glitter stays off the letters")
@@ -1887,6 +1910,11 @@ def _review(J, parts, ll_path, arrays=None):
                                                  shimmer_levels=float(cf["shimmer_levels"]),
                                                  shimmer_block=int(cf["shimmer_block"])))
             ctx[id(P)]["glitter"].exclude(glass)
+            if (rcv.get("print_alpha") or {}).get("ink") == "edit" and getattr(P, "kf", None) is not None:
+                # ink "edit" (V76): the keyframe carried onto each frame is the label's own print (review.doubled)
+                a_ = P.anchor - P.s0
+                if 0 <= a_ < len(res["smooth"]) and res["smooth"][a_] is not None:
+                    ctx[id(P)]["carried"] = (P.kf, maps.get(P.anchor, res["smooth"][a_]))
             ctx[id(P)]["body"] = _body_reference(P, ctx[id(P)], lambda T: src[T - lo] if lo <= T < hi else
                                                  P.media.frames(T, T + 1)[0])
             # the scene's orbit (V65), where the render measured it: the label's turn is judged against it
@@ -1942,7 +1970,8 @@ def _review(J, parts, ll_path, arrays=None):
                 LF[T] = {"looks": lk.frame_looks(src[i], out[i], m, chg, pol),
                          "ghost_px": c["rinfo"].get(str(T), {}).get("ghost_px"),
                          "double": rv.doubled(c["art"], out[i], src[i], m, Ho, pol, glass=c["glass"],
-                                              H_src=c["res"].get("morph_source", {}).get(t, H) if Ho is not H else None)}
+                                              H_src=c["res"].get("morph_source", {}).get(t, H) if Ho is not H else None,
+                                              carried=c.get("carried"))}
                 if i > 0 and owner.get(T - 1) is P and (T - 1) in LF:
                     lc = dict(lk.LOOKS, **(looks_cfg or {}))
                     LF[T - 1]["swim"] = lk.swim_pair(src[i - 1], src[i], out[i - 1], out[i], prev[1], m,
@@ -2282,6 +2311,11 @@ BAND_OVER_PRINT = {
 }
 
 
+# a body printed all over (V76): the clip carries its keyframe's whole edit, on the generated print's own place
+PRINTED_OFF = ("body_snap", "glue", "level", "limb_snap", "feather")
+PRINTED_ALPHA = {"ink": "edit", "presence": "off"}
+
+
 def band_over_print(band, changed, mask, kf, polarity, stroke, c=None, src=None, cover=None):
     """The measured band (the product profile's: the segment between a cap, collar or base step that carries the most
     print) stretched over the lines of print the keyframe corrected that run past it, plus `room` px, within the
@@ -2431,7 +2465,8 @@ def band_over_print(band, changed, mask, kf, polarity, stroke, c=None, src=None,
         p0, p1 = min(p0, allp[0]), max(p1, allp[1])
     return [b0, b1], {"from": [int(band[0]), int(band[1])], "print": [round(float(p0), 1), round(float(p1), 1)],
                       "print_in_band": round(share, 3),
-                      "room_px": [round(float(p0 - b0), 1), round(float(b1 - p1), 1)]}
+                      "room_px": [round(float(p0 - b0), 1), round(float(b1 - p1), 1)],
+                      **({"all_print": True} if allp is not None else {})}
 
 
 def _staged(J, stamps, k_track, k_fit, still_key, f, cfg):
@@ -2555,6 +2590,10 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
                     binfo["over_print"] = over
                     anc.setdefault("fit_band", list(band))
                     band = b2
+                    if over.get("all_print"):
+                        # a body printed all over (V76): its corrected lines run past the body's own band (a shoulder
+                        # narrower than the base): the surface follows the body's outline row by row
+                        anc.setdefault("profile", True)
         if not band:
             d["skipped"] = "no label band found on the keyframe (give anchor.band in settings)"
             continue
@@ -2590,6 +2629,16 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
             for k in ("limb_snap", "feather"):
                 vj["render"].pop(k, None)
             vj["fit"].pop("camera", None)
+        printed = bool(anchor.get("profile"))
+        if printed:
+            # a body printed all over (V76): its keyframe's whole edit is carried (render.print_alpha.ink "edit"), on
+            # the generated print's own place: the tracks follow it, and the label is that print, so nothing places
+            # it by the body (body_snap, glue, level, limb_snap) or fades it at its ends (feather)
+            for k in PRINTED_OFF:
+                vj["render"].pop(k, None)
+            vj["render"]["print_alpha"] = dict(vj["render"].get("print_alpha") or {}, **PRINTED_ALPHA)
+            d["printed_body"] = {"surface": "profile" if tube else anchor.get("model"), "print_alpha": PRINTED_ALPHA,
+                                 "off": list(PRINTED_OFF)}
         vj = _merge(vj, {k: cfg[k] for k in SETTINGS_SECTIONS if k in cfg})
         # what the measured job switched on that the settings don't name (logged by the render, in the report)
         dflt = defaults_on(vj["render"], cfg.get("render"), {"*": "the measured job", **{
@@ -2665,8 +2714,19 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
         carries = [d_.get("band_carries") for d_ in decisions if isinstance(d_, dict) and d_.get("band_carries") is not None]
         if review is not None and carries:
             # the share of a keyframe's corrected print the rendered band holds, the lowest (V74: 0.45, the sleeve's
-            # shoulder left garbled): the pack's review name fails the clip under 0.9
+            # shoulder left garbled): the pack's review name fails the clip under 0.6
             review["carried"] = min(carries)
+        from . import review as rv
+        kept = []
+        for J in jobs:
+            fk = J.anchor
+            if (J.v.get("render") or {}).get("print_alpha", {}).get("ink") == "edit" and owner.get(fk) is J:
+                # the keyframe's whole edit carried (V76): on its own frame the clip must deliver the keyframe
+                kv = rv.keyframe_kept(J.kf, frames[fk], out[fk], masks[fk])
+                if kv is not None:
+                    kept.append(kv)
+        if review is not None and kept:
+            review["kf_kept"] = min(kept)
         if rows:
             plot = root / "label-qa.png"
             if not plot_qa(rows, rep, plot):

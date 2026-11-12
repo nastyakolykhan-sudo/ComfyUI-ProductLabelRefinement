@@ -32,7 +32,9 @@ def shift_ref(H, ox, oy):
         R = copy.copy(H)
         R.__dict__["base"] = shift_ref(H.base, ox, oy)
         return R
-    from .surface import Tube
+    from .surface import Profile, Tube
+    if isinstance(H, Profile):
+        return H.moved(-ox, oy).with_camera(H.A, H.a + H.A[:, 1] * oy)
     if isinstance(H, Tube):
         return Tube(H.u0 - ox, H.Ru, H.R + H.k * oy, H.k, H.A, H.a + H.A[:, 1] * oy)
     if isinstance(H, geo.Cylinder):

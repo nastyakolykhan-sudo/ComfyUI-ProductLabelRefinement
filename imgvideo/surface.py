@@ -67,6 +67,106 @@ class Tube:
                 "a": self.a.round(6).tolist()}
 
 
+class Profile(Tube):
+    """A tube whose radius and axis follow the body's own outline row by row (V76): a printed body whose shoulder is
+    narrower than its base (a trigger spray), where one straight taper fitted on the base runs off the shoulder's
+    sides. Label px as the tube's; at row v the surface's centre sits c(v) px across the axis and its radius is r(v)
+    (tables `pv`, `pc`, `pr`, linear between rows, held past their ends). Surface point
+    P = (c(v) + r(v) sin theta, v, r(v) cos theta). R and k keep the straight taper fitted on the tables (reports)."""
+    def __init__(self, u0, Ru, R, k, A, a, pv, pc, pr):
+        super().__init__(u0, Ru, R, k, A, a)
+        self.pv, self.pc, self.pr = (np.asarray(x, float).ravel() for x in (pv, pc, pr))
+        self._dc, self._dr = np.gradient(self.pc, self.pv), np.gradient(self.pr, self.pv)
+
+    def rows(self, v):
+        """At rows v: (radius, centre, d radius / dv, d centre / dv)."""
+        v = np.asarray(v, float)
+        pv = self.pv
+        return (np.maximum(np.interp(v, pv, self.pr), 1e-6), np.interp(v, pv, self.pc),
+                np.interp(v, pv, self._dr, left=0.0, right=0.0), np.interp(v, pv, self._dc, left=0.0, right=0.0))
+
+    def surface(self, pts):
+        P = np.atleast_2d(np.asarray(pts, float))
+        th = (P[:, 0] - self.u0) / self.Ru
+        r, c = self.rows(P[:, 1])[:2]
+        return np.c_[c + r * np.sin(th), P[:, 1], r * np.cos(th)]
+
+    def inverse(self, x, y):
+        """Scene px -> label px and the rays that meet the front of the surface: the tube's quadratic at the row's own
+        radius, centre and slopes, three times over (the row the ray meets moves only with the camera's tilt)."""
+        shape = np.shape(x)
+        x, y = np.asarray(x, float).ravel(), np.asarray(y, float).ravel()
+        A = self.A
+        d = np.cross(A[0], A[1])
+        P0 = np.linalg.pinv(A) @ np.vstack([x - self.a[0], y - self.a[1]])
+        px, py, pz = P0
+        Y = py.copy()
+        for _ in range(3):
+            r0, c0, k, kc = self.rows(Y)
+            R = r0 - k * Y
+            qx, dx = px - (c0 - kc * Y) - kc * py, d[0] - kc * d[1]
+            qa = dx ** 2 + d[2] ** 2 - (k * d[1]) ** 2
+            qb = 2.0 * (qx * dx + pz * d[2] - k * d[1] * (R + k * py))
+            qc = qx ** 2 + pz ** 2 - (R + k * py) ** 2
+            disc = qb * qb - 4.0 * qa * qc
+            sq = np.sqrt(np.clip(disc, 0.0, None))
+            qa_ = np.where(np.abs(qa) < 1e-12, 1e-12, qa)
+            lam = (-qb + np.sign(qa_) * sq) / (2.0 * qa_)
+            Y = py + lam * d[1]
+        ok = disc >= 0.0
+        X, Z = px + lam * d[0], pz + lam * d[2]
+        r, c = self.rows(Y)[:2]
+        ok &= r > 1e-3
+        th = np.arctan2(X - c, Z)
+        u, v = self.u0 + self.Ru * th, Y
+        return u.reshape(shape), v.reshape(shape), ok.reshape(shape)
+
+    def grazing(self, ths, v, d):
+        """The surface's normal . the viewing ray at angles ths on row v (0 where the ray grazes: the limbs)."""
+        _, _, k, kc = (float(x) for x in self.rows(v))
+        return np.sin(ths) * d[0] - (kc * np.sin(ths) + k) * d[1] + np.cos(ths) * d[2]
+
+    def limb_points(self, side, v):
+        v = np.atleast_1d(np.asarray(v, float))
+        d = np.cross(self.A[0], self.A[1])
+        sgn = 1.0 if side == "right" else -1.0
+        out = []
+        for vv in v:
+            ths = np.linspace(-np.pi, np.pi, 721)
+            i = np.nonzero(np.diff(np.sign(self.grazing(ths, vv, d))))[0]
+            cand = ths[i] if len(i) else np.array([sgn * np.pi / 2])
+            th = cand[np.argmax(sgn * np.sin(cand))]
+            out.append(self.forward([[self.u0 + self.Ru * th, vv]])[0])
+        return np.array(out)
+
+    def with_camera(self, A, a):
+        return Profile(self.u0, self.Ru, self.R, self.k, A, a, self.pv, self.pc, self.pr)
+
+    def moved(self, du, p, f=1.0):
+        """The same surface with label px (u, v) -> (u + du, p + f v): rows re-indexed, camera unchanged."""
+        return Profile(self.u0 + du, self.Ru, self.R + self.k * p, self.k * f, self.A, self.a, (self.pv - p) / f,
+                       self.pc, self.pr)
+
+    def to_json(self):
+        return dict(super().to_json(), prof={"v": self.pv.round(3).tolist(), "c": self.pc.round(3).tolist(),
+                                             "r": self.pr.round(3).tolist()})
+
+
+def tube_from(t, A=None, a=None):
+    """A Tube or a Profile from its json (or a fit spec's "tube"), with the camera given or its own."""
+    A = t.get("A", np.zeros((2, 3))) if A is None else A
+    a = t.get("a", np.zeros(2)) if a is None else a
+    if t.get("prof"):
+        p = t["prof"]
+        return Profile(t["u0"], t["Ru"], t["R"], t["k"], A, a, p["v"], p["c"], p["r"])
+    return Tube(t["u0"], t["Ru"], t["R"], t["k"], A, a)
+
+
+def with_camera(T, A, a):
+    """T with another camera (A, a): a Profile keeps its rows."""
+    return T.with_camera(A, a) if isinstance(T, Profile) else Tube(T.u0, T.Ru, T.R, T.k, A, a)
+
+
 def fit(spec):
     """geometry.fit for model "tube": spec["tube"] = {"u0", "Ru", "R", "k"}, spec["points"] with "ref" (label px), "scene",
     optional "w". Weighted linear least squares for (A, a). -> (Tube, report)"""
@@ -75,7 +175,7 @@ def fit(spec):
     uv = np.array([p["ref"] for p in P], float)
     xy = np.array([p["scene"] for p in P], float)
     w = np.sqrt(np.array([p.get("w", 1.0) for p in P], float))[:, None]
-    T = Tube(tb["u0"], tb["Ru"], tb["R"], tb["k"], np.zeros((2, 3)), np.zeros(2))
+    T = tube_from(tb, np.zeros((2, 3)), np.zeros(2))
     P3 = T.surface(uv)
     S = np.c_[P3, np.ones(len(uv))]
     M = np.linalg.lstsq(S * w, xy * w, rcond=None)[0]            # 4 x 2: the affine camera, a start
@@ -135,6 +235,39 @@ def from_keyframe(mask, t_range, theta_lim=75.0, step=4.0):
             "fit_half_width_rms": round(float(np.sqrt(np.mean((half - (R0 + k * v)) ** 2))), 2),
             "axis": ax2.round(5).tolist(), "origin": origin.round(2).tolist()}
     return T, W, Hh, info
+
+
+def profile_from_keyframe(mask, fit_range, band_range, theta_lim=75.0, step=2.0, smooth=2.0):
+    """The Profile as the keyframe shows it (V76): the axis as from_keyframe fits it on the body's own band
+    (fit_range), the label over band_range (v = 0 at its start), and at every row of the band the matte's own middle
+    and half-width as the surface's centre and radius (a running median over 5 rows, then a Gaussian of `smooth`
+    rows). -> (Profile in label px, label width, label height, info)"""
+    from scipy.ndimage import gaussian_filter1d, median_filter
+    T, _, _, info = from_keyframe(mask, fit_range, theta_lim)
+    dv = float(band_range[0] - fit_range[0])
+    ax, n = T.A[:, 1].copy(), T.A[:, 0].copy()
+    origin = T.a + ax * dv                                      # v = 0 at the band's start
+    Hh = int(np.ceil(band_range[1] - band_range[0])) + 1
+    ys, xs = np.nonzero(mask)
+    Pm = np.c_[xs, ys].astype(float) - origin
+    Y, X = Pm @ ax, Pm @ n
+    rows = []
+    for vv in np.arange(0.0, Hh - 1 + 1e-6, step):
+        sel = np.abs(Y - vv) < 1.0
+        if sel.sum() >= 2:
+            rows.append((vv, X[sel].min(), X[sel].max()))
+    rows = np.array(rows)
+    pv = rows[:, 0]
+    mid = gaussian_filter1d(median_filter(0.5 * (rows[:, 1] + rows[:, 2]), 5, mode="nearest"), smooth, mode="nearest")
+    half = gaussian_filter1d(median_filter(0.5 * (rows[:, 2] - rows[:, 1]), 5, mode="nearest"), smooth, mode="nearest")
+    Ru = float(half.max())
+    W = int(np.ceil(np.pi * Ru)) + 1
+    k, R0 = np.polyfit(pv, half, 1)
+    P = Profile(0.5 * (W - 1), Ru, R0, k, np.c_[n, ax, np.zeros(2)], origin, pv, mid, half)
+    info = dict(info, R0=round(Ru, 2), taper=round(float(k), 5), profile={
+        "rows": int(len(pv)), "radius_px": [round(float(half.min()), 1), round(float(half.max()), 1)],
+        "centre_px": [round(float(mid.min()), 1), round(float(mid.max()), 1)]})
+    return P, W, Hh, info
 
 
 def unroll(key_u8, T, W, Hh, theta_lim):
