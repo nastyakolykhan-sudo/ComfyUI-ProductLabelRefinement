@@ -22,6 +22,10 @@ The render's top-hat misses faint ink (a pale copy in shade, a frame the generat
 light can't come through as print. ink "render": the render's top-hat 15 at 0.03, 3+ px inside the change and 6+
 levels over the source (the first real run's frosted bottle).
 Light print on a body only (white ink): a dark print needs the top-hats and gains turned round.
+ink "edit" (a body printed all over, V76): the keyframe's whole edit is the print, any colour or polarity: where the
+keyframe differs from its source frame by edit_levels+ (components rising ink_p90+ somewhere), edit_inset px inside the
+matte, in label space, dilated 2 px; per frame alpha = smooth(dilate(that, grow)) and the target is the render's own
+pixels (the keyframe relit onto the frame), line-blurred along the label's motion where the source is.
 
 Ported from the first real run's job script (ink_alpha.py, 2026-10-17), step for step: on the same render it gives
 the same pixels."""
@@ -32,7 +36,10 @@ from scipy.ndimage import binary_dilation, distance_transform_edt, gaussian_filt
 from imgpost import geometry as geo
 
 DEFAULTS = {
-    "ink": "keyframe",      # the new print: the keyframe's own ink ("keyframe") or the render's top-hat ("render")
+    "ink": "keyframe",      # the new print: the keyframe's own ink ("keyframe"), the render's top-hat ("render") or the
+                            # keyframe's whole edit ("edit": a body printed all over, V76)
+    "edit_levels": 4.0,     # levels (ink "edit"): the keyframe this far from its source frame (any channel) is edit
+    "edit_inset": 2.0,      # px (ink "edit"): edits this far inside the keyframe frame's matte
     "carry": True,          # the target: the print carried onto the source's body (false: the render's pixels)
     "grow": 3,              # px the print is dilated by
     "sigma": 1.5,           # px the alpha is smoothed by
@@ -62,8 +69,8 @@ DEFAULTS = {
 def settings(spec):
     """render.print_alpha merged over DEFAULTS."""
     c = dict(DEFAULTS, **(spec or {}))
-    if c["ink"] not in ("keyframe", "render"):
-        raise ValueError(f"render.print_alpha.ink {c['ink']!r}: \"keyframe\" or \"render\"")
+    if c["ink"] not in ("keyframe", "render", "edit"):
+        raise ValueError(f"render.print_alpha.ink {c['ink']!r}: \"keyframe\", \"render\" or \"edit\"")
     if c["presence"] not in ("off", "match"):
         raise ValueError(f"render.print_alpha.presence {c['presence']!r}: \"off\" or \"match\"")
     return c
@@ -110,6 +117,28 @@ def keyframe_ink(kf_u8, src_u8, matte, H, label_shape, c):
     if n:
         p90 = np.array([np.percentile(gain[lab == i], 90) for i in range(1, n + 1)])
         added = np.isin(lab, 1 + np.nonzero(p90 >= float(c["ink_p90"]))[0])
+    ink = binary_dilation(added, iterations=2)
+    return g[ink.ravel()], int(ink.sum())
+
+
+def keyframe_edit(kf_u8, src_u8, matte, H, label_shape, c):
+    """ink "edit" (V76): the keyframe's whole edit in label space: (N x 2 label px, their count). Where the keyframe
+    differs from its source frame by edit_levels or more in any channel, edit_inset px inside the matte, in components
+    whose 90th-percentile change is ink_p90 or more (a decode's few levels at a strong edge are not an edit), dilated
+    2 px. Arguments as keyframe_ink's."""
+    from scipy.ndimage import map_coordinates
+    h, w = label_shape
+    g = np.stack(np.meshgrid(np.arange(float(w)), np.arange(float(h))), -1).reshape(-1, 2)
+    p = geo.apply_H(H, g)
+    D = gaussian_filter(np.abs(kf_u8.astype(np.float32) - src_u8.astype(np.float32)).max(-1), 0.7)
+    inside = distance_transform_edt(matte) > float(c["edit_inset"]) if matte is not None else np.ones(D.shape, bool)
+    smp = lambda I, o=1: map_coordinates(I, [p[:, 1], p[:, 0]], order=o, mode="constant")
+    gain = smp(D).reshape(h, w)
+    added = (gain > float(c["edit_levels"])) & (smp(inside.astype(np.float32), 0) > 0.5).reshape(h, w)
+    lab, n = ndi.label(added, np.ones((3, 3)))
+    if n:
+        p90 = ndi.labeled_comprehension(gain, lab, np.arange(1, n + 1), lambda x: np.percentile(x, 90), float, 0.0)
+        added = np.isin(lab, 1 + np.nonzero(np.asarray(p90) >= float(c["ink_p90"]))[0])
     ink = binary_dilation(added, iterations=2)
     return g[ink.ravel()], int(ink.sum())
 
@@ -277,6 +306,59 @@ def motion_blur(v, sharp, c):
     return (v / max(sp, 1e-6), L) if L >= 1.0 and sp >= float(c["min_speed"]) else None
 
 
+def keyframe_on(kf_u8, H, Hf, box):
+    """The keyframe carried onto a frame, read once: each px of box (y0, y1, x0, x1) through H (this frame's mapping)
+    back to label px, then through Hf onto the keyframe's frame, sampled there (cubic). -> (float32 h x w x 3, the
+    px whose ray meets the surface)"""
+    from scipy.ndimage import map_coordinates
+    y0, y1, x0, x1 = box
+    Y, X = np.mgrid[y0:y1, x0:x1].astype(float)
+    if hasattr(H, "inverse"):
+        u, v, ok = H.inverse(X, Y)
+        ok = np.ones(X.shape, bool) if ok is None else np.asarray(ok, bool).reshape(X.shape)
+    else:
+        q = np.c_[X.ravel(), Y.ravel(), np.ones(X.size)] @ np.linalg.inv(H).T
+        u, v, ok = (q[:, 0] / q[:, 2]).reshape(X.shape), (q[:, 1] / q[:, 2]).reshape(X.shape), np.ones(X.shape, bool)
+    p = geo.apply_H(Hf, np.c_[np.nan_to_num(u).ravel(), np.nan_to_num(v).ravel()])
+    kw = np.stack([map_coordinates(kf_u8[..., c].astype(np.float32), [p[:, 1], p[:, 0]], order=3, mode="nearest")
+                   for c in range(3)], -1).reshape(*X.shape, 3)
+    return kw, ok
+
+
+def carry_keyframe(kf_u8, ref, ch, H, Hf, sigma=3.0):
+    """ink "edit" (V76): the render's pixels inside its change replaced by the keyframe's own, read once: each frame
+    px through H back to label px, through Hf onto the keyframe's frame (the render reads a texture unrolled from the
+    keyframe, prefiltered and supersampled: on the keyframe's own frame its letters came out 6-14 levels soft at their
+    edges), plus the render's own light against the keyframe's (both low-passed by sigma px inside the change).
+    -> the render with those px replaced (uint8)"""
+    y0, y1, x0, x1 = _crop(ch)
+    kw, ok = keyframe_on(kf_u8, H, Hf, (y0, y1, x0, x1))
+    m = ch[y0:y1, x0:x1] & ok
+    r = ref[y0:y1, x0:x1].astype(np.float32)
+    den = np.maximum(gaussian_filter(m.astype(np.float32), sigma), 1e-3)
+    light = np.stack([gaussian_filter(np.where(m, r[..., c] - kw[..., c], 0.0), sigma) / den for c in range(3)], -1)
+    out = ref.copy()
+    out[y0:y1, x0:x1] = np.where(m[..., None], np.clip(kw + light + 0.5, 0, 255), r).astype(np.uint8)
+    return out
+
+
+def _composite_edit(src, s, r, chc, ed, box, c, blur):
+    """ink "edit": the render's own pixels over the keyframe's edit carried onto this frame (V76)."""
+    extra = int(np.ceil(0.5 * blur[1])) if blur is not None else 0
+    reg = binary_dilation(ed, iterations=int(c["grow"]) + extra) & chc
+    a = np.clip(gaussian_filter(reg.astype(np.float32), float(c["sigma"])) * 1.5, 0, 1) * chc
+    tgt = r.astype(np.float32)
+    if blur is not None:                            # motion blur along the label's own motion (shutter x speed)
+        from .optics import line_blur
+        tgt = line_blur(tgt, *blur)
+    o = np.clip(s * (1 - a[..., None]) + tgt * a[..., None] + 0.5, 0, 255).astype(np.uint8)
+    out = src.copy()
+    y0, y1, x0, x1 = box
+    out[y0:y1, x0:x1] = o
+    return out, {"alpha_px": int((a > 0.02).sum()), "print_px": int((ed & chc).sum()), "lost_print_px": 0,
+                 "ink_px": int((ed & chc).sum())}
+
+
 def composite(src, ref, ch, key, c, ink=None, gain=1.0, blur=None):
     """One frame. src: the source frame; ref: the render (uint8, full frames); ch: the render's changed pixels; key: the
     product's matte (bool); ink: the keyframe's ink on this frame (ink_mask) or None (the render's top-hat); gain: the
@@ -284,6 +366,8 @@ def composite(src, ref, ch, key, c, ink=None, gain=1.0, blur=None):
     {"alpha_px", "print_px", "lost_print_px", "ink_px"})"""
     y0, y1, x0, x1 = _crop(ch)
     s, r, chc = src[y0:y1, x0:x1], ref[y0:y1, x0:x1], ch[y0:y1, x0:x1]
+    if c["ink"] == "edit" and ink is not None:
+        return _composite_edit(src, s, r, chc, ink[y0:y1, x0:x1], (y0, y1, x0, x1), c, blur)
     Ls, Lr = lin_lum(s), lin_lum(r)
     old = (Ls - grey_opening(Ls, size=(7, 7))) > float(c["thresh"])
     new, rim, differs = _new_print(s, r, chc, key[y0:y1, x0:x1], c, None if ink is None else ink[y0:y1, x0:x1])

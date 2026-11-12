@@ -736,6 +736,8 @@ class ProductLabelReviewName:
     SHARE = 0.5                  # a check over more than this share of the refined frames
     WRONG = ("double", "ghost")  # the print wrong on the frame (doubled, the old print through it): over SHARE, FAIL
     CARRIED = 0.6                # under this share of the keyframe's corrected print in the rendered band: FAIL (V74)
+    KF_KEPT = 0.9                # under this share of the keyframe's edit delivered on its own frame (the edit carry,
+                                 # V76: a surface short of a shoulder left its line ends garbled; carried 0.97): FAIL
     HELD = ("slide", "creep", "fade")   # the label off the print it lies on, held (the check's own run), creeping on
                                         # a still product (V71: the user saw 0.6 px over a still shot), or fading over
                                         # the old print where the product leaves right after (V72): any, FAIL
@@ -781,6 +783,10 @@ class ProductLabelReviewName:
             # frame (V74: a sleeve's band was its base, 0.45)
             reasons.append(f"carried: the clip renders {100 * float(rv['carried']):.0f} % of the keyframe's corrected "
                            "print (the rest of its lines stay garbled)")
+        if rv.get("kf_kept") is not None and float(rv["kf_kept"]) < cls.KF_KEPT:
+            # the keyframe's whole edit carried (V76): on the keyframe's own frame the clip must deliver the keyframe
+            reasons.append(f"kf_kept: on the keyframe's own frame the clip delivers {100 * float(rv['kf_kept']):.0f} % "
+                           "of the keyframe's edit (the rest keeps the source)")
         f = int(rv.get("flagged") or 0)
         if reasons:
             return "FAIL", reasons, per
@@ -806,8 +812,10 @@ class ProductLabelReviewName:
             with open(path, "w") as fh:
                 json.dump({"verdict": v, "reasons": reasons, "refined": n, "flagged": f, "checks": rv.get("checks") or {},
                            "frames_per_check": {k: len(x) for k, x in sorted(per.items())},
+                           **{k: rv[k] for k in ("carried", "kf_kept") if rv.get(k) is not None},
                            "rule": {"FAIL": f"{'/'.join(self.WRONG)} on more than {self.SHARE:.0%} of the refined "
-                                            f"frames, or any {'/'.join(self.HELD)}",
+                                            f"frames, or any {'/'.join(self.HELD)}, or carried under "
+                                            f"{self.CARRIED:g}, or kf_kept under {self.KF_KEPT:g}",
                                     "CHECK": f"any checks on more than {self.SHARE:.0%} of the refined frames"}},
                           fh, indent=2)
             ui["files"] = [{"filename": fname, "subfolder": sub, "type": "output"}]

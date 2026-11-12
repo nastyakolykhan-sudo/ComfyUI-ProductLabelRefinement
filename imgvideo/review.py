@@ -38,6 +38,7 @@ from imgpost import images as im
 
 from . import fit as vf
 from . import labelspace as ls
+from .surface import Profile
 
 # defaults, calibrated on the example rounds (override per job with vjob "review": {...})
 DEFAULTS = {
@@ -225,7 +226,7 @@ def limb_rows(H, matte, v_range, step=24.0, reach=60.0):
     m = matte.astype(np.float32)
     out = []
     for v in np.arange(v_range[0], v_range[1] + 1e-6, step):
-        nd = np.sin(ths) * d[0] - Hb.k * d[1] + np.cos(ths) * d[2]
+        nd = Hb.grazing(ths, v, d) if isinstance(Hb, Profile) else np.sin(ths) * d[0] - Hb.k * d[1] + np.cos(ths) * d[2]
         i = np.nonzero(np.diff(np.sign(nd)))[0]
         if len(i) < 2:
             continue
@@ -425,8 +426,26 @@ class Ghost:
         return {"blocks": int(len(pc)), "pc": round(float(np.median(pc)), 3), "cluster": cl}
 
 
+def keyframe_kept(kf_u8, src_u8, out_u8, matte, levels=4.0, p90=8.0, inset=2.0, off=12.0):
+    """The keyframe's edit as the clip delivers it on the keyframe's own frame (V76): the share of the edit's px
+    (the keyframe off its source frame by `levels`+ in any channel, `inset` px inside the matte, in components rising
+    `p90`+ somewhere: printalpha.keyframe_edit's reading) where the output is within `off` levels of the keyframe. On
+    a sleeve whose surface stopped short of its shoulder the right-hand line ends kept the source there. -> share or
+    None (under 200 edit px)"""
+    D = gaussian_filter(np.abs(kf_u8.astype(np.float32) - src_u8.astype(np.float32)).max(-1), 0.7)
+    E = (D > levels) & (distance_transform_edt(matte) > inset)
+    lab, n = ndi.label(E, np.ones((3, 3)))
+    if n:
+        q = ndi.labeled_comprehension(D, lab, np.arange(1, n + 1), lambda x: np.percentile(x, 90), float, 0.0)
+        E = np.isin(lab, 1 + np.nonzero(np.asarray(q) >= p90)[0])
+    if E.sum() < 200:
+        return None
+    miss = gaussian_filter(np.abs(out_u8.astype(np.float32) - kf_u8.astype(np.float32)).max(-1), 0.7) > off
+    return round(1.0 - float((miss & E).sum()) / float(E.sum()), 4)
+
+
 def doubled(art, out_u8, src_u8, matte, H, polarity="light", clear=2, edge=4, tophat=15, thresh=0.03, piece=3, ends=32,
-            reach=10, tile=48, match=0.4, ink=0.25, glass=None, keep=False, H_src=None):
+            reach=10, tile=48, match=0.4, ink=0.25, glass=None, keep=False, H_src=None, carried=None):
     """The source's own print beside the label's (V54): the generator's lines drift against the tracked label, so
     wherever the label lets the source through over print (its end fade, a band that ends on a line) the frame's own
     line shows a few px off the label's: the one workflow's jar, its second-last line doubled at its band's
@@ -442,6 +461,12 @@ def doubled(art, out_u8, src_u8, matte, H, polarity="light", clear=2, edge=4, to
     except the frame's print where the tracking puts the label's (H_src, when the render placed the label elsewhere:
     render.body_snap.turn holds it off the generator's print, V59), off the label's own strokes: the generator's line
     left showing beside the label's ("glass_line_px", counted in "px").
+    carried (ink "edit", V76: the keyframe's whole edit carried; (keyframe u8, the keyframe frame's mapping)): the
+    output is the source wherever the edit isn't, so a doubled line is old print the output shows as the source's
+    (within 2 levels) within `reach` px of what the clip changed, that the keyframe, carried onto this frame through
+    H, doesn't have within `clear` px. Read against the unrolled texture instead, the sleeve's kept graphics (a
+    wordmark's edges, glints the generator redraws every frame) read as the label's print moved on 60 of 104 clean
+    frames.
     -> {"px", "at": [y, x] of the largest piece, "v": [label rows it spans], "by_end":
     px within `ends` rows of the label's top, its bottom, or inside, "band_v": [the label's rows]} or None (keep: plus
     "mask": (roi, the px), for a look)"""
@@ -477,6 +502,14 @@ def doubled(art, out_u8, src_u8, matte, H, polarity="light", clear=2, edge=4, to
         own |= prt(im.lum(wp.warp(art.texture, Hl, roi, art.refmask, ss=2, prefilter=0)[0]))
     d_src, d_out = depth(lin_lum(src_u8[y0:y1, x0:x1])), depth(lin_lum(out_u8[y0:y1, x0:x1]))
     sp = d_src > thresh
+    if carried is not None:
+        from .printalpha import keyframe_on
+        kw, ok_ = keyframe_on(carried[0], H, carried[1], (y0, y1, x0, x1))
+        own = prt(lin_lum(np.clip(kw + 0.5, 0, 255).astype(np.uint8))) | ~ok_
+        dif = np.abs(out_u8[y0:y1, x0:x1].astype(np.int16) - src_u8[y0:y1, x0:x1].astype(np.int16)).max(-1)
+        # beside the new print: within `reach` px of what the clip changed (the generator redraws its own kept
+        # graphics a little every frame: a wordmark's edge, a glint, far from any new line, isn't a doubled line)
+        sp &= (dif <= 2) & binary_dilation(dif > 2, iterations=reach)
     cand = (d_out > thresh) & sp & lab & ~binary_dilation(own, iterations=clear)
     # the source's print as the label's own print moved, tile by tile round the candidates
     h, w = cand.shape
