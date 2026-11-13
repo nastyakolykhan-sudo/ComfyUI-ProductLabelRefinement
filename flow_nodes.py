@@ -738,9 +738,10 @@ class ProductLabelReviewName:
     CARRIED = 0.6                # under this share of the keyframe's corrected print in the rendered band: FAIL (V74)
     KF_KEPT = 0.9                # under this share of the keyframe's edit delivered on its own frame (the edit carry,
                                  # V76: a surface short of a shoulder left its line ends garbled; carried 0.97): FAIL
-    HELD = ("slide", "creep", "fade")   # the label off the print it lies on, held (the check's own run), creeping on
+    HELD = ("slide", "creep", "fade", "lock")   # the label off the print it lies on, held (the check's own run), creeping on
                                         # a still product (V71: the user saw 0.6 px over a still shot), or fading over
-                                        # the old print where the product leaves right after (V72): any, FAIL
+                                        # the old print where the product leaves right after (V72), or (the edit
+                                        # carry) the new print drifting against the generated print (V77): any, FAIL
 
     @classmethod
     def INPUT_TYPES(cls):

@@ -1034,7 +1034,11 @@ def _render_one(C, J, t, frame, extras=None):
             if pr.get("Hf") is not None:
                 # ink "edit" (V76): the keyframe's own pixels, sampled once through this frame's mapping and the
                 # keyframe frame's, under the render's light
-                out = pa.carry_keyframe(J.kf, out, ch, H, pr["Hf"])
+                lk_on = bool(pr["c"].get("lock", True))
+                out, lock_ = pa.carry_keyframe(J.kf, out, ch, H, pr["Hf"], src=frame if lk_on else None, ink=ink,
+                                               inside=J.key(t, H), c=pr["c"])
+                if lock_:
+                    info["print_lock"] = lock_
             g, bl = float(ex.get("gain", 1.0)), ex.get("blur")
             out, pi = pa.composite(frame, out, ch, J.key(t, H), pr["c"], ink, gain=g, blur=bl)
             if ink is None:                  # (lost print is measured against the keyframe's own ink only)
@@ -1915,6 +1919,7 @@ def _review(J, parts, ll_path, arrays=None):
                 a_ = P.anchor - P.s0
                 if 0 <= a_ < len(res["smooth"]) and res["smooth"][a_] is not None:
                     ctx[id(P)]["carried"] = (P.kf, maps.get(P.anchor, res["smooth"][a_]))
+                    ctx[id(P)]["lock"] = bool((rcv.get("print_alpha") or {}).get("lock", True))
             ctx[id(P)]["body"] = _body_reference(P, ctx[id(P)], lambda T: src[T - lo] if lo <= T < hi else
                                                  P.media.frames(T, T + 1)[0])
             # the scene's orbit (V65), where the render measured it: the label's turn is judged against it
@@ -1977,6 +1982,9 @@ def _review(J, parts, ll_path, arrays=None):
                     LF[T - 1]["swim"] = lk.swim_pair(src[i - 1], src[i], out[i - 1], out[i], prev[1], m,
                                                      np.any(out[i - 1] != src[i - 1], axis=-1), lc["still_px"],
                                                      int(lc["swim_search"]))
+                    if c.get("carried") is not None and c.get("lock", True):
+                        # the edit carry (V77): each new line's motion against the kept print round it
+                        LF[T - 1]["lock"] = lk.lock_pair(src[i - 1], src[i], out[i - 1], out[i])
             Q = owner.get(T - 1)
             if i > 0 and Q is not None and Q is not P and context(Q)["shot"] != c["shot"] and \
                     np.allclose(context(Q)["outline"], c["outline"]):
