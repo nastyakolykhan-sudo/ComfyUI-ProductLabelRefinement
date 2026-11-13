@@ -444,6 +444,25 @@ def keyframe_kept(kf_u8, src_u8, out_u8, matte, levels=4.0, p90=8.0, inset=2.0, 
     return round(1.0 - float((miss & E).sum()) / float(E.sum()), 4)
 
 
+def keyframe_old_left(kf_u8, src_u8, matte, size=15, edit=4.0, reach=12, inset=6, stroke=0.06, lit=0.015):
+    """The old light print a keyframe left round its new print (V79): carried onto every frame, it shows under the new
+    letters on all of them (a coloured pump's blurred wordmark, filled through an opening narrower than its strokes,
+    glowed as soft boxes round each new letter). Over the keyframe's edit grown `reach` px, `inset` px inside the
+    matte, off its strokes (`stroke` linear above the body, grown 2 px): the share of px still `lit` linear above the
+    body, the body a `size` px grey opening (wider than the old print's strokes: pipeline.body_open), smoothed.
+    Measured: the rejected keyframe 0.346, the same fixed 0.088; approved ones 0.041, 0.111, a printed sleeve's 0.139.
+    -> share, or None (under 500 px to read)"""
+    L = lin_lum(kf_u8)
+    inner = binary_erosion(matte, iterations=inset)
+    body = gaussian_filter(ndi.grey_opening(np.where(inner, L, 1.0), size=(size, size)), size / 3)
+    R = (L - body) * inner
+    zone = binary_dilation(np.abs(kf_u8.astype(np.int16) - src_u8.astype(np.int16)).max(-1) > edit, iterations=reach) & \
+        inner & ~binary_dilation(R > stroke, iterations=2)
+    if zone.sum() < 500:
+        return None
+    return round(float((R[zone] > lit).mean()), 4)
+
+
 def doubled(art, out_u8, src_u8, matte, H, polarity="light", clear=2, edge=4, tophat=15, thresh=0.03, piece=3, ends=32,
             reach=10, tile=48, match=0.4, ink=0.25, glass=None, keep=False, H_src=None, carried=None):
     """The source's own print beside the label's (V54): the generator's lines drift against the tracked label, so

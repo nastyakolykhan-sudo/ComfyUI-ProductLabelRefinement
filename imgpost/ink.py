@@ -33,6 +33,9 @@ DEFAULTS = {
     "gen_inset": 4,       # scene px: ... and this far inside the matte (with gen_near)
     "gen_dilate": 2,      # scene px: the fill reaches this far past the garbled print
     "gen_glow": None,     # scene px (light print): the fill also takes the garbled strokes' soft glow this far out
+    "frame_open_wide": False,  # (light print, not text) the frame's opening widened to 1.5 x its widest garbled stroke
+                               # where that is over WIDE_FROM x frame_open (an opening narrower than a stroke reads its
+                               # middle as body), the glow and the garbled print's reach grown by the stroke
     "glow_thresh": 0.008,  # linear luminance above the body light (off every light stroke) that counts as glow
     "ink_pct": 90,        # percentile of frame / body over the garbled print's core that sets the ink's colour
     "seed": 7,            # the grain over the fill
@@ -70,7 +73,10 @@ DARK = dict(DEFAULTS, frame_open="auto", gen_rel=0.15, gen_grow=True, register=T
 # showed beside it on every frame. It is registered onto the generated print as dark print is (scaled along and across
 # the body's axis only); a print already on it moves by the registration's own residual. A generated frame's light print
 # fades into its body over several px (pitfall 108): the fill also takes that glow
-LIGHT = dict(DEFAULTS, register=True, reg_model="scale", gen_glow=6)
+LIGHT = dict(DEFAULTS, register=True, reg_model="scale", gen_glow=6, frame_open_wide=True)
+WIDE_FROM = 2.0        # frame_open_wide: only where the widest garbled stroke is over this many times frame_open (a coloured
+                       # pump's blurred wordmark 23.3 px; the approved frosted tube 10, pump under 5: their fills unchanged)
+DARK_RIM = 0.03        # frame_open_wide: px this share below the body light within the glow's reach are the old strokes' rims
 POLARITIES = ("light", "dark")
 TEXT_ASPECT = 0.03     # text only: the registration's scales at most this share apart (reg_aspect)
 
@@ -1034,6 +1040,7 @@ def _garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=Non
         zone = work & ndi.binary_dilation(cover > 0.1, iterations=int(cfg["gen_near"])) & \
             ndi.binary_erosion(M, iterations=int(cfg["gen_inset"]))
     rep = {}
+    glow_wide = 0
     so = cfg["frame_open"]
     if so == "auto":
         # wider than the frame's widest garbled stroke: a closing narrower than a stroke leaves its middle as body
@@ -1045,6 +1052,26 @@ def _garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=Non
         so, widest = max(_widest(_tophat(ch, M, big, dark)[0] * zone, zone, big) for ch in chans)
         rep["frame_open_auto"] = {"size": so, "widest_stroke_px": round(widest, 1)}
     so = int(so)
+    if not dark and text is None and cfg.get("frame_open_wide") and "frame_open_auto" not in rep:
+        # light print with garbled strokes wider than the opening (a blurred wordmark 8 px wide and more on a coloured
+        # body): an opening narrower than a stroke reads its middle as body, and most of the old letter stayed under
+        # the new (pitfall 117)
+        xs = np.nonzero(M.any(0))[0]
+        big = int(max(15, (xs.max() - xs.min()) // 8)) | 1 if len(xs) else 15
+        wide, widest = _widest(_tophat(Lf, M, big, False)[0] * zone, zone, big)
+        if widest > WIDE_FROM * so:
+            # ... and the strokes' glow reaches as far as a stroke is wide (a 6 px reach left a light plate round
+            # each blurred letter, the fill blended from inside the glow)
+            glow_wide = int(np.ceil(widest))
+            rep["frame_open_wide"] = {"size": int(wide), "widest_stroke_px": round(widest, 1), "from": so,
+                                      "glow_px": glow_wide}
+            so = int(wide)
+            if cfg["gen_near"] is not None:
+                # ... and the garbled print is taken that much further from the new print's footprint: a blurred
+                # wordmark set a stroke's width beside the new one kept its far half (pitfall 117)
+                zone = work & ndi.binary_dilation(cover > 0.1, iterations=int(cfg["gen_near"]) + glow_wide) & \
+                    ndi.binary_erosion(M, iterations=int(cfg["gen_inset"]))
+                rep["frame_open_wide"]["near_px"] = int(cfg["gen_near"]) + glow_wide
     if dark:
         body = _dark_body(Lf, M, so)[0]
         top = body - Lf
@@ -1212,13 +1239,18 @@ def _garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=Non
         # each old letter showed as a soft ghost beside the new one. The glow: px within gen_glow of the fill and
         # glow_thresh above the body light, the body the local mean of the px off every light stroke by gen_glow
         # (the opening sits on the glow), joined to the fill
-        r = int(cfg["gen_glow"])
+        r = max(int(cfg["gen_glow"]), glow_wide)
         lit = M & (top > 0.5 * cfg["gen_thresh"])
         w = (M & ~ndi.binary_dilation(lit | fillm, iterations=r)).astype(float)
         den = ndi.gaussian_filter(w, 1.5 * r)
         bl = ndi.gaussian_filter(_extend(Lf, M) * w, 1.5 * r) / np.maximum(den, 1e-6)
         glow = ndi.binary_dilation(fillm, iterations=r) & ndi.binary_erosion(M, iterations=2) & (den > 0.02) & \
             (Lf - bl > cfg["glow_thresh"])
+        if glow_wide:
+            # ... and their dark rims: a blurred light letter is ringed darker than its body, and with only its light
+            # part filled the ring stayed, each old letter's outline beside the new one (pitfall 117)
+            glow |= ndi.binary_dilation(fillm, iterations=r) & ndi.binary_erosion(M, iterations=2) & (den > 0.02) & \
+                (bl - Lf > DARK_RIM * bl)
         if vis is not None:
             glow &= vis > 0.5
         lab, _ = ndi.label(glow | fillm)
@@ -1259,6 +1291,8 @@ def _garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=Non
     if vis is not None:
         a = a * vis
     info = {"polarity": pol, "k": k, "alpha": a, "region": work | fillm, "matte": M.copy(), "fill": fillm}
+    if (rep.get("frame_open_wide") or {}).get("near_px"):
+        info["near_px"] = rep["frame_open_wide"]["near_px"]      # check(): the widened reach is the garbled print's
     info.update(vis=vis, frame_size=so)            # for the checks (dark_checks)
     if ink_rgb is not None:
         # the main ink in the frame's own colour (k); any other ink in its packshot colour, relit by the frame's body
@@ -1373,7 +1407,8 @@ def check(crop_u8, out_u8, info, cover, cfg, offset):
     own highlights taken for print. On the first real job's approved keyframes every changed pixel lies within 6 px
     of the true print (with gen_near). -> audit findings ("ink_edges")."""
     changed = (out_u8 != crop_u8).any(-1)
-    reach = int(cfg["gen_near"] if cfg["gen_near"] is not None else DEFAULTS["gen_near"]) + int(cfg["gen_dilate"]) + 1
+    near = info.get("near_px") or (cfg["gen_near"] if cfg["gen_near"] is not None else DEFAULTS["gen_near"])
+    reach = int(near) + int(cfg["gen_dilate"]) + 1    # (frame_open_wide: the widened reach, pitfall 117)
     foot = ndi.binary_dilation(cover > 1e-3, iterations=reach)
     grown = info.get("grown")
     if grown is not None:
