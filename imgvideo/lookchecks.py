@@ -10,6 +10,10 @@ with pass/fail flags and the setting an agent tries next (summary["actions"]). P
           still_px): on fast moves the measure is blur, not glue.
   ends    the same on the first and last pairs of a run the label holds: the glue's smoothing at a run's ends (edge
           "line" extrapolates the next frames' trend, "mean" doesn't; "mean" helped one product and hurt another).
+  lock    (the edit carry on a body printed all over, V77) the new print drifting against the generated print it
+          replaces: per pair, the new letters' motion less the garbled ones' (Lucas-Kanade on the changed px only),
+          summed over each run, its spread within lock_frames frames over lock_px (the user: "the text on the
+          shoulder drifts a bit while the hand moves out of screen").
   creep   the label creeping on a still product (V71; the user: "the label drifts slightly" over 3-4 frames of a still
           shot, 0.05-0.15 px a frame, 0.6 px in all): the label's shift less the source print's on the label's box, each by phase
           correlation (the swim's own search wanders 0.02-0.05 px a pair),
@@ -63,6 +67,9 @@ LOOKS = {
     "ends_frames": 4,        # the pairs within this many frames of a held run's first and last frames: "ends"
     "creep_still": 0.2,      # px: a pair is still when the source print moves at most this far (on the label's box;
                              # still frames 0.00-0.03, a bottle's last settling step 0.36: not still) ...
+    "lock_px": 0.6,          # px: the new print against the kept print round it, its summed drift spread within ...
+    "lock_frames": 12,       # ... this many frames (edit carry, V77: the spray clip without the print lock 0.81-1.32 px on 5 lines, with it 0.37-0.48)
+    "lock_reach": 4,         # px: a line's centre off where the print's motion puts it (the same line)
     "creep_px": 0.3,         # ... and the label's summed shift against it over a run of still pairs spreads over this
                              # (v11's pump bottle 0.59 px, the user saw it; 0.03 on the motion clock, V71) ...
     "creep_pairs": 3,        # ... over at least this many pairs in a row
@@ -158,6 +165,79 @@ def _pc(a, b):
     if xx > W / 2:
         xx -= W
     return np.array([-xx, -yy])
+
+
+def _lk(a, b, m, d0, steps=5, fit=False):
+    """The shift d with b(x) ~ a(x) moved by d (times a gain, plus an offset), over the px in m (Lucas-Kanade on
+    high-passed luminance, from d0, in
+    content moving by +d from a to b). No window edges: a static mask can't pull it to zero. -> d or None (too little texture)"""
+    from scipy.ndimage import shift as nd_shift
+    if m.sum() < 200:
+        return None
+    a, b = _hp(a) * 255.0, _hp(b) * 255.0
+    d = np.asarray(d0, float).copy()
+    for _ in range(steps):
+        ad = nd_shift(a, (d[1], d[0]), order=1, mode="nearest")
+        gy, gx = np.gradient(ad)
+        # with a gain and an offset (a light blinking over the print isn't motion)
+        G = np.c_[gx[m], gy[m], ad[m], np.ones(int(m.sum()))]
+        M = G.T @ G
+        if np.linalg.cond(M[:2, :2]) > 1e4 or np.linalg.cond(M) > 1e8:
+            return None
+        step = -np.linalg.solve(M, G.T @ (b[m] - ad[m]))[:2]
+        d = d + step
+        if np.hypot(*step) < 1e-3:
+            break
+    if not np.isfinite(d).all():
+        return None
+    if fit:                      # how well b is a moved: its correlation with a shifted by d, over m
+        ad = nd_shift(a, (d[1], d[0]), order=1, mode="nearest")
+        return d, float(np.corrcoef(ad[m], b[m])[0, 1])
+    return d
+
+
+def lock_pair(s0, s1, o0, o1, region=None, min_px=150, pad=10, levels=12.0, ring=20, fit_min=0.85, min_print=0.05):
+    """lock (the edit carry, V77): per edited line (the px the clip changed by `levels` or more, grown 3 px, a component
+    of min_px or more; the soft rim of the carry joins every line into one region), the new letters' motion less the
+    generated print's round them: a `ring` px band round the line, off the changed px, where the output is the source
+    (kept graphics, body, rays). Each by Lucas-Kanade on the output (from the source's phase correlation on the box),
+    per line: the whole label's motion hid a shoulder line drifting 0.3 px (0.02 over all lines). Against the garbled
+    letters instead, the generator's redraw of small type read 0.3-0.46 px within 12 still frames. Pairs where the
+    ring isn't the same print moved (correlation under fit_min: a fast move, the generator redrawing) are skipped, and
+    lines whose ring holds under min_print print (a plain body: a coloured pump's 0.007 read its sliding print as
+    drift; the spray's rings 0.13-0.98).
+    Measured on moving frames too: the drift came while a hand left. -> [[cx, cy, dx, dy, mx, my], ...] (the line's
+    centre, its drift, the print's motion) or None"""
+    changed = np.abs(o0.astype(np.int16) - s0.astype(np.int16)).max(-1) >= levels
+    near = binary_dilation(np.abs(o0.astype(np.int16) - s0.astype(np.int16)).max(-1) > 0, iterations=3)
+    comp, n = ndi.label(binary_dilation(changed, iterations=3), np.ones((3, 3)))
+    out = []
+    for i, sl in enumerate(ndi.find_objects(comp), start=1):
+        if sl is None:
+            continue
+        y0, y1 = max(sl[0].start - ring - pad, 0), min(sl[0].stop + ring + pad, changed.shape[0])
+        x0, x1 = max(sl[1].start - ring - pad, 0), min(sl[1].stop + ring + pad, changed.shape[1])
+        w = (slice(y0, y1), slice(x0, x1))
+        c_ = comp[w] == i
+        if c_.sum() < min_px or min(c_.shape) < 16:
+            continue
+        line = binary_dilation(changed[w] & c_, iterations=2)
+        rg = binary_dilation(c_, iterations=ring) & ~near[w]
+        from .printalpha import print_share
+        if print_share(o0[w], rg) < min_print:
+            continue                         # a plain body round the line: no print to measure against
+        lo0, lo1 = lin_lum(o0[w]), lin_lum(o1[w])
+        d0 = _pc(lin_lum(s0[w]), lin_lum(s1[w]))
+        a_, b_ = _lk(lo0, lo1, rg, d0, fit=True), _lk(lo0, lo1, line, d0)
+        if a_ is None or b_ is None or a_[1] < fit_min:
+            continue
+        a_ = a_[0]
+        if np.hypot(*(b_ - a_)) > 3.0:
+            continue
+        cy, cx = np.argwhere(c_).mean(0)
+        out.append([round(float(cx + x0), 1), round(float(cy + y0), 1)] + [round(float(v), 3) for v in (b_ - a_)] +
+                   [round(float(v), 3) for v in a_])
+    return out or None
 
 
 def swim_pair(s0, s1, o0, o1, m0, m1, region, still_px=3.0, mx=8):
@@ -439,6 +519,51 @@ def evaluate(F, shots, fps=24.0, cfg=None):
                 act("creep", crept, "the label creeps on a still product",
                     {"render": {"glue": dict(g if isinstance(g, dict) else {}, still_px=2.0)}})
             S["creep"] = {"runs": cr, "flagged": len(crept)}
+            # lock (V77, the edit carry): the new print against the generated print, summed over each run of measured
+            # pairs; flagged where it spreads over lock_px within lock_frames frames
+            lk_ = {t: F[t]["lock"] for t in ts if F[t].get("lock")}
+            lr, locked = [], []
+            W = int(c["lock_frames"])
+            for a, b in _runs(sorted(lk_)):
+                # each line followed from pair to pair by its centre (within lock_reach px)
+                lines = []                      # [{"at": [x, y], "cum": {t: [x, y]}}]
+                for t in range(a, b + 1):
+                    used = set()
+                    for cx, cy, dx, dy, mx, my in lk_[t]:
+                        best = None
+                        for j, L in enumerate(lines):
+                            # the same line: where the print's motion since its last pair puts it
+                            dd = np.hypot(L["at"][0] + L["mv"][0] - cx, L["at"][1] + L["mv"][1] - cy) \
+                                if L["last"] == t - 1 else np.inf
+                            if j not in used and dd <= c["lock_reach"] and (best is None or dd < best[0]):
+                                best = (dd, j)
+                        if best is None:
+                            lines.append({"at": [cx, cy], "cum": {t: [dx, dy]}, "last": t, "mv": [mx, my]})
+                            used.add(len(lines) - 1)
+                            continue
+                        L = lines[best[1]]
+                        used.add(best[1])
+                        prev = L["cum"][L["last"]]
+                        L["cum"][t] = [prev[0] + dx, prev[1] + dy] if L["last"] == t - 1 else [dx, dy]
+                        L["at"], L["last"], L["mv"] = [cx, cy], t, [mx, my]
+                worst = 0.0
+                for L in lines:
+                    tl = sorted(L["cum"])
+                    for i, t0 in enumerate(tl):
+                        seg = np.array([[0.0, 0.0]] + [L["cum"][t] for t in tl[i:] if t - t0 < W])
+                        spr = float(np.max(np.hypot(*(seg[:, None, :] - seg[None, :, :]).transpose(2, 0, 1))))
+                        worst = max(worst, spr)
+                        if spr > c["lock_px"]:
+                            locked += [t for t in tl[i:] if t - t0 < W] + [t0]
+                lr.append({"frames": [a, b + 1], "px": round(worst, 3)})
+            locked = sorted(set(locked))
+            for t in locked:
+                flag(t, "lock", f"the new print drifts against the generated print (over {c['lock_px']} px within "
+                                f"{c['lock_frames']} frames)")
+            if locked:
+                act("lock", locked, "the new print drifts against the generated print", {})
+            if lk_:
+                S["lock"] = {"runs": lr, "flagged": len(locked)}
             v = np.array(list(ex.values()))
             S["swim"] = {"pairs": len(sw), "median_px": round(float(np.median([s["swim_px"] for s in sw.values()])), 2),
                          "source_median_px": round(float(np.median([s["swim_src_px"] for s in sw.values()])), 2),

@@ -31,7 +31,7 @@ Ported from the first real run's job script (ink_alpha.py, 2026-10-17), step for
 the same pixels."""
 import numpy as np
 from scipy import ndimage as ndi
-from scipy.ndimage import binary_dilation, distance_transform_edt, gaussian_filter, grey_opening
+from scipy.ndimage import binary_dilation, distance_transform_edt, gaussian_filter, grey_closing, grey_opening
 
 from imgpost import geometry as geo
 
@@ -40,6 +40,14 @@ DEFAULTS = {
                             # keyframe's whole edit ("edit": a body printed all over, V76)
     "edit_levels": 4.0,     # levels (ink "edit"): the keyframe this far from its source frame (any channel) is edit
     "edit_inset": 2.0,      # px (ink "edit"): edits this far inside the keyframe frame's matte
+    "lock": True,           # (ink "edit", V77) the print lock and its check; off where the label already follows a
+                            # print that slides on a plain body (nothing kept round its lines to lock to)
+    "lock_ring": 24,        # px (ink "edit", V77): each edited line is registered onto the generated print in a ring
+                            # this wide round it (the kept graphics show where the print is on the frame)
+    "lock_max": 3.0,        # px: a registration further than this is not trusted (0 there)
+    "lock_print": 0.05,     # the ring's share of print (a 15 px top-hat at `thresh`, either polarity) at least this:
+                            # a line on a plain body has nothing to lock to (a coloured pump's ring held 0.007 and
+                            # read the body under the sliding print; the spray's rings 0.13-0.98)
     "carry": True,          # the target: the print carried onto the source's body (false: the render's pixels)
     "grow": 3,              # px the print is dilated by
     "sigma": 1.5,           # px the alpha is smoothed by
@@ -74,6 +82,11 @@ def settings(spec):
     if c["presence"] not in ("off", "match"):
         raise ValueError(f"render.print_alpha.presence {c['presence']!r}: \"off\" or \"match\"")
     return c
+
+
+def binary_erosion_(m, n):
+    from scipy.ndimage import binary_erosion
+    return binary_erosion(m, iterations=n)
 
 
 def lin_lum(u8):
@@ -306,13 +319,15 @@ def motion_blur(v, sharp, c):
     return (v / max(sp, 1e-6), L) if L >= 1.0 and sp >= float(c["min_speed"]) else None
 
 
-def keyframe_on(kf_u8, H, Hf, box):
+def keyframe_on(kf_u8, H, Hf, box, D=None):
     """The keyframe carried onto a frame, read once: each px of box (y0, y1, x0, x1) through H (this frame's mapping)
     back to label px, then through Hf onto the keyframe's frame, sampled there (cubic). -> (float32 h x w x 3, the
     px whose ray meets the surface)"""
     from scipy.ndimage import map_coordinates
     y0, y1, x0, x1 = box
     Y, X = np.mgrid[y0:y1, x0:x1].astype(float)
+    if D is not None:                                # read each px D further on (print_lock: the print's own place)
+        X, Y = X + D[0], Y + D[1]
     if hasattr(H, "inverse"):
         u, v, ok = H.inverse(X, Y)
         ok = np.ones(X.shape, bool) if ok is None else np.asarray(ok, bool).reshape(X.shape)
@@ -325,7 +340,72 @@ def keyframe_on(kf_u8, H, Hf, box):
     return kw, ok
 
 
-def carry_keyframe(kf_u8, ref, ch, H, Hf, sigma=3.0):
+def print_share(u8, m, thresh=0.03, size=15):
+    """The share of m that is print in u8: a `size` px top-hat of linear luminance over `thresh`, either polarity."""
+    if not m.any():
+        return 0.0
+    L = lin_lum(u8)
+    pr = ((L - grey_opening(L, size=(size, size))) > thresh) | ((grey_closing(L, size=(size, size)) - L) > thresh)
+    return float(pr[m].mean())
+
+
+def _hp_lum(x, s=4.0):
+    L = np.asarray(x, np.float32) @ np.array([0.299, 0.587, 0.114], np.float32)
+    return L - gaussian_filter(L, s)
+
+
+def print_lock(kw, s, ed, inside, c):
+    """ink "edit" (V77): where each edited line's keyframe sits on the generated print of this frame. The tracks can
+    drift a fraction of a px off the print (0.2-0.6 px for 20 frames after a hand left a spray bottle's shoulder: the
+    new line crept while the bottle stood still); the kept graphics round each line show where the print really is.
+    Per edited component (the edit grown 3 px), its ring (`lock_ring` px round it, inside the matte, off the edit) is
+    registered from the keyframe carried (kw) onto the source (s) by Lucas-Kanade on high-passed luminance, 3 steps,
+    at most `lock_max` px; a ring under `lock_print` print (a plain body) is skipped. -> (displacement field (dx, dy) over the crop, {"px": median |d|, "lines": n}) or (None, {})"""
+    from scipy.ndimage import shift as nd_shift
+    comp, n = ndi.label(binary_dilation(ed, iterations=3), np.ones((3, 3)))
+    if not n:
+        return None, {}
+    A, B = _hp_lum(kw), _hp_lum(s)
+    ring = int(c["lock_ring"])
+    near = binary_dilation(ed, iterations=2)
+    ds = np.zeros((n + 1, 2), np.float32)
+    got = []
+    for i, sl in enumerate(ndi.find_objects(comp), start=1):
+        if sl is None:
+            continue
+        y0, y1 = max(sl[0].start - ring - 4, 0), min(sl[0].stop + ring + 4, comp.shape[0])
+        x0, x1 = max(sl[1].start - ring - 4, 0), min(sl[1].stop + ring + 4, comp.shape[1])
+        w = (slice(y0, y1), slice(x0, x1))
+        R = binary_dilation(comp[w] == i, iterations=ring) & inside[w] & ~near[w]
+        if print_share(s[w], R, float(c["thresh"])) < float(c["lock_print"]):
+            continue                         # no kept print round the line: nothing to lock to
+        a, b = A[w], B[w]
+        gy, gx = np.gradient(gaussian_filter(a, 0.7))
+        R &= np.hypot(gx, gy) > 0.5
+        if R.sum() < 300:
+            continue
+        d = np.zeros(2)
+        for _ in range(3):
+            ai = nd_shift(a, (-d[1], -d[0]), order=1, mode="nearest")        # a(x + d)
+            gy, gx = np.gradient(gaussian_filter(ai, 0.7))
+            G = np.c_[gx[R], gy[R]]
+            M = G.T @ G
+            if np.linalg.cond(M) > 1e4:
+                break
+            d = d + np.linalg.solve(M, G.T @ (b[R] - ai[R]))
+        if np.isfinite(d).all() and np.hypot(*d) <= float(c["lock_max"]):
+            ds[i] = d
+            got.append(float(np.hypot(*d)))
+    if not got:
+        return None, {}
+    # each px takes its nearest line's registration, smoothed so neighbouring lines meet without a seam
+    _, (iy, ix) = ndi.distance_transform_edt(comp == 0, return_indices=True)
+    lab = comp[iy, ix]
+    D = np.stack([gaussian_filter(ds[lab, k], 3.0) for k in range(2)])
+    return D, {"px": round(float(np.median(got)), 3), "lines": len(got)}
+
+
+def carry_keyframe(kf_u8, ref, ch, H, Hf, sigma=3.0, src=None, ink=None, inside=None, c=None):
     """ink "edit" (V76): the render's pixels inside its change replaced by the keyframe's own, read once: each frame
     px through H back to label px, through Hf onto the keyframe's frame (the render reads a texture unrolled from the
     keyframe, prefiltered and supersampled: on the keyframe's own frame its letters came out 6-14 levels soft at their
@@ -333,13 +413,20 @@ def carry_keyframe(kf_u8, ref, ch, H, Hf, sigma=3.0):
     -> the render with those px replaced (uint8)"""
     y0, y1, x0, x1 = _crop(ch)
     kw, ok = keyframe_on(kf_u8, H, Hf, (y0, y1, x0, x1))
+    lock = {}
+    if src is not None and ink is not None and c is not None:
+        # print_lock (V77): each line read where the generated print is on this frame, not where the tracks put it
+        D, lock = print_lock(kw, src[y0:y1, x0:x1], ink[y0:y1, x0:x1],
+                             binary_erosion_(inside[y0:y1, x0:x1], 3) if inside is not None else ok, c)
+        if D is not None:
+            kw, ok = keyframe_on(kf_u8, H, Hf, (y0, y1, x0, x1), D)
     m = ch[y0:y1, x0:x1] & ok
     r = ref[y0:y1, x0:x1].astype(np.float32)
     den = np.maximum(gaussian_filter(m.astype(np.float32), sigma), 1e-3)
     light = np.stack([gaussian_filter(np.where(m, r[..., c] - kw[..., c], 0.0), sigma) / den for c in range(3)], -1)
     out = ref.copy()
     out[y0:y1, x0:x1] = np.where(m[..., None], np.clip(kw + light + 0.5, 0, 255), r).astype(np.uint8)
-    return out
+    return out, lock
 
 
 def _composite_edit(src, s, r, chc, ed, box, c, blur):
