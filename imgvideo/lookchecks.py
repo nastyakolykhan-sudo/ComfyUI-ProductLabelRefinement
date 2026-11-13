@@ -392,7 +392,7 @@ def spots(src, out, changed, cfg=None):
 
 # -------------------------------------------------------------------------------------------- per-frame measures
 
-def frame_looks(src, out, M, changed, polarity="light"):
+def frame_looks(src, out, M, changed, polarity="light", spot_cfg=None):
     """The per-frame measures: print sharpness of the output and the source, the print against the limb (tilt), the
     lines against the base (level), the base alone, spots. -> dict"""
     r = {}
@@ -423,7 +423,7 @@ def frame_looks(src, out, M, changed, polarity="light"):
         # a light-print measure: dark print's own letters are dark marks on the body it can't tell from spots (it
         # flagged every frame of the one workflow's dark-print jar and tube, V54); stray dark print there is the
         # double check's (review.doubled)
-        sp = spots(src, out, changed)
+        sp = spots(src, out, changed, spot_cfg)
         if sp:
             r["spots"] = sp
     return r

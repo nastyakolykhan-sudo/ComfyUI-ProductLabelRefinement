@@ -1041,6 +1041,9 @@ def _render_one(C, J, t, frame, extras=None):
                     info["print_lock"] = lock_
             g, bl = float(ex.get("gain", 1.0)), ex.get("blur")
             out, pi = pa.composite(frame, out, ch, J.key(t, H), pr["c"], ink, gain=g, blur=bl)
+            if rct.get("body_floor"):
+                # the slide route (V78): the carried fill no darker than this frame's own body
+                out = body_floored(frame, out, float(rct["body_floor"]), int(rct.get("body_open", BODY_OPEN)))
             if ink is None:                  # (lost print is measured against the keyframe's own ink only)
                 pi.pop("lost_print_px")
                 pi.pop("ink_px")
@@ -1232,6 +1235,66 @@ def _body_snap_turn_auto(J, C, fr, frames, bc):
     print(f"turn auto  {'on' if dec['turn'] else 'off'}: {dec['why']} (the print's slide "
           f"{dec['slide_px']} px, the limit {lim:g})")
     return body, rep
+
+
+def _print_on_body(J):
+    """How far the body route (render.body_snap, glue, level, limb_snap, as the render places the label) puts the label
+    off the generated print it tracks (V78): per frame, p90 over the label's inner grid points facing the camera of the
+    distance between the placed and the tracked label, frame px. Reads the job's fit only (inputs only, no render).
+    Where the generated print slides on the body this is large: the label held to the body sits beside the print, and
+    print-only compositing replaces the old print only within print_alpha.near px of the new.
+    -> {"frames": measured, "held_px": [p50, p90], "near_px": print_alpha.near} or None (no body measure)"""
+    fr = J.frames()
+    res = _fit(J)
+    V = set(res["valid"])
+    art, _ = J.artwork()
+    rc = dict(J.v.get("render", {}))
+    optics = json.loads((J.work / "optics.json").read_text()) if (J.work / "optics.json").exists() else {}
+    optics = render_optics(optics, rc)
+    if rc.get("blur", "auto") == "auto":
+        rc["blur"] = optics.get("blur", 0.6)
+    rc.update(_white(J, fr))
+    if rc.get("ink_gain", "auto") == "auto":
+        rc["ink_gain"] = optics.get("ink_gain", [1.0, 1.0, 1.0])
+    ax_mode = rc["limb_snap"].get("axial") if isinstance(rc.get("limb_snap"), dict) else None
+    ax_ref, morph = None, set(res.get("morph", []))
+    if ax_mode and morph:
+        Pv = J.outline()[:, 1]
+        vmid = 0.5 * (Pv.min() + Pv.max())
+        E = [vf.axis_ends(res["smooth"][t], J.key(t, res["smooth"][t]), vmid) for t in sorted(V) if t not in morph]
+        E = np.array([e for e in E if e is not None])
+        if len(E) >= 3:
+            ax_ref = np.median(E, 0)
+    C = _render_context(J, rc, optics, 0.0, ax_ref, res=res, art=art)
+    body, rep = _body_snap(J, C, fr, V)
+    if rep.get("skipped"):
+        return None
+    rc["_body"] = C["body"] = body
+    if rc.get("glue"):
+        C["glue"] = _glue(J, C, fr, res)[0]
+    if rc.get("level"):
+        lev = _level(J, C, fr, res)[0]
+        if lev:
+            C["level"] = lev
+    from .review import label_grid, shape_points
+    G = label_grid(J.outline())
+    held = {}
+    for t in sorted(V):
+        H, H0_ = _place(C, J, t)[:2]
+        if H is H0_:
+            held[t] = 0.0
+            continue
+        P, ok = shape_points(H0_, G)
+        Q = geo.apply_H(H, G)
+        dd = np.hypot(*(Q - P).T)[ok & np.isfinite(Q).all(1)]
+        if len(dd):
+            held[t] = float(np.percentile(dd, 90))
+    C["held_off_print"] = held
+    if not held:
+        return None
+    x = np.array(list(held.values()))
+    return {"frames": len(held), "held_px": [round(float(np.percentile(x, 50)), 2), round(float(np.percentile(x, 90)), 2)],
+            "near_px": float(pa.settings(rc.get("print_alpha"))["near"])}
 
 
 def _glue(J, C, fr, res):
@@ -1972,7 +2035,9 @@ def _review(J, parts, ll_path, arrays=None):
                 # the look checks' per-frame measures (the user's notes from the first real run, V42-V45)
                 pol = (P.v.get("render") or {}).get("polarity", "light")
                 chg = np.any(out[i] != src[i], axis=-1)
-                LF[T] = {"looks": lk.frame_looks(src[i], out[i], m, chg, pol),
+                bo_ = (P.v.get("render") or {}).get("body_open")     # (V79: the body under wide old strokes)
+                LF[T] = {"looks": lk.frame_looks(src[i], out[i], m, chg, pol,
+                                                 {"spot_body": int(bo_)} if bo_ else None),
                          "ghost_px": c["rinfo"].get(str(T), {}).get("ghost_px"),
                          "double": rv.doubled(c["art"], out[i], src[i], m, Ho, pol, glass=c["glass"],
                                               H_src=c["res"].get("morph_source", {}).get(t, H) if Ho is not H else None,
@@ -2322,6 +2387,85 @@ BAND_OVER_PRINT = {
 # a body printed all over (V76): the clip carries its keyframe's whole edit, on the generated print's own place
 PRINTED_OFF = ("body_snap", "glue", "level", "limb_snap", "feather")
 PRINTED_ALPHA = {"ink": "edit", "presence": "off"}
+# the generated print sliding on the body (V78): the label the body route places sits off the print it tracks by more than
+# this share of print_alpha.near at the shot's p90 (_print_on_body): the label follows the print instead (PRINTED_OFF,
+# PRINTED_ALPHA). Round v17: the coloured pump bottle 15.1 px (near 14), the approved frosted pump and tube 7.4, 6.8.
+PRINT_SLIDE = {"held": 0.75}
+
+
+def print_slides(sl):
+    """Does the measured placement (_print_on_body) sit off the print past PRINT_SLIDE?"""
+    if not sl or PRINT_SLIDE.get("held") is None:
+        return False
+    return sl["held_px"][1] > float(PRINT_SLIDE["held"]) * sl["near_px"]
+
+
+def _slide_route_open(render, cfg):
+    """The slide trigger (V78) decides only for the measured job's body route: light print composited as print, the
+    label held to the body, and none of the route's settings given (body_snap, glue, level, limb_snap, feather,
+    print_alpha.ink)."""
+    given = (cfg.get("render") or {}) if isinstance(cfg, dict) else {}
+    return bool(render.get("body_snap")) and render.get("alpha") == "print" and \
+        not any(k in given for k in PRINTED_OFF) and "ink" not in (given.get("print_alpha") or {})
+
+
+BODY_FLOOR = 2.0   # levels: the slide route's carried edit is kept no darker than the frame's own body less this (V78)
+BODY_OPEN = 15     # px: the grey opening that reads the body under light print, at least (V79: wider where the old
+                   # print's strokes are: a blurred wordmark 23 px wide read as body through 15 px)
+
+
+def body_open(kf, src, matte):
+    """The opening that reads the body under the keyframe frame's old light print (V79): 1.5 x its widest stroke near
+    what the keyframe changed (imgpost.ink's frame_open measure), at least BODY_OPEN. A narrower one takes a stroke's
+    middle for body: the floor lifted the clean fill back to the old letters and the spots check read the fill as
+    dark spots. -> (size, widest stroke px)"""
+    from scipy.ndimage import binary_erosion as be
+    from imgpost import ink as ik
+    Lf = im.lum(im.srgb_to_lin(im.to_float(src)))
+    zone = binary_dilation(np.abs(kf.astype(np.int16) - src).max(-1) > 4, iterations=10) & be(matte, iterations=4)
+    xs = np.nonzero(matte.any(0))[0]
+    if not zone.any() or not len(xs):
+        return BODY_OPEN, 0.0
+    big = int(max(15, (xs.max() - xs.min()) // 8)) | 1
+    wide, widest = ik._widest(ik._tophat(Lf, matte, big, False)[0] * zone, zone, big)
+    return max(BODY_OPEN, int(wide)), float(widest)
+
+
+def body_floored(src, out, tol=BODY_FLOOR, size=BODY_OPEN):
+    """render.body_floor (V78, light print): where the output differs from its source frame, no channel darker than the
+    source's body under its light print (a `size` px grey opening per channel: the lower envelope, never above the
+    source's own pixels, its dark details included) less `tol` levels. With the label following a print that slides
+    on the body, the keyframe's body shading travels with its print: carried onto another frame, the keyframe's fill
+    beside the wordmark sat 10-20 levels darker than that frame's body (`spots` on 117 of 120 frames). -> the output"""
+    from scipy.ndimage import grey_opening
+    ch = np.any(out != src, -1)
+    if not ch.any():
+        return out
+    ys, xs = np.nonzero(ch)
+    p = size
+    y0, y1 = max(ys.min() - p, 0), min(ys.max() + p + 1, src.shape[0])
+    x0, x1 = max(xs.min() - p, 0), min(xs.max() + p + 1, src.shape[1])
+    s = src[y0:y1, x0:x1].astype(np.float32)
+    body = np.stack([grey_opening(s[..., i], size=(size, size)) for i in range(3)], -1) - float(tol)
+    o = out[y0:y1, x0:x1]
+    res = out.copy()
+    res[y0:y1, x0:x1] = np.where(ch[y0:y1, x0:x1, None], np.maximum(o, np.clip(np.rint(body), 0, 255)), o).astype(np.uint8)
+    return res
+
+
+def _follow_print(render, slide=False):
+    """The label follows the generated print (V76, V78): nothing places it by the body or fades its ends, and the
+    keyframe's whole edit is carried; slide (the print slides on the body, V78): its fill no darker than each frame's
+    body (render.body_floor), and no print lock (print_alpha.lock off: the lines are locked onto the kept print round
+    them, and a plain body holds none: the lock read the body the print slides on). In place."""
+    if slide:
+        render["body_floor"] = BODY_FLOOR
+    for k in PRINTED_OFF:
+        render.pop(k, None)
+    render["print_alpha"] = dict(render.get("print_alpha") or {}, **PRINTED_ALPHA, **({"lock": False} if slide else {}))
+    if render.get("_defaults"):
+        render["_defaults"] = {k: v for k, v in render["_defaults"].items()
+                               if k.split(".")[0] not in PRINTED_OFF}
 
 
 def band_over_print(band, changed, mask, kf, polarity, stroke, c=None, src=None, cover=None):
@@ -2504,7 +2648,7 @@ def _staged(J, stamps, k_track, k_fit, still_key, f, cfg):
 SETTINGS_SECTIONS = ("track", "fit", "render", "qa", "review", "artwork", "key")
 # render settings the still label doesn't depend on
 RENDER_ONLY = ("body_snap", "sparkles", "spark_glow", "alpha", "print_alpha", "soft_cap", "smear", "_sparkles_asked",
-               "glue", "level", "_defaults", "shade_print", "shade_local", "clear_glass", "steady_light")
+               "glue", "level", "_defaults", "shade_print", "shade_local", "clear_glass", "steady_light", "body_floor", "body_open")
 
 
 def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24.0, work=None, workers=None):
@@ -2677,6 +2821,27 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
         if patched or isinstance(key, str):
             d["matte_patch"] = {"frames": [[int(a_), int(b_)] for a_, b_ in _ranges(patched)], "key": key}
         patched_all.update(patched)
+        if not printed and tube and _slide_route_open(J.v.get("render") or {}, cfg):
+            # the generated print slides on the body (V78): the label held to the body showed the old letters beside
+            # the new; it follows the print instead, carrying the keyframe's whole edit (V76's route, on the tube)
+            sl = _print_on_body(J)
+            d["print_on_body"] = sl
+            if print_slides(sl):
+                _follow_print(J.v["render"], slide=True)
+                bo, bw = body_open(J.kf, frames[f], m)
+                J.v["render"]["body_open"] = int(bo)
+                d["printed_body"] = {"surface": "tube", "by": "the generated print slides on the body",
+                                     "print_alpha": dict(J.v["render"]["print_alpha"]), "off": list(PRINTED_OFF),
+                                     "body_floor": BODY_FLOOR, "body_open": int(bo), "widest_stroke_px": round(bw, 1)}
+                print(f"route      the generated print slides on the body: held to the body, the label would sit "
+                      f"{sl['held_px'][1]:.1f} px off it (p90; limit {PRINT_SLIDE['held']:g} x the print's "
+                      f"{sl['near_px']:g} px reach): it follows the print and carries the keyframe's whole edit (V78)")
+                r_still = {k_: v_ for k_, v_ in J.v["render"].items() if k_ not in RENDER_ONLY}
+                _staged(J, jd / "stamps.json", k_track, k_fit, [r_still, vj.get("artwork"), cfg.get("key"),
+                                                               cfg.get("matte_patch")], f, cfg)
+            elif sl:
+                print(f"route      held to the body, the label stays within {sl['held_px'][1]:.1f} px of the generated "
+                      f"print (p90; limit {PRINT_SLIDE['held']:g} x {sl['near_px']:g} px): the body route (V78)")
         stage_render(J, workers=workers)
         stage_qa(J)
         res = _fit(J)
@@ -2725,7 +2890,7 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
             # shoulder left garbled): the pack's review name fails the clip under 0.6
             review["carried"] = min(carries)
         from . import review as rv
-        kept = []
+        kept, old = [], []
         for J in jobs:
             fk = J.anchor
             if (J.v.get("render") or {}).get("print_alpha", {}).get("ink") == "edit" and owner.get(fk) is J:
@@ -2733,8 +2898,15 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
                 kv = rv.keyframe_kept(J.kf, frames[fk], out[fk], masks[fk])
                 if kv is not None:
                     kept.append(kv)
+                # ... and every frame gets what the keyframe left of the old print round its new print (V79)
+                ko = rv.keyframe_old_left(J.kf, frames[fk], masks[fk],
+                                          int((J.v.get("render") or {}).get("body_open") or BODY_OPEN))
+                if ko is not None:
+                    old.append(ko)
         if review is not None and kept:
             review["kf_kept"] = min(kept)
+        if review is not None and old:
+            review["kf_old"] = max(old)
         if rows:
             plot = root / "label-qa.png"
             if not plot_qa(rows, rep, plot):

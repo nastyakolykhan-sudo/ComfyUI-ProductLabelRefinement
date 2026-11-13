@@ -355,9 +355,9 @@ def definition_all():
             "frames": L(1, 0), "shot_frames": L(62, 0), "start": L(19, 2), "shot": L(19, 4)}, (0, 0)),
         # the clip's file names from Refine's review: _REVIEW-FAIL (print wrong, slid), _REVIEW-CHECK (look first)
         94: ("ProductLabelReviewName", "Master's name: _REVIEW-FAIL / _REVIEW-CHECK from the review (+ its summary)", {
-            "report": L(62, 3), "prefix": "product-label-refinement/video/refined", "save_summary": True}, (0, 0)),
+            "report": L(62, 3), "prefix": "product-label-refinement/video/refined", "save_summary": True, "keyframe_report": L(89, 1)}, (0, 0)),
         95: ("ProductLabelReviewName", "Review copy's name: _REVIEW-FAIL / _REVIEW-CHECK from the review", {
-            "report": L(62, 3), "prefix": "product-label-refinement/video/review", "save_summary": False}, (0, 0)),
+            "report": L(62, 3), "prefix": "product-label-refinement/video/review", "save_summary": False, "keyframe_report": L(89, 1)}, (0, 0)),
         63: ("ProductLabelVideoSaveLossless", "Save the lossless master (QuickTime PNG)", {
             "images": L(75, 0), "fps": L(1, 1), "filename_prefix": L(94, 0),
             "format": "mov (PNG, exact RGB)", "audio": L(1, 2)}, (1980, 2300)),
