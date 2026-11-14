@@ -654,7 +654,8 @@ def build(wf_name, nodes_def, classes, notes=None, groups=None):
                 continue
             src, idx = v
             t, got = inp["type"], specs[src][2][idx]
-            if got != t and "*" not in (got, t) and not (t == "COMBO" and isinstance(got, list)):
+            if (got != t and "*" not in (got, t) and not (t == "COMBO" and isinstance(got, list))
+                    and got not in t.split(",")):      # a multi-type socket ("FLOAT,INT,BOOLEAN")
                 sys.exit(f"node {nid}.{inp['name']} expects {t}, linked to node {src} output {idx} ({got})")
             lid = len(links) + 1
             links.append([lid, int(src), idx, int(nid), slot, t])
