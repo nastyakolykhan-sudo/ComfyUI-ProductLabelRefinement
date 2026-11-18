@@ -130,8 +130,8 @@ def definition():
 NOTES = {
     90: ("About this workflow", (-2200, 0), (560, 1250), (
         "AGENTIC PRODUCT LABEL REFINEMENT\n\n"
-        "Makes the garbled text on a product's label legible, in an AI-generated image or a single-shot clip, from "
-        "the real product's packshot. The generated product keeps its shape, position, label outline, colours and "
+        "Makes the garbled text on a product's label legible, in an AI-generated image or clip, from the "
+        "real product's packshot. The generated product keeps its shape, position, label outline, colours and "
         "light; only the letters change. Results a check finds wrong are named, never passed: _AUDIT-FAIL on the "
         "image (a clip whose keyframe fails: that keyframe comes back, no clip, no error), _REVIEW-FAIL (wrong) or "
         "_REVIEW-CHECK (look first) on the clip.\n\n"
@@ -145,7 +145,7 @@ NOTES = {
         "product mask, a corrected keyframe, a job, the keyframe frame or Refine settings in a run copy.\n\n"
         "## Node packs\n"
         "- ComfyUI-ProductLabelRefinement: https://github.com/nastyakolykhan-sudo/ComfyUI-ProductLabelRefinement "
-        "@ c24b000dfe0d2063ddedd031f0511d4f903f8ecd\n"
+        "@ a1ec26c8e7b1e12f18c2ca073a15744da31d62f3\n"
         "- ComfyUI-MaskAspectCrop (ImageReframe, ImageReframeComposite): "
         "https://github.com/nastyakolykhan-sudo/ComfyUI-MaskAspectCrop @ 10b47888f08a297da1ba2f03f45ace3ab9594ad1\n"
         "- comfy-workflow-io-nodes (WorkflowIO*): https://github.com/aw93silverside/comfy-workflow-io-nodes "
