@@ -1,8 +1,8 @@
 {
  "id": "0dc5c267-8982-5325-ba1f-da25c82e8753",
  "revision": 0,
- "last_node_id": 99,
- "last_link_id": 240,
+ "last_node_id": 110,
+ "last_link_id": 254,
  "nodes": [
   {
    "id": 1,
@@ -24,8 +24,8 @@
      "name": "frames",
      "type": "IMAGE",
      "links": [
-      186,
-      238
+      188,
+      242
      ],
      "slot_index": 0
     },
@@ -33,10 +33,10 @@
      "name": "fps",
      "type": "FLOAT",
      "links": [
-      162,
-      165,
-      169,
-      196
+      164,
+      167,
+      171,
+      198
      ],
      "slot_index": 1
     },
@@ -44,8 +44,8 @@
      "name": "audio",
      "type": "AUDIO",
      "links": [
-      164,
-      168
+      166,
+      170
      ],
      "slot_index": 2
     },
@@ -55,7 +55,7 @@
      "links": [
       16,
       153,
-      239
+      243
      ],
      "slot_index": 3
     },
@@ -100,12 +100,12 @@
       57,
       65,
       104,
-      176,
-      199,
+      178,
       201,
-      204,
-      217,
-      233
+      203,
+      206,
+      219,
+      237
      ],
      "slot_index": 0
     },
@@ -113,8 +113,8 @@
      "name": "MASK",
      "type": "MASK",
      "links": [
-      202,
-      205
+      204,
+      207
      ],
      "slot_index": 1
     }
@@ -154,7 +154,7 @@
      "name": "mask",
      "type": "MASK",
      "links": [
-      240
+      244
      ],
      "slot_index": 1
     },
@@ -164,7 +164,7 @@
      "links": [
       19,
       24,
-      221
+      223
      ],
      "slot_index": 2
     }
@@ -214,7 +214,7 @@
      "links": [
       31,
       154,
-      220
+      222
      ],
      "slot_index": 2
     }
@@ -283,7 +283,7 @@
      "name": "INT",
      "type": "INT",
      "links": [
-      219
+      221
      ],
      "slot_index": 0
     }
@@ -317,7 +317,7 @@
      "name": "settings",
      "type": "STRING",
      "links": [
-      161
+      163
      ],
      "slot_index": 0
     },
@@ -325,7 +325,7 @@
      "name": "product_copy",
      "type": "STRING",
      "links": [
-      178
+      180
      ],
      "slot_index": 1
     }
@@ -392,8 +392,8 @@
      "name": "BOOLEAN",
      "type": "BOOLEAN",
      "links": [
-      181,
-      183
+      183,
+      185
      ],
      "slot_index": 0
     }
@@ -428,10 +428,10 @@
      "links": [
       4,
       12,
-      198,
-      215,
-      232,
-      235
+      200,
+      217,
+      236,
+      239
      ],
      "slot_index": 0
     },
@@ -440,7 +440,7 @@
      "type": "CLIP",
      "links": [
       1,
-      231
+      235
      ],
      "slot_index": 1
     },
@@ -485,9 +485,9 @@
      "name": "CONDITIONING",
      "type": "CONDITIONING",
      "links": [
-      200,
-      210,
-      216
+      202,
+      212,
+      218
      ],
      "slot_index": 0
     }
@@ -540,9 +540,9 @@
      "type": "IMAGE",
      "links": [
       5,
-      174,
-      180,
-      190
+      176,
+      182,
+      192
      ],
      "slot_index": 0
     },
@@ -793,7 +793,7 @@
      "name": "value",
      "type": "*",
      "links": [
-      184
+      186
      ],
      "slot_index": 0
     }
@@ -850,8 +850,8 @@
      "type": "MASK",
      "links": [
       33,
-      175,
-      191
+      177,
+      193
      ],
      "slot_index": 1
     },
@@ -973,7 +973,7 @@
      "name": "start",
      "type": "INT",
      "links": [
-      189
+      251
      ],
      "slot_index": 2
     },
@@ -982,7 +982,7 @@
      "type": "INT",
      "links": [
       15,
-      160
+      250
      ],
      "slot_index": 3
     },
@@ -990,7 +990,7 @@
      "name": "shot",
      "type": "STRING",
      "links": [
-      188
+      252
      ],
      "slot_index": 4
     }
@@ -1105,7 +1105,7 @@
      "name": "mask",
      "type": "MASK",
      "links": [
-      211
+      213
      ],
      "slot_index": 2
     },
@@ -1115,7 +1115,7 @@
      "links": [
       118,
       122,
-      212
+      214
      ],
      "slot_index": 3
     }
@@ -1170,7 +1170,7 @@
      "type": "*",
      "links": [
       38,
-      236
+      240
      ],
      "slot_index": 0
     }
@@ -2392,8 +2392,9 @@
      "name": "report",
      "type": "STRING",
      "links": [
-      223,
-      226
+      225,
+      228,
+      254
      ],
      "slot_index": 3
     },
@@ -2562,7 +2563,8 @@
      "type": "*",
      "links": [
       126,
-      224
+      226,
+      253
      ],
      "slot_index": 0
     }
@@ -3148,9 +3150,8 @@
      "name": "value",
      "type": "*",
      "links": [
-      157,
-      193,
-      225
+      227,
+      247
      ],
      "slot_index": 0
     }
@@ -3199,7 +3200,7 @@
      "name": "value",
      "type": "*",
      "links": [
-      159
+      249
      ],
      "slot_index": 0
     }
@@ -3215,14 +3216,14 @@
    "type": "ProductLabelVideoRefine",
    "pos": [
     5960,
-    680
+    1050
    ],
    "size": [
     420,
     440
    ],
    "flags": {},
-   "order": 79,
+   "order": 80,
    "mode": 0,
    "inputs": [
     {
@@ -3251,12 +3252,25 @@
      "link": null
     },
     {
+     "name": "shots",
+     "type": "STRING",
+     "link": 160
+    },
+    {
      "name": "keyframe_index",
      "type": "INT",
      "widget": {
       "name": "keyframe_index"
      },
-     "link": 160
+     "link": 161
+    },
+    {
+     "name": "keyframe_frames",
+     "type": "STRING",
+     "widget": {
+      "name": "keyframe_frames"
+     },
+     "link": 162
     },
     {
      "name": "settings",
@@ -3264,7 +3278,7 @@
      "widget": {
       "name": "settings"
      },
-     "link": 161
+     "link": 163
     },
     {
      "name": "fps",
@@ -3272,7 +3286,7 @@
      "widget": {
       "name": "fps"
      },
-     "link": 162
+     "link": 164
     }
    ],
    "outputs": [
@@ -3280,7 +3294,7 @@
      "name": "frames",
      "type": "IMAGE",
      "links": [
-      187
+      189
      ],
      "slot_index": 0
     },
@@ -3300,9 +3314,9 @@
      "name": "report",
      "type": "STRING",
      "links": [
-      173,
-      227,
-      229
+      175,
+      229,
+      232
      ],
      "slot_index": 3
     },
@@ -3310,7 +3324,7 @@
      "name": "qa_image",
      "type": "IMAGE",
      "links": [
-      172
+      174
      ],
      "slot_index": 4
     }
@@ -3322,7 +3336,7 @@
    "widgets_values": [
     "alltracker.pth",
     0,
-    "auto",
+    "",
     "",
     0.0,
     0,
@@ -3344,18 +3358,18 @@
     220
    ],
    "flags": {},
-   "order": 82,
+   "order": 83,
    "mode": 0,
    "inputs": [
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 163
+     "link": 165
     },
     {
      "name": "audio",
      "type": "AUDIO",
-     "link": 164
+     "link": 166
     },
     {
      "name": "fps",
@@ -3363,7 +3377,7 @@
      "widget": {
       "name": "fps"
      },
-     "link": 165
+     "link": 167
     },
     {
      "name": "filename_prefix",
@@ -3371,7 +3385,7 @@
      "widget": {
       "name": "filename_prefix"
      },
-     "link": 166
+     "link": 168
     }
    ],
    "outputs": [],
@@ -3397,18 +3411,18 @@
     180
    ],
    "flags": {},
-   "order": 83,
+   "order": 84,
    "mode": 0,
    "inputs": [
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 167
+     "link": 169
     },
     {
      "name": "audio",
      "type": "AUDIO",
-     "link": 168
+     "link": 170
     },
     {
      "name": "fps",
@@ -3416,7 +3430,7 @@
      "widget": {
       "name": "fps"
      },
-     "link": 169
+     "link": 171
     }
    ],
    "outputs": [
@@ -3424,7 +3438,7 @@
      "name": "VIDEO",
      "type": "VIDEO",
      "links": [
-      170
+      172
      ],
      "slot_index": 0
     }
@@ -3452,13 +3466,13 @@
     300
    ],
    "flags": {},
-   "order": 85,
+   "order": 86,
    "mode": 0,
    "inputs": [
     {
      "name": "video",
      "type": "VIDEO",
-     "link": 170
+     "link": 172
     },
     {
      "name": "filename_prefix",
@@ -3466,7 +3480,7 @@
      "widget": {
       "name": "filename_prefix"
      },
-     "link": 171
+     "link": 173
     }
    ],
    "outputs": [
@@ -3500,13 +3514,13 @@
     330
    ],
    "flags": {},
-   "order": 86,
+   "order": 87,
    "mode": 0,
    "inputs": [
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 172
+     "link": 174
     }
    ],
    "outputs": [],
@@ -3530,13 +3544,13 @@
     300
    ],
    "flags": {},
-   "order": 87,
+   "order": 88,
    "mode": 0,
    "inputs": [
     {
      "name": "source",
      "type": "*",
-     "link": 173
+     "link": 175
     }
    ],
    "outputs": [
@@ -3565,28 +3579,28 @@
     220
    ],
    "flags": {},
-   "order": 88,
+   "order": 89,
    "mode": 0,
    "inputs": [
     {
      "name": "frame",
      "type": "IMAGE",
-     "link": 174
+     "link": 176
     },
     {
      "name": "mask",
      "type": "MASK",
-     "link": 175
+     "link": 177
     },
     {
      "name": "reference",
      "type": "IMAGE",
-     "link": 176
+     "link": 178
     },
     {
      "name": "reference_mask",
      "type": "MASK",
-     "link": 177
+     "link": 179
     },
     {
      "name": "product_copy",
@@ -3594,7 +3608,7 @@
      "widget": {
       "name": "product_copy"
      },
-     "link": 178
+     "link": 180
     }
    ],
    "outputs": [
@@ -3602,7 +3616,7 @@
      "name": "sheet",
      "type": "IMAGE",
      "links": [
-      179
+      181
      ],
      "slot_index": 0
     },
@@ -3635,13 +3649,13 @@
     330
    ],
    "flags": {},
-   "order": 89,
+   "order": 90,
    "mode": 0,
    "inputs": [
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 179
+     "link": 181
     }
    ],
    "outputs": [],
@@ -3671,12 +3685,12 @@
     {
      "name": "value",
      "type": "*",
-     "link": 180
+     "link": 182
     },
     {
      "name": "when",
      "type": "*",
-     "link": 181
+     "link": 183
     }
    ],
    "outputs": [
@@ -3715,12 +3729,12 @@
     {
      "name": "value",
      "type": "*",
-     "link": 182
+     "link": 184
     },
     {
      "name": "when",
      "type": "*",
-     "link": 183
+     "link": 185
     }
    ],
    "outputs": [
@@ -3728,7 +3742,7 @@
      "name": "value",
      "type": "*",
      "links": [
-      207
+      209
      ],
      "slot_index": 0
     }
@@ -3759,12 +3773,12 @@
     {
      "name": "value",
      "type": "*",
-     "link": 184
+     "link": 186
     },
     {
      "name": "when",
      "type": "*",
-     "link": 185
+     "link": 187
     }
    ],
    "outputs": [
@@ -3772,8 +3786,7 @@
      "name": "value",
      "type": "*",
      "links": [
-      158,
-      194
+      248
      ],
      "slot_index": 0
     }
@@ -3798,23 +3811,23 @@
     240
    ],
    "flags": {},
-   "order": 80,
+   "order": 81,
    "mode": 0,
    "inputs": [
     {
      "name": "frames",
      "type": "IMAGE",
-     "link": 186
+     "link": 188
     },
     {
      "name": "shot_frames",
      "type": "IMAGE",
-     "link": 187
+     "link": 189
     },
     {
      "name": "shot",
      "type": "STRING",
-     "link": 188
+     "link": 190
     },
     {
      "name": "start",
@@ -3822,7 +3835,7 @@
      "widget": {
       "name": "start"
      },
-     "link": 189
+     "link": 191
     }
    ],
    "outputs": [
@@ -3830,8 +3843,8 @@
      "name": "frames",
      "type": "IMAGE",
      "links": [
-      163,
-      167
+      165,
+      169
      ],
      "slot_index": 0
     },
@@ -3842,7 +3855,7 @@
      "slot_index": 1
     }
    ],
-   "title": "The refined shot back into the clip (its text: shot.json)",
+   "title": "The refined shots back into the clip (its text: shot.json)",
    "properties": {
     "Node name for S&R": "ProductLabelSplice"
    },
@@ -3862,18 +3875,18 @@
     120
    ],
    "flags": {},
-   "order": 90,
+   "order": 91,
    "mode": 0,
    "inputs": [
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 190
+     "link": 192
     },
     {
      "name": "masks",
      "type": "MASK",
-     "link": 191
+     "link": 193
     }
    ],
    "outputs": [
@@ -3881,7 +3894,7 @@
      "name": "overlay",
      "type": "IMAGE",
      "links": [
-      192
+      194
      ],
      "slot_index": 0
     }
@@ -3906,13 +3919,13 @@
     330
    ],
    "flags": {},
-   "order": 91,
+   "order": 92,
    "mode": 0,
    "inputs": [
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 192
+     "link": 194
     }
    ],
    "outputs": [],
@@ -3936,18 +3949,18 @@
     120
    ],
    "flags": {},
-   "order": 92,
+   "order": 93,
    "mode": 0,
    "inputs": [
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 193
+     "link": 195
     },
     {
      "name": "masks",
      "type": "MASK",
-     "link": 194
+     "link": 196
     }
    ],
    "outputs": [
@@ -3955,12 +3968,12 @@
      "name": "overlay",
      "type": "IMAGE",
      "links": [
-      195
+      197
      ],
      "slot_index": 0
     }
    ],
-   "title": "The shot's masks on its frames (check SAM 3's track)",
+   "title": "The shots' masks on their frames (check SAM 3's track)",
    "properties": {
     "Node name for S&R": "ProductLabelMaskOverlay"
    },
@@ -3980,13 +3993,13 @@
     180
    ],
    "flags": {},
-   "order": 93,
+   "order": 94,
    "mode": 0,
    "inputs": [
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 195
+     "link": 197
     },
     {
      "name": "audio",
@@ -3999,7 +4012,7 @@
      "widget": {
       "name": "fps"
      },
-     "link": 196
+     "link": 198
     }
    ],
    "outputs": [
@@ -4007,7 +4020,7 @@
      "name": "VIDEO",
      "type": "VIDEO",
      "links": [
-      197
+      199
      ],
      "slot_index": 0
     }
@@ -4035,13 +4048,13 @@
     300
    ],
    "flags": {},
-   "order": 94,
+   "order": 95,
    "mode": 0,
    "inputs": [
     {
      "name": "video",
      "type": "VIDEO",
-     "link": 197
+     "link": 199
     }
    ],
    "outputs": [
@@ -4081,17 +4094,17 @@
     {
      "name": "model",
      "type": "MODEL",
-     "link": 198
+     "link": 200
     },
     {
      "name": "image",
      "type": "IMAGE",
-     "link": 199
+     "link": 201
     },
     {
      "name": "conditioning",
      "type": "CONDITIONING",
-     "link": 200
+     "link": 202
     },
     {
      "name": "bboxes",
@@ -4114,8 +4127,8 @@
      "name": "masks",
      "type": "MASK",
      "links": [
-      203,
-      206
+      205,
+      208
      ],
      "slot_index": 0
     },
@@ -4154,17 +4167,17 @@
     {
      "name": "reference",
      "type": "IMAGE",
-     "link": 201
+     "link": 203
     },
     {
      "name": "mask",
      "type": "MASK",
-     "link": 202
+     "link": 204
     },
     {
      "name": "sam_mask",
      "type": "MASK",
-     "link": 203
+     "link": 205
     }
    ],
    "outputs": [
@@ -4173,8 +4186,8 @@
      "type": "MASK",
      "links": [
       10,
-      177,
-      218
+      179,
+      220
      ],
      "slot_index": 0
     },
@@ -4211,17 +4224,17 @@
     {
      "name": "reference",
      "type": "IMAGE",
-     "link": 204
+     "link": 206
     },
     {
      "name": "mask",
      "type": "MASK",
-     "link": 205
+     "link": 207
     },
     {
      "name": "sam_mask",
      "type": "MASK",
-     "link": 206
+     "link": 208
     }
    ],
    "outputs": [
@@ -4270,7 +4283,7 @@
      "name": "BOOLEAN",
      "type": "BOOLEAN",
      "links": [
-      208
+      210
      ],
      "slot_index": 0
     }
@@ -4301,12 +4314,12 @@
     {
      "name": "value",
      "type": "*",
-     "link": 207
+     "link": 209
     },
     {
      "name": "when",
      "type": "*",
-     "link": 208
+     "link": 210
     }
    ],
    "outputs": [
@@ -4315,7 +4328,8 @@
      "type": "*",
      "links": [
       27,
-      185
+      187,
+      245
      ],
      "slot_index": 0
     }
@@ -4364,7 +4378,7 @@
      "name": "given",
      "type": "BOOLEAN",
      "links": [
-      209
+      211
      ],
      "slot_index": 2
     }
@@ -4395,7 +4409,7 @@
     {
      "name": "when",
      "type": "*",
-     "link": 209
+     "link": 211
     },
     {
      "name": "if_true",
@@ -4405,7 +4419,7 @@
     {
      "name": "if_false",
      "type": "*",
-     "link": 210
+     "link": 212
     }
    ],
    "outputs": [
@@ -4443,12 +4457,12 @@
     {
      "name": "mask",
      "type": "MASK",
-     "link": 211
+     "link": 213
     },
     {
      "name": "crop_data",
      "type": "CROP_DATA",
-     "link": 212
+     "link": 214
     }
    ],
    "outputs": [
@@ -4486,32 +4500,32 @@
     {
      "name": "frames",
      "type": "IMAGE",
-     "link": 213
+     "link": 215
     },
     {
      "name": "masks",
      "type": "MASK",
-     "link": 214
+     "link": 216
     },
     {
      "name": "model",
      "type": "MODEL",
-     "link": 215
+     "link": 217
     },
     {
      "name": "conditioning",
      "type": "CONDITIONING",
-     "link": 216
+     "link": 218
     },
     {
      "name": "reference",
      "type": "IMAGE",
-     "link": 217
+     "link": 219
     },
     {
      "name": "reference_mask",
      "type": "MASK",
-     "link": 218
+     "link": 220
     },
     {
      "name": "keyframe_frame",
@@ -4519,7 +4533,7 @@
      "widget": {
       "name": "keyframe_frame"
      },
-     "link": 219
+     "link": 221
     },
     {
      "name": "keyframe_given",
@@ -4527,7 +4541,7 @@
      "widget": {
       "name": "keyframe_given"
      },
-     "link": 220
+     "link": 222
     },
     {
      "name": "mask_given",
@@ -4535,7 +4549,7 @@
      "widget": {
       "name": "mask_given"
      },
-     "link": 221
+     "link": 223
     }
    ],
    "outputs": [
@@ -4553,8 +4567,9 @@
      "name": "report",
      "type": "STRING",
      "links": [
-      228,
-      230
+      230,
+      233,
+      246
      ],
      "slot_index": 1
     }
@@ -4581,14 +4596,14 @@
     1180
    ],
    "flags": {},
-   "order": 95,
+   "order": 96,
    "mode": 0,
    "inputs": [],
    "outputs": [],
    "title": "What to set",
    "properties": {},
    "widgets_values": [
-    "ONE WORKFLOW FOR EVERY CASE\n\nSet: the source (an image or a clip), the packshot (the real product photo), the SAM 3 prompt (the product's kind in a word or two, e.g. 'jar', 'pump bottle') and, for a clip, the product's copy. Everything else is decided from these and reported:\n- Keyframe frame -1: found. The clip's shots (between hard cuts) are each probed with SAM 3; the shot whose product matches the packshot best (silhouette, print layout, colour, size) is fixed, from its best frame (largest, sharpest, most frontal, off morph frames and the shot's ends). Set it (from 0) to choose.\n- The packshot's outline: its alpha, else the engine's trace of the backdrop where SAM 3 agrees, else SAM 3's (the trace took in a drop shadow or a reflection).\n- Auto Draft auto: the print's polarity from the packshot; the fit affine where the packshot's silhouette fits the product's mask (seen front on), else homography; dark print seen front on is warped whole, else the print goes on the frame's own body (dark print registered onto the generated print), inside a print box read off the packshot's glyphs; the bow from the generated print's lines or the mask's ends.\n- Refine: the label turns round the body only where its print slides past the review's limit and the camera's orbit is measured on the ground; render processes by the machine's cores and memory.\n\nOptional: a product mask (else SAM 3), a corrected keyframe (else the stills branch makes it), a job (else Auto Draft), Refine settings JSON, Straighten (Image Reframe's frame and rotation, all 0: off). Fix this product false: only the triage sheet runs. An edit with several products: run one product's packshot, then the next on the output.\n\nOutputs: the refined image (a clip: the refined keyframe), QA sheets and report.json (QA Sheet's text); for a clip, the lossless master (.mov), the mp4 review copy, the QA plot and the Refine report. Each decision is in its node's text: Find Keyframe Frame, Packshot Matte, Auto Draft, Refine's report.\n\nOnly the needed branch runs: Switch and Run If nodes skip the rest."
+    "ONE WORKFLOW FOR EVERY CASE\n\nSet: the source (an image or a clip), the packshot (the real product photo), the SAM 3 prompt (the product's kind in a word or two, e.g. 'jar', 'pump bottle') and, for a clip, the product's copy. Everything else is decided from these and reported:\n- Keyframe frame -1: found. The clip's shots (between hard cuts) are each probed with SAM 3; the shot whose product matches the packshot best (silhouette, print layout, colour, size) is fixed, from its best frame (largest, sharpest, most frontal, off morph frames and the shot's ends). Every other shot that likely shows the product (6 frames or more) is fixed too, from its own best frame (Every Shot: its own keyframe from the stills branch, its own masks); a shot whose keyframe fails its audit is left as generated and named. Set the keyframe frame (from 0) to fix only that frame's shot.\n- The packshot's outline: its alpha, else the engine's trace of the backdrop where SAM 3 agrees, else SAM 3's (the trace took in a drop shadow or a reflection).\n- Auto Draft auto: the print's polarity from the packshot; the fit affine where the packshot's silhouette fits the product's mask (seen front on), else homography; dark print seen front on is warped whole, else the print goes on the frame's own body (dark print registered onto the generated print), inside a print box read off the packshot's glyphs; the bow from the generated print's lines or the mask's ends.\n- Refine: the label turns round the body only where its print slides past the review's limit and the camera's orbit is measured on the ground; render processes by the machine's cores and memory.\n\nOptional: a product mask (else SAM 3), a corrected keyframe (else the stills branch makes it), a job (else Auto Draft), Refine settings JSON, Straighten (Image Reframe's frame and rotation, all 0: off). Fix this product false: only the triage sheet runs. An edit with several products: run one product's packshot, then the next on the output.\n\nOutputs: the refined image (a clip: the refined keyframe), QA sheets and report.json (QA Sheet's text); for a clip, the lossless master (.mov), the mp4 review copy, the QA plot and the Refine report. Each decision is in its node's text: Find Keyframe Frame, Packshot Matte, Auto Draft, Refine's report.\n\nOnly the needed branch runs: Switch and Run If nodes skip the rest."
    ],
    "color": "#432",
    "bgcolor": "#653"
@@ -4611,12 +4626,12 @@
     {
      "name": "keyframe",
      "type": "IMAGE",
-     "link": 222
+     "link": 224
     },
     {
      "name": "report",
      "type": "STRING",
-     "link": 223
+     "link": 225
     }
    ],
    "outputs": [
@@ -4653,12 +4668,12 @@
     {
      "name": "value",
      "type": "*",
-     "link": 224
+     "link": 226
     },
     {
      "name": "when",
      "type": "*",
-     "link": 225
+     "link": 227
     }
    ],
    "outputs": [
@@ -4666,7 +4681,7 @@
      "name": "value",
      "type": "*",
      "links": [
-      222
+      224
      ],
      "slot_index": 0
     }
@@ -4697,7 +4712,7 @@
     {
      "name": "report",
      "type": "STRING",
-     "link": 226
+     "link": 228
     }
    ],
    "outputs": [
@@ -4730,18 +4745,23 @@
     120
    ],
    "flags": {},
-   "order": 81,
+   "order": 82,
    "mode": 0,
    "inputs": [
     {
      "name": "report",
      "type": "STRING",
-     "link": 227
+     "link": 229
     },
     {
      "name": "keyframe_report",
      "type": "STRING",
-     "link": 228
+     "link": 230
+    },
+    {
+     "name": "every_shot",
+     "type": "STRING",
+     "link": 231
     }
    ],
    "outputs": [
@@ -4749,7 +4769,7 @@
      "name": "filename_prefix",
      "type": "STRING",
      "links": [
-      166
+      168
      ],
      "slot_index": 0
     }
@@ -4775,18 +4795,23 @@
     120
    ],
    "flags": {},
-   "order": 84,
+   "order": 85,
    "mode": 0,
    "inputs": [
     {
      "name": "report",
      "type": "STRING",
-     "link": 229
+     "link": 232
     },
     {
      "name": "keyframe_report",
      "type": "STRING",
-     "link": 230
+     "link": 233
+    },
+    {
+     "name": "every_shot",
+     "type": "STRING",
+     "link": 234
     }
    ],
    "outputs": [
@@ -4794,7 +4819,7 @@
      "name": "filename_prefix",
      "type": "STRING",
      "links": [
-      171
+      173
      ],
      "slot_index": 0
     }
@@ -4826,7 +4851,7 @@
     {
      "name": "clip",
      "type": "CLIP",
-     "link": 231
+     "link": 235
     }
    ],
    "outputs": [
@@ -4834,8 +4859,8 @@
      "name": "CONDITIONING",
      "type": "CONDITIONING",
      "links": [
-      234,
-      237
+      238,
+      241
      ],
      "slot_index": 0
     }
@@ -4866,17 +4891,17 @@
     {
      "name": "model",
      "type": "MODEL",
-     "link": 232
+     "link": 236
     },
     {
      "name": "image",
      "type": "IMAGE",
-     "link": 233
+     "link": 237
     },
     {
      "name": "conditioning",
      "type": "CONDITIONING",
-     "link": 234
+     "link": 238
     },
     {
      "name": "bboxes",
@@ -4938,17 +4963,17 @@
     {
      "name": "model",
      "type": "MODEL",
-     "link": 235
+     "link": 239
     },
     {
      "name": "image",
      "type": "IMAGE",
-     "link": 236
+     "link": 240
     },
     {
      "name": "conditioning",
      "type": "CONDITIONING",
-     "link": 237
+     "link": 241
     },
     {
      "name": "bboxes",
@@ -5010,17 +5035,17 @@
     {
      "name": "frames",
      "type": "IMAGE",
-     "link": 238
+     "link": 242
     },
     {
      "name": "is_video",
      "type": "BOOLEAN",
-     "link": 239
+     "link": 243
     },
     {
      "name": "masks",
      "type": "MASK",
-     "link": 240
+     "link": 244
     }
    ],
    "outputs": [
@@ -5029,8 +5054,8 @@
      "type": "IMAGE",
      "links": [
       2,
-      182,
-      213
+      184,
+      215
      ],
      "slot_index": 0
     },
@@ -5040,7 +5065,7 @@
      "links": [
       25,
       28,
-      214
+      216
      ],
      "slot_index": 1
     },
@@ -5066,6 +5091,148 @@
    "widgets_values": [
     4096
    ]
+  },
+  {
+   "id": 110,
+   "type": "ProductLabelEveryShot",
+   "pos": [
+    5960,
+    680
+   ],
+   "size": [
+    420,
+    300
+   ],
+   "flags": {},
+   "order": 79,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "frames",
+     "type": "IMAGE",
+     "link": 245
+    },
+    {
+     "name": "keyframe_report",
+     "type": "STRING",
+     "link": 246
+    },
+    {
+     "name": "shot_frames",
+     "type": "IMAGE",
+     "link": 247
+    },
+    {
+     "name": "shot_masks",
+     "type": "MASK",
+     "link": 248
+    },
+    {
+     "name": "keyframe",
+     "type": "IMAGE",
+     "link": 249
+    },
+    {
+     "name": "keyframe_index",
+     "type": "INT",
+     "link": 250
+    },
+    {
+     "name": "start",
+     "type": "INT",
+     "link": 251
+    },
+    {
+     "name": "shot",
+     "type": "STRING",
+     "link": 252
+    },
+    {
+     "name": "template_keyframe",
+     "type": "IMAGE",
+     "link": 253
+    },
+    {
+     "name": "template_report",
+     "type": "STRING",
+     "link": 254
+    }
+   ],
+   "outputs": [
+    {
+     "name": "frames",
+     "type": "IMAGE",
+     "links": [
+      157,
+      195
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "masks",
+     "type": "MASK",
+     "links": [
+      158,
+      196
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "keyframes",
+     "type": "IMAGE",
+     "links": [
+      159
+     ],
+     "slot_index": 2
+    },
+    {
+     "name": "keyframe_index",
+     "type": "INT",
+     "links": [
+      161
+     ],
+     "slot_index": 3
+    },
+    {
+     "name": "keyframe_frames",
+     "type": "STRING",
+     "links": [
+      162
+     ],
+     "slot_index": 4
+    },
+    {
+     "name": "start",
+     "type": "INT",
+     "links": [
+      191
+     ],
+     "slot_index": 5
+    },
+    {
+     "name": "shot",
+     "type": "STRING",
+     "links": [
+      190,
+      231,
+      234
+     ],
+     "slot_index": 6
+    },
+    {
+     "name": "shots",
+     "type": "STRING",
+     "links": [
+      160
+     ],
+     "slot_index": 7
+    }
+   ],
+   "title": "Every Shot: a keyframe and masks for each other shot the product is in",
+   "properties": {
+    "Node name for S&R": "ProductLabelEveryShot"
+   },
+   "widgets_values": []
   }
  ],
  "links": [
@@ -6319,7 +6486,7 @@
   ],
   [
    157,
-   60,
+   110,
    0,
    62,
    0,
@@ -6327,46 +6494,62 @@
   ],
   [
    158,
-   74,
-   0,
+   110,
+   1,
    62,
    1,
    "MASK"
   ],
   [
    159,
-   61,
-   0,
+   110,
+   2,
    62,
    2,
    "IMAGE"
   ],
   [
    160,
-   19,
-   3,
+   110,
+   7,
    62,
    5,
-   "INT"
-  ],
-  [
-   161,
-   7,
-   0,
-   62,
-   6,
    "STRING"
   ],
   [
+   161,
+   110,
+   3,
+   62,
+   6,
+   "INT"
+  ],
+  [
    162,
-   1,
-   1,
+   110,
+   4,
    62,
    7,
-   "FLOAT"
+   "STRING"
   ],
   [
    163,
+   7,
+   0,
+   62,
+   8,
+   "STRING"
+  ],
+  [
+   164,
+   1,
+   1,
+   62,
+   9,
+   "FLOAT"
+  ],
+  [
+   165,
    75,
    0,
    63,
@@ -6374,7 +6557,7 @@
    "IMAGE"
   ],
   [
-   164,
+   166,
    1,
    2,
    63,
@@ -6382,7 +6565,7 @@
    "AUDIO"
   ],
   [
-   165,
+   167,
    1,
    1,
    63,
@@ -6390,7 +6573,7 @@
    "FLOAT"
   ],
   [
-   166,
+   168,
    94,
    0,
    63,
@@ -6398,7 +6581,7 @@
    "STRING"
   ],
   [
-   167,
+   169,
    75,
    0,
    64,
@@ -6406,7 +6589,7 @@
    "IMAGE"
   ],
   [
-   168,
+   170,
    1,
    2,
    64,
@@ -6414,7 +6597,7 @@
    "AUDIO"
   ],
   [
-   169,
+   171,
    1,
    1,
    64,
@@ -6422,7 +6605,7 @@
    "*"
   ],
   [
-   170,
+   172,
    64,
    0,
    65,
@@ -6430,7 +6613,7 @@
    "VIDEO"
   ],
   [
-   171,
+   173,
    95,
    0,
    65,
@@ -6438,7 +6621,7 @@
    "*"
   ],
   [
-   172,
+   174,
    62,
    4,
    66,
@@ -6446,7 +6629,7 @@
    "IMAGE"
   ],
   [
-   173,
+   175,
    62,
    3,
    67,
@@ -6454,7 +6637,7 @@
    "*"
   ],
   [
-   174,
+   176,
    12,
    0,
    70,
@@ -6462,7 +6645,7 @@
    "IMAGE"
   ],
   [
-   175,
+   177,
    17,
    1,
    70,
@@ -6470,7 +6653,7 @@
    "MASK"
   ],
   [
-   176,
+   178,
    2,
    0,
    70,
@@ -6478,7 +6661,7 @@
    "IMAGE"
   ],
   [
-   177,
+   179,
    82,
    0,
    70,
@@ -6486,7 +6669,7 @@
    "MASK"
   ],
   [
-   178,
+   180,
    7,
    1,
    70,
@@ -6494,7 +6677,7 @@
    "STRING"
   ],
   [
-   179,
+   181,
    70,
    0,
    71,
@@ -6502,26 +6685,10 @@
    "IMAGE"
   ],
   [
-   180,
+   182,
    12,
    0,
    72,
-   0,
-   "*"
-  ],
-  [
-   181,
-   9,
-   0,
-   72,
-   1,
-   "*"
-  ],
-  [
-   182,
-   99,
-   0,
-   73,
    0,
    "*"
   ],
@@ -6529,12 +6696,28 @@
    183,
    9,
    0,
-   73,
+   72,
    1,
    "*"
   ],
   [
    184,
+   99,
+   0,
+   73,
+   0,
+   "*"
+  ],
+  [
+   185,
+   9,
+   0,
+   73,
+   1,
+   "*"
+  ],
+  [
+   186,
    16,
    0,
    74,
@@ -6542,7 +6725,7 @@
    "*"
   ],
   [
-   185,
+   187,
    85,
    0,
    74,
@@ -6550,7 +6733,7 @@
    "*"
   ],
   [
-   186,
+   188,
    1,
    0,
    75,
@@ -6558,7 +6741,7 @@
    "IMAGE"
   ],
   [
-   187,
+   189,
    62,
    0,
    75,
@@ -6566,23 +6749,23 @@
    "IMAGE"
   ],
   [
-   188,
-   19,
-   4,
+   190,
+   110,
+   6,
    75,
    2,
    "STRING"
   ],
   [
-   189,
-   19,
-   2,
+   191,
+   110,
+   5,
    75,
    3,
    "INT"
   ],
   [
-   190,
+   192,
    12,
    0,
    76,
@@ -6590,7 +6773,7 @@
    "IMAGE"
   ],
   [
-   191,
+   193,
    17,
    1,
    76,
@@ -6598,7 +6781,7 @@
    "MASK"
   ],
   [
-   192,
+   194,
    76,
    0,
    77,
@@ -6606,23 +6789,23 @@
    "IMAGE"
   ],
   [
-   193,
-   60,
+   195,
+   110,
    0,
    78,
    0,
    "IMAGE"
   ],
   [
-   194,
-   74,
-   0,
+   196,
+   110,
+   1,
    78,
    1,
    "MASK"
   ],
   [
-   195,
+   197,
    78,
    0,
    79,
@@ -6630,7 +6813,7 @@
    "IMAGE"
   ],
   [
-   196,
+   198,
    1,
    1,
    79,
@@ -6638,7 +6821,7 @@
    "*"
   ],
   [
-   197,
+   199,
    79,
    0,
    80,
@@ -6646,7 +6829,7 @@
    "VIDEO"
   ],
   [
-   198,
+   200,
    10,
    0,
    81,
@@ -6654,7 +6837,7 @@
    "MODEL"
   ],
   [
-   199,
+   201,
    2,
    0,
    81,
@@ -6662,7 +6845,7 @@
    "IMAGE"
   ],
   [
-   200,
+   202,
    11,
    0,
    81,
@@ -6670,39 +6853,39 @@
    "CONDITIONING"
   ],
   [
-   201,
+   203,
    2,
    0,
    82,
    0,
    "IMAGE"
-  ],
-  [
-   202,
-   2,
-   1,
-   82,
-   1,
-   "MASK"
-  ],
-  [
-   203,
-   81,
-   0,
-   82,
-   2,
-   "MASK"
   ],
   [
    204,
    2,
+   1,
+   82,
+   1,
+   "MASK"
+  ],
+  [
+   205,
+   81,
+   0,
+   82,
+   2,
+   "MASK"
+  ],
+  [
+   206,
+   2,
    0,
    83,
    0,
    "IMAGE"
   ],
   [
-   205,
+   207,
    2,
    1,
    83,
@@ -6710,7 +6893,7 @@
    "MASK"
   ],
   [
-   206,
+   208,
    81,
    0,
    83,
@@ -6718,7 +6901,7 @@
    "MASK"
   ],
   [
-   207,
+   209,
    73,
    0,
    85,
@@ -6726,7 +6909,7 @@
    "*"
   ],
   [
-   208,
+   210,
    84,
    0,
    85,
@@ -6734,7 +6917,7 @@
    "*"
   ],
   [
-   209,
+   211,
    86,
    2,
    87,
@@ -6742,7 +6925,7 @@
    "*"
   ],
   [
-   210,
+   212,
    11,
    0,
    87,
@@ -6750,7 +6933,7 @@
    "*"
   ],
   [
-   211,
+   213,
    21,
    2,
    88,
@@ -6758,7 +6941,7 @@
    "MASK"
   ],
   [
-   212,
+   214,
    21,
    3,
    88,
@@ -6766,7 +6949,7 @@
    "CROP_DATA"
   ],
   [
-   213,
+   215,
    99,
    0,
    89,
@@ -6774,7 +6957,7 @@
    "IMAGE"
   ],
   [
-   214,
+   216,
    99,
    1,
    89,
@@ -6782,7 +6965,7 @@
    "MASK"
   ],
   [
-   215,
+   217,
    10,
    0,
    89,
@@ -6790,7 +6973,7 @@
    "MODEL"
   ],
   [
-   216,
+   218,
    11,
    0,
    89,
@@ -6798,7 +6981,7 @@
    "CONDITIONING"
   ],
   [
-   217,
+   219,
    2,
    0,
    89,
@@ -6806,7 +6989,7 @@
    "IMAGE"
   ],
   [
-   218,
+   220,
    82,
    0,
    89,
@@ -6814,7 +6997,7 @@
    "MASK"
   ],
   [
-   219,
+   221,
    6,
    0,
    89,
@@ -6822,7 +7005,7 @@
    "INT"
   ],
   [
-   220,
+   222,
    4,
    2,
    89,
@@ -6830,7 +7013,7 @@
    "BOOLEAN"
   ],
   [
-   221,
+   223,
    3,
    2,
    89,
@@ -6838,7 +7021,7 @@
    "BOOLEAN"
   ],
   [
-   222,
+   224,
    92,
    0,
    91,
@@ -6846,7 +7029,7 @@
    "IMAGE"
   ],
   [
-   223,
+   225,
    40,
    3,
    91,
@@ -6854,7 +7037,7 @@
    "STRING"
   ],
   [
-   224,
+   226,
    43,
    0,
    92,
@@ -6862,7 +7045,7 @@
    "*"
   ],
   [
-   225,
+   227,
    60,
    0,
    92,
@@ -6870,7 +7053,7 @@
    "*"
   ],
   [
-   226,
+   228,
    40,
    3,
    93,
@@ -6878,26 +7061,10 @@
    "STRING"
   ],
   [
-   227,
-   62,
-   3,
-   94,
-   0,
-   "STRING"
-  ],
-  [
-   228,
-   89,
-   1,
-   94,
-   1,
-   "STRING"
-  ],
-  [
    229,
    62,
    3,
-   95,
+   94,
    0,
    "STRING"
   ],
@@ -6905,12 +7072,44 @@
    230,
    89,
    1,
-   95,
+   94,
    1,
    "STRING"
   ],
   [
    231,
+   110,
+   6,
+   94,
+   2,
+   "STRING"
+  ],
+  [
+   232,
+   62,
+   3,
+   95,
+   0,
+   "STRING"
+  ],
+  [
+   233,
+   89,
+   1,
+   95,
+   1,
+   "STRING"
+  ],
+  [
+   234,
+   110,
+   6,
+   95,
+   2,
+   "STRING"
+  ],
+  [
+   235,
    10,
    1,
    96,
@@ -6918,7 +7117,7 @@
    "CLIP"
   ],
   [
-   232,
+   236,
    10,
    0,
    97,
@@ -6926,7 +7125,7 @@
    "MODEL"
   ],
   [
-   233,
+   237,
    2,
    0,
    97,
@@ -6934,7 +7133,7 @@
    "IMAGE"
   ],
   [
-   234,
+   238,
    96,
    0,
    97,
@@ -6942,7 +7141,7 @@
    "CONDITIONING"
   ],
   [
-   235,
+   239,
    10,
    0,
    98,
@@ -6950,7 +7149,7 @@
    "MODEL"
   ],
   [
-   236,
+   240,
    22,
    0,
    98,
@@ -6958,7 +7157,7 @@
    "IMAGE"
   ],
   [
-   237,
+   241,
    96,
    0,
    98,
@@ -6966,7 +7165,7 @@
    "CONDITIONING"
   ],
   [
-   238,
+   242,
    1,
    0,
    99,
@@ -6974,7 +7173,7 @@
    "IMAGE"
   ],
   [
-   239,
+   243,
    1,
    3,
    99,
@@ -6982,12 +7181,92 @@
    "BOOLEAN"
   ],
   [
-   240,
+   244,
    3,
    1,
    99,
    2,
    "MASK"
+  ],
+  [
+   245,
+   85,
+   0,
+   110,
+   0,
+   "IMAGE"
+  ],
+  [
+   246,
+   89,
+   1,
+   110,
+   1,
+   "STRING"
+  ],
+  [
+   247,
+   60,
+   0,
+   110,
+   2,
+   "IMAGE"
+  ],
+  [
+   248,
+   74,
+   0,
+   110,
+   3,
+   "MASK"
+  ],
+  [
+   249,
+   61,
+   0,
+   110,
+   4,
+   "IMAGE"
+  ],
+  [
+   250,
+   19,
+   3,
+   110,
+   5,
+   "INT"
+  ],
+  [
+   251,
+   19,
+   2,
+   110,
+   6,
+   "INT"
+  ],
+  [
+   252,
+   19,
+   4,
+   110,
+   7,
+   "STRING"
+  ],
+  [
+   253,
+   43,
+   0,
+   110,
+   8,
+   "IMAGE"
+  ],
+  [
+   254,
+   40,
+   3,
+   110,
+   9,
+   "STRING"
   ]
  ],
  "groups": [
@@ -7071,7 +7350,7 @@
   },
   {
    "id": 7,
-   "title": "Video: Refine (Video) through the shot, spliced back into the clip (clips only)",
+   "title": "Video: Every Shot, Refine (Video) through the shots, spliced back into the clip (clips only)",
    "bounding": [
     5940,
     -80,

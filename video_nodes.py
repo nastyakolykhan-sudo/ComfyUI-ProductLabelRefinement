@@ -177,6 +177,10 @@ class ProductLabelVideoRefine:
                                                 "products since engine 0.5.0; {\"render\": {\"glue\": false}} turns "
                                                 "it off). The report's review says when an end of the run wants "
                                                 "glue.edge \"mean\"."}),
+                "shots": ("STRING", {"forceInput": True, "tooltip": (
+                    "Several shots of the clip, one per keyframe (Every Shot's): JSON [[start, end], ...], the frames "
+                    "each covers (end excluded). Each is refined on its own, as a run of that shot alone, from its "
+                    "keyframe (keyframe_frames: each one's frame), and put back; empty: the frames are one run.")}),
             },
         }
 
@@ -188,9 +192,13 @@ class ProductLabelVideoRefine:
                    "the product, fits its surface per frame, re-projects the label with the frame's light, softness "
                    "and grain. Pixels outside the changed area come back exactly as they went in.")
 
+    @staticmethod
+    def _run(pl, fr, mk, kfs, cfg, kfr, fps, processes, weights):
+        return _run_refine(pl, fr, mk, kfs, cfg, kfr, fps, processes, weights)
+
     def refine(self, frames, mask, keyframes, tracker, keyframe_index=-1, keyframe_frames="auto", keyframe_bbox=None,
                product=None, settings="", fps=24.0, processes=0, model=None, compositing=None, soft_cap=-1.0,
-               glue=False):
+               glue=False, shots=""):
         pl = _engine()
         processes, why = _processes(processes, frames.shape)
         if mask.dim() == 2:
@@ -229,17 +237,32 @@ class ProductLabelVideoRefine:
             raise FileNotFoundError(f"tracker weights not found: put alltracker.pth (MIT, huggingface.co/aharley/"
                                     f"alltracker) in {TRACKERS_DIR}")
         os.environ["PLR_ALLTRACKER"] = weights
-        root = Path(folder_paths.get_temp_directory()) / "label-video" / _digest(fr, mk, *kfs)
-        root.mkdir(parents=True, exist_ok=True)
         print(f"processes  {processes} ({why})")
-        if processes > 1:
-            try:
-                r = _refine_in_process_of_its_own(root, fr, mk, kfs, cfg, kfr, fps, processes, weights)
-            except _WorkerKilled as e:               # out of memory: the same render in this process, one worker
-                print(f"processes  the {processes}-process render was stopped ({e}): again with 1")
-                r = pl.refine(fr, mk, kfs, cfg, kfr, fps=fps, work=root / "work", workers=1)
+        sh = json.loads(shots) if shots and shots.strip() else []
+        if sh:
+            # several shots (Every Shot): each refined on its own frames from its own keyframe, exactly as a run of
+            # that shot alone (its own work folder by its inputs), then put back into the clip
+            if len(sh) != len(kfs) or any(x is None for x in kfr):
+                raise ValueError(f"shots: {len(sh)} shots for {len(kfs)} keyframes; each needs its keyframe frame "
+                                 "(keyframe_frames)")
+            parts = []
+            for (a, b), k_i, f_i in zip(sh, kfs, kfr):
+                if not a <= f_i < b:
+                    raise ValueError(f"shots: keyframe frame {f_i} is outside its shot {a}-{b - 1}")
+                print(f"shot       {a}-{b - 1}, keyframe frame {f_i}")
+                # the shot's own range is the run's: its cuts are found already (Find Keyframe Frame), and inside it
+                # the tracks decide where the label holds; the shot analysis's own cuts read a camera move that swaps
+                # the background as one and stopped the label short of the shot's end (V81)
+                # ... and the label is carried past where they hold while the product's own tracks and matte carry on
+                # (a camera move, a pan, the frame's edge: fit.carry)
+                cfg_i = cfg if cfg.get("shots") else dict(cfg, shots=[[0, b - a]])
+                if "carry" not in (cfg_i.get("fit") or {}):
+                    cfg_i = dict(cfg_i, fit=dict(cfg_i.get("fit") or {}, carry=True))
+                parts.append(self._run(pl, fr[a:b], mk[a:b], [k_i], cfg_i, [f_i - a], fps, processes, weights))
+            root = Path(folder_paths.get_temp_directory()) / "label-video" / _digest(fr, mk, *kfs)
+            r = pl.merge_shots(parts, sh, fr, mk, work=root)
         else:
-            r = pl.refine(fr, mk, kfs, cfg, kfr, fps=fps, work=root / "work", workers=1)
+            r = self._run(pl, fr, mk, kfs, cfg, kfr, fps, processes, weights)
         changed = torch.from_numpy(r["changed"])
         out = frames.clone()
         if changed.any():                    # only the changed pixels are written; the rest is the input tensor
@@ -253,6 +276,19 @@ class ProductLabelVideoRefine:
             qa_img = torch.zeros((1, 64, 64, 3))
         matte = torch.from_numpy(r["matte"].astype(np.float32))
         return (out, matte, changed.to(torch.float32), json.dumps(r["report"], indent=1, default=str), qa_img)
+
+
+def _run_refine(pl, fr, mk, kfs, cfg, kfr, fps, processes, weights):
+    """One run of refine(): its work folder by its inputs (kept across runs), in a process of its own above 1."""
+    root = Path(folder_paths.get_temp_directory()) / "label-video" / _digest(fr, mk, *kfs)
+    root.mkdir(parents=True, exist_ok=True)
+    if processes > 1:
+        try:
+            return _refine_in_process_of_its_own(root, fr, mk, kfs, cfg, kfr, fps, processes, weights)
+        except _WorkerKilled as e:               # out of memory: the same render in this process, one worker
+            print(f"processes  the {processes}-process render was stopped ({e}): again with 1")
+            return pl.refine(fr, mk, kfs, cfg, kfr, fps=fps, work=root / "work", workers=1)
+    return pl.refine(fr, mk, kfs, cfg, kfr, fps=fps, work=root / "work", workers=1)
 
 
 def _digest(*arrays):
