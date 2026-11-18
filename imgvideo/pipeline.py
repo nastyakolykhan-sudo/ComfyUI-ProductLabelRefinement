@@ -497,7 +497,8 @@ def stage_fit(J):
                       fc.get("half", 3), residual=fc.get("residual"), ngrid=fc.get("grid", 5), anchor=J.anchor - J.s0,
                       min_inliers=fc.get("min_inliers", 0.5), max_rms=fc.get("max_rms", 3.0), max_rigid=fc.get("max_rigid", 12.0),
                       shear_max=fc.get("shear_max"), morph_rigid=[int(t) - J.s0 for t in fc.get("morph_rigid", [])],
-                      morph_skip=[int(t) - J.s0 for t in fc.get("morph_skip", [])])
+                      morph_skip=[int(t) - J.s0 for t in fc.get("morph_skip", [])],
+                      carry=bool(fc.get("carry", False)), carry_gate=_carry_gate(J), whole=_whole(J))
     pickle.dump(res, open(J.work / "fit.pkl", "wb"))
     E = res["errors"]
     for e in E:
@@ -508,6 +509,10 @@ def stage_fit(J):
     stops = {k: dict(v, frame=None if v["frame"] is None else v["frame"] + J.s0) for k, v in stops.items()}
     (J.qa / "fit.json").write_text(json.dumps({"impacts": [int(i) + J.s0 for i in res["impacts"]],
                                                "valid": [int(t) + J.s0 for t in res["valid"]], "stops": stops,
+                                               "carried": [int(t) + J.s0 for t in res.get("carried", [])],
+                                               "morph_test": {str(int(t) + J.s0): v for t, v in
+                                                              (res.get("morph_test") or {}).items()},
+                                               "carry": {str(int(t) + J.s0): v for t, v in (res.get("carry") or {}).items()},
                                                "frames": E}, indent=0))
     V = res["valid"]
     rms = np.array([E[t]["rms_px"] for t in V])
@@ -520,13 +525,46 @@ def stage_fit(J):
           f"; smoothing moved the label {np.median(sh):.2f} px (median), {sh.max():.2f} max; "
           f"{sum(t in res['kept_raw'] for t in V)} frames kept their own fit (smoothing fought their tracks: judder)" +
           (f"; morph frames (a shear spike: shape from the frames either side) {[t + J.s0 for t in res['morph']]}"
-           if res.get("morph") else "") + "; the run stops: " + _stops_text(stops))
+           if res.get("morph") else "") + "; the run stops: " + _stops_text(stops) +
+          (f"; carried past it with the product's own tracks (V81): {[t + J.s0 for t in res['carried']]}"
+           if res.get("carried") else ""))
 
 
 def _frame_hist(f, bins=8):
     q = (f // (256 // bins)).astype(np.int32)
     h = np.bincount(((q[..., 0] * bins + q[..., 1]) * bins + q[..., 2]).ravel(), minlength=bins ** 3).astype(float)
     return h / h.sum()
+
+
+def _whole(J):
+    """-> whole(t): the product's matte clear of the frame's border on the job's frame t (None without mattes)."""
+    if not J.has_masks:
+        return None
+    M = J.masks()
+
+    def whole(t):
+        m = M[t]
+        return bool(m.any()) and not bool(m[0].any() or m[-1].any() or m[:, 0].any() or m[:, -1].any())
+    return whole
+
+
+def _carry_gate(J):
+    """The carry's matte test (V81): the product carries on from the frame before (its matte as it lies overlaps that
+    frame's by review's drop_iou) and still shows (drop_matte of the held run's end frame's matte): the same limits
+    the review's drop check reads, so a cut or a wipe (an approved tube's close-up: mattes 0.29) stops both."""
+    if not J.has_masks:
+        return None
+    from .review import DEFAULTS as RV
+    M = J.masks()
+
+    def gate(end, prev, t):
+        a, b = M[prev], M[t]
+        if b.sum() < RV["drop_matte"] * max(int(M[end].sum()), 1):
+            return "the product's matte shrinks (it leaves or is covered)"
+        if (a & b).sum() < RV["drop_iou"] * max(int((a | b).sum()), 1):
+            return "the matte jumps (a cut or a wipe)"
+        return None
+    return gate
 
 
 def _confirm_cuts(J, res):
@@ -553,7 +591,8 @@ def _confirm_cuts(J, res):
         if v["frame"] is None:
             out[k] = v
             continue
-        t_in = V[0] if k == "start" else V[-1]
+        lo, hi = res.get("held") or (V[0], V[-1])          # (the tracks' own run, before any carry)
+        t_in = lo if k == "start" else hi
         d = float(0.5 * np.abs(hist(v["frame"]) - hist(t_in)).sum())
         spike = d > max(0.2, 4.0 * usual)
         failed = list(v["failed"])
@@ -2228,12 +2267,12 @@ def plot_qa(rows, rep, path):
     if rep.get("review"):
         # the automatic review checks: one row per check, a mark on each flagged frame (refined or not)
         ax = axs[-1]
-        names = ["edges", "ghost", "shear", "bend", "vanish", "switch", "swim", "ends", "level", "sharp", "tilt", "spots",
-                 "double"]
+        names = ["edges", "ghost", "shear", "bend", "vanish", "drop", "drift", "switch", "swim", "ends", "level", "sharp",
+                 "tilt", "spots", "double"]
         ax.set_facecolor(surf)
         for i, k in enumerate(names):
             xs = [int(t) for t, v in checks.items() if k in v]
-            ax.scatter(xs, [i] * len(xs), marker="|", s=160, color=(s2 if k in ("vanish", "switch") else s1), lw=2, zorder=3)
+            ax.scatter(xs, [i] * len(xs), marker="|", s=160, color=(s2 if k in ("vanish", "drop", "drift", "switch") else s1), lw=2, zorder=3)
         ax.set_yticks(range(len(names)), names)
         ax.set_ylim(-0.6, len(names) - 0.4)
         if not checks:
@@ -2412,6 +2451,18 @@ def _slide_route_open(render, cfg):
 BODY_FLOOR = 2.0   # levels: the slide route's carried edit is kept no darker than the frame's own body less this (V78)
 BODY_OPEN = 15     # px: the grey opening that reads the body under light print, at least (V79: wider where the old
                    # print's strokes are: a blurred wordmark 23 px wide read as body through 15 px)
+
+
+OLD_WIDE = 14.0   # px: the keyframe frame's old light print with a stroke wider than this (imgpost.ink's WIDE_FROM x its
+                  # 7 px frame_open, where the keyframe's own removal widens, pitfall 117) is left round the new letters
+                  # by the body route's per-frame removal: the label carries the keyframe's whole edit (V80). A coloured
+                  # pump's blurred wordmark in its second shot: 23 px, double and ghost on 17 of 17 frames; the approved
+                  # frosted tube 10, pump under 5
+
+
+def old_print_wide(widest):
+    """Is the old print's widest stroke (body_open's) past what the body route removes (V80)?"""
+    return float(widest) > OLD_WIDE
 
 
 def body_open(kf, src, matte):
@@ -2826,16 +2877,32 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
             # the new; it follows the print instead, carrying the keyframe's whole edit (V76's route, on the tube)
             sl = _print_on_body(J)
             d["print_on_body"] = sl
-            if print_slides(sl):
+            slides = print_slides(sl)
+            bo, bw = body_open(J.kf, frames[f], m)
+            wide = not slides and old_print_wide(bw)
+            if slides or wide:
                 _follow_print(J.v["render"], slide=True)
-                bo, bw = body_open(J.kf, frames[f], m)
                 J.v["render"]["body_open"] = int(bo)
-                d["printed_body"] = {"surface": "tube", "by": "the generated print slides on the body",
+                d["printed_body"] = {"surface": "tube", "by": "the generated print slides on the body" if slides else
+                                     "the old print's strokes are wider than the clip's removal reads",
                                      "print_alpha": dict(J.v["render"]["print_alpha"]), "off": list(PRINTED_OFF),
                                      "body_floor": BODY_FLOOR, "body_open": int(bo), "widest_stroke_px": round(bw, 1)}
-                print(f"route      the generated print slides on the body: held to the body, the label would sit "
-                      f"{sl['held_px'][1]:.1f} px off it (p90; limit {PRINT_SLIDE['held']:g} x the print's "
-                      f"{sl['near_px']:g} px reach): it follows the print and carries the keyframe's whole edit (V78)")
+                if slides:
+                    print(f"route      the generated print slides on the body: held to the body, the label would sit "
+                          f"{sl['held_px'][1]:.1f} px off it (p90; limit {PRINT_SLIDE['held']:g} x the print's "
+                          f"{sl['near_px']:g} px reach): it follows the print and carries the keyframe's whole edit (V78)")
+                else:
+                    print(f"route      the old print's widest stroke is {bw:.1f} px, over {OLD_WIDE:g} px: the body "
+                          f"route's per-frame removal leaves it round the new letters, so the label follows the print "
+                          f"and carries the keyframe's whole edit, its old print removed (V80)")
+                if (J.v.get("fit") or {}).get("shear_max") is not None and "shear_max" not in (cfg.get("fit") or {}):
+                    # the label covers the generated print, sheared or not: a frame whose print shears for a frame
+                    # (a jolt, a blend) keeps its own fit, or the shape borrowed from its neighbours turns the label
+                    # off the print it must cover and the old print shows round it (V81: 4.2 deg off the body, the
+                    # tracks missed by 2.8 px, on a shot's third frame)
+                    J.v["fit"] = dict(J.v["fit"], shear_max=None)
+                    k_fit = _digest(k_track, J.v["fit"])
+                    d["printed_body"]["fit"] = "no morph frames: the label follows the print through its shear (V81)"
                 r_still = {k_: v_ for k_, v_ in J.v["render"].items() if k_ not in RENDER_ONLY}
                 _staged(J, jd / "stamps.json", k_track, k_fit, [r_still, vj.get("artwork"), cfg.get("key"),
                                                                cfg.get("matte_patch")], f, cfg)
@@ -2963,3 +3030,84 @@ def refine(frames, masks, keyframes, settings=None, keyframe_frames=None, fps=24
           f"keyframe saw): {spans(partly_covered)}; flagged {len(report['flagged'])}; {outside} px changed outside "
           f"the matte; {report['seconds']} s")
     return {"frames": out, "matte": masks, "changed": changed, "report": report, "qa_plot": plot, "work": root}
+
+
+def merge_shots(results, shots, frames, masks, work=None):
+    """Shots of one clip refined one by one (refine() on each shot's own frames, as a run of that shot alone) put back
+    into the clip. results: refine()'s dicts; shots: [[a, b], ...], the clip frames each covers (b exclusive), in order
+    and apart; frames, masks: the clip's. -> refine()'s dict over the clip: the frames, matte and changed of each shot
+    in its place, the rest the input; its report's "shots" holds each shot's own report (frames counted from the
+    shot's start) and the merged fields count frames in the clip: covered, not_covered, partly_covered, needs_mask,
+    matte_patched, flagged, keyframes, cuts, and the review (refined and flagged summed, each check's frames; kf_kept and
+    carried the lowest, kf_old the highest)."""
+    frames = np.ascontiguousarray(frames)
+    out, matte = frames.copy(), np.array(masks, dtype=bool)
+    changed = np.zeros(frames.shape[:3], bool)
+    rep = {"engine": None, "frames": int(frames.shape[0]), "size": [frames.shape[2], frames.shape[1]], "fps": None,
+           "cuts": [], "keyframes": [], "covered": [], "not_covered": [], "partly_covered": [], "needs_mask": [],
+           "flagged": {}, "review": None, "outside_matte_px": 0, "matte_patched": [], "seconds": 0.0, "shots": []}
+    review, plots = None, []
+
+    def shift(rs, a):
+        return [[int(x) + a for x in r] for r in rs]
+
+    for r, (a, b) in zip(results, shots):
+        a, b = int(a), int(b)
+        if r["frames"].shape[0] != b - a:
+            raise ValueError(f"shot {a}-{b - 1}: {r['frames'].shape[0]} frames refined for {b - a}")
+        out[a:b], matte[a:b], changed[a:b] = r["frames"], r["matte"], r["changed"]
+        q = r["report"]
+        rep["shots"].append({"frames": [a, b], "report": q})
+        rep["engine"], rep["fps"] = rep["engine"] or q.get("engine"), rep["fps"] or q.get("fps")
+        rep["cuts"] += [int(c) + a for c in q.get("cuts") or []]
+        for d in q.get("keyframes") or []:
+            d = dict(d)
+            for k in ("frame",):
+                if isinstance(d.get(k), int):
+                    d[k] += a
+            for k in ("shot", "held"):
+                if isinstance(d.get(k), list):
+                    d[k] = [int(x) + a for x in d[k]]
+            d["clip_shot"] = [a, b]
+            rep["keyframes"].append(d)
+        for k in ("covered", "needs_mask", "matte_patched"):
+            rep[k] += shift(q.get(k) or [], a)
+        for k in ("not_covered", "partly_covered"):
+            rep[k] += [dict(e, frames=[int(x) + a for x in e["frames"]]) for e in q.get(k) or []]
+        rep["flagged"].update({str(int(t) + a): v for t, v in (q.get("flagged") or {}).items()})
+        rep["outside_matte_px"] += int(q.get("outside_matte_px") or 0)
+        rep["seconds"] = round(rep["seconds"] + float(q.get("seconds") or 0), 1)
+        v = q.get("review")
+        if v is not None:
+            if review is None:
+                review = dict(v, refined=0, flagged=0, frames={}, checks={})
+            review["refined"] += int(v.get("refined") or 0)
+            review["flagged"] += int(v.get("flagged") or 0)
+            review["frames"].update({str(int(t) + a): ks for t, ks in (v.get("frames") or {}).items()})
+            for k, x in (v.get("checks") or {}).items():
+                review["checks"].setdefault(k, x)
+            for k, pick in (("kf_kept", min), ("carried", min), ("kf_old", max)):
+                vals = [x for x in (review.get(k) if len(rep["shots"]) > 1 else None, v.get(k)) if x is not None]
+                if vals:
+                    review[k] = pick(vals)
+        if r.get("qa_plot"):
+            plots.append(r["qa_plot"])
+    rep["review"] = review
+    plot = None
+    if plots and work is not None:
+        from PIL import Image as _I
+        ims = [_I.open(x).convert("RGB") for x in plots if Path(x).exists()]
+        if ims:
+            W = max(i.width for i in ims)
+            canvas = _I.new("RGB", (W, sum(i.height for i in ims)), "white")
+            y = 0
+            for i in ims:
+                canvas.paste(i, (0, y))
+                y += i.height
+            Path(work).mkdir(parents=True, exist_ok=True)
+            plot = Path(work) / "label-qa.png"
+            canvas.save(plot)
+    print(f"shots      {len(results)} refined one by one and put back: " +
+          ", ".join(f"{a}-{b - 1}" for a, b in shots) + f"; covered {sum(b - a for a, b in rep['covered'])} of "
+          f"{rep['frames']} frames")
+    return {"frames": out, "matte": matte, "changed": changed, "report": rep, "qa_plot": plot, "work": work}

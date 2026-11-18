@@ -1595,26 +1595,77 @@
       "title": "Keyframe: the given one, else the stills branch's"
     }
   },
-  "62": {
+  "110": {
     "inputs": {
       "frames": [
+        "85",
+        0
+      ],
+      "keyframe_report": [
+        "89",
+        1
+      ],
+      "shot_frames": [
         "60",
         0
       ],
-      "mask": [
+      "shot_masks": [
         "74",
         0
       ],
-      "keyframes": [
+      "keyframe": [
         "61",
         0
       ],
-      "tracker": "alltracker.pth",
       "keyframe_index": [
         "19",
         3
       ],
-      "keyframe_frames": "auto",
+      "start": [
+        "19",
+        2
+      ],
+      "shot": [
+        "19",
+        4
+      ],
+      "template_keyframe": [
+        "43",
+        0
+      ],
+      "template_report": [
+        "40",
+        3
+      ]
+    },
+    "class_type": "ProductLabelEveryShot",
+    "_meta": {
+      "title": "Every Shot: a keyframe and masks for each other shot the product is in"
+    }
+  },
+  "62": {
+    "inputs": {
+      "frames": [
+        "110",
+        0
+      ],
+      "mask": [
+        "110",
+        1
+      ],
+      "keyframes": [
+        "110",
+        2
+      ],
+      "tracker": "alltracker.pth",
+      "keyframe_index": [
+        "110",
+        3
+      ],
+      "keyframe_frames": [
+        "110",
+        4
+      ],
       "settings": [
         "7",
         0
@@ -1627,7 +1678,11 @@
       "model": "tube (round products)",
       "compositing": "settings (render.alpha, else measured)",
       "soft_cap": -1.0,
-      "glue": false
+      "glue": false,
+      "shots": [
+        "110",
+        7
+      ]
     },
     "class_type": "ProductLabelVideoRefine",
     "_meta": {
@@ -1645,17 +1700,17 @@
         0
       ],
       "start": [
-        "19",
-        2
+        "110",
+        5
       ],
       "shot": [
-        "19",
-        4
+        "110",
+        6
       ]
     },
     "class_type": "ProductLabelSplice",
     "_meta": {
-      "title": "The refined shot back into the clip (its text: shot.json)"
+      "title": "The refined shots back into the clip (its text: shot.json)"
     }
   },
   "94": {
@@ -1669,6 +1724,10 @@
       "keyframe_report": [
         "89",
         1
+      ],
+      "every_shot": [
+        "110",
+        6
       ]
     },
     "class_type": "ProductLabelReviewName",
@@ -1687,6 +1746,10 @@
       "keyframe_report": [
         "89",
         1
+      ],
+      "every_shot": [
+        "110",
+        6
       ]
     },
     "class_type": "ProductLabelReviewName",
@@ -1789,18 +1852,18 @@
   "78": {
     "inputs": {
       "images": [
-        "60",
+        "110",
         0
       ],
       "masks": [
-        "74",
-        0
+        "110",
+        1
       ],
       "opacity": 0.4
     },
     "class_type": "ProductLabelMaskOverlay",
     "_meta": {
-      "title": "The shot's masks on its frames (check SAM 3's track)"
+      "title": "The shots' masks on their frames (check SAM 3's track)"
     }
   },
   "79": {

@@ -60,6 +60,20 @@ DEFAULTS = {
     "fade_n": 3,                 # just inside them, the product gone past the run (V72; an eased end: 0.67 and 0.34
     "fade_ref": 6,               # of its frames before, held: 1.0)
     "jump_px": 3.0,              # the old print, read through both frames' mappings, moves this far in label space
+    "drop_matte": 0.35,          # drop (V81): frames left as generated next to a refined run, each side for as
+                                 # long as they show the product (matte at least this share of the run's end frame's: half
+                                 # in frame on a pan 0.45) ...
+    "drop_detail": 0.5,          # ... and its print (detail at least this share, median of the run's 5 end frames) ...
+    "drop_overlap": 0.5,         # ... the same product carrying on (silhouettes overlap this much frame to frame,
+    "drop_iou": 0.45,            # centred, and their mattes as they lie this much); a camera move or pan that swaps
+                                 # the background doesn't stop it, unlike vanish's cut (pump clip, v20: 120-121,
+                                 # 143-144, 163-165 at 0.45-1.0 of the matte, 0.7-1.0 of the detail, mattes 0.58-0.93;
+                                 # an approved tube's cut from a close-up: mattes 0.29)
+    "drift_edge": 4,             # drift (V81): on a refined run's first or last frames ...
+    "drift_roll": 1.5,           # ... the label's axis off the body turns this many deg off the run's frames round
+                                 # it (median of up to 4 each side): a one-frame turn the body check's 5-frame median
+                                 # hides (pump clip, v20: frame 123, 2.2 deg; the run's own frames 0.1-0.9); read only
+                                 # where the product is whole in frame (its body measured off its whole matte)
     "bend_slope": 0.6,           # a matte edge running this steep to the axis (px across per px along) over 2 row pairs
     "bend_ends": 0.15,           # ... away from the band's ends (where a crimp or a cap steps the outline on purpose),
     "bend_moved": 4.0,           # ... on a side the snap moved this far: the snap followed an occluder, not the limb
@@ -191,7 +205,8 @@ def matte_overlap(m0, m1):
 def frame_measures(src_u8, out_u8, matte, prev=None):
     """The image measures of one delivered frame (prev: the previous frame's (src, matte) for the cut test)."""
     ch = np.any(out_u8 != src_u8, -1)
-    r = {"changed_px": int(ch.sum()), "matte_px": int(matte.sum()), "detail": round(detail(src_u8, binary_erosion(matte, iterations=4)), 6)}
+    r = {"changed_px": int(ch.sum()), "matte_px": int(matte.sum()), "detail": round(detail(src_u8, binary_erosion(matte, iterations=4)), 6),
+         "in_frame": not bool(matte[0].any() or matte[-1].any() or matte[:, 0].any() or matte[:, -1].any())}
     lab = label_region(ch)
     if lab.sum() > 2000:
         r["seam"] = seam_steps(src_u8, out_u8, matte, lab)
@@ -204,6 +219,7 @@ def frame_measures(src_u8, out_u8, matte, prev=None):
     if prev is not None:
         r["hist"] = round(hist_dist(prev[0], src_u8), 4)
         r["overlap"] = round(matte_overlap(prev[1], matte), 3)
+        r["iou"] = round(float((prev[1] & matte).sum() / max((prev[1] | matte).sum(), 1)), 3)
     return r
 
 
@@ -1042,6 +1058,44 @@ def evaluate(F, fps=24.0, cfg=None):
                                roll_deg_med=round(float(med["roll_deg"][i]), 3),
                                **({"turn_px_med": round(float(med["turn_px"][i]), 2)} if np.isfinite(x).any() else {}),
                                **({"turn_vs_orbit": True, "orbit_gain": round(gain, 3)} if has_orb else {}))
+    # drop and drift (V81): the label left out next to a refined run while the same product shows its print, and the
+    # label turning off the body for a frame where a run starts or ends
+    for a, b in _runs(refined):
+        near = {b: range(max(a, b - 4), b + 1), a: range(a, min(b, a + 4) + 1)}
+        for edge_t, step in ((b, 1), (a, -1)):
+            ref = F[edge_t]
+            det = float(np.median([F[u]["detail"] for u in near[edge_t]]))
+            prev, t = edge_t, edge_t + step
+            while t in F and t not in refined:
+                r = F[t]
+                pair = r if step > 0 else F[prev]
+                ov, iou = pair.get("overlap"), pair.get("iou")
+                if r["matte_px"] < c["drop_matte"] * max(ref["matte_px"], 1) or r["detail"] < c["drop_detail"] * det \
+                        or (ov is not None and ov < c["drop_overlap"]) or (iou is not None and iou < c["drop_iou"]):
+                    break
+                flags[t].append(("drop", f"left as generated next to the label's run {a}-{b}, though the product and "
+                                         f"its print carry on ({r['matte_px'] / max(ref['matte_px'], 1):.2f} of the "
+                                         f"matte, {r['detail'] / max(det, 1e-9):.2f} of the print's detail)"))
+                prev, t = t, t + step
+    for a, b in _runs(refined):
+        # (a run's ends are the refined run's own: a frame the body measure missed, an occluder crossing it, doesn't
+        # make the frames beside it a run's ends)
+        ts = [t for t in range(a, b + 1) if t in geometry]
+        roll = {t: geometry[t].get("roll_deg") for t in ts}
+        for t in ts:
+            if min(t - a, b - t) >= c["drift_edge"] or roll[t] is None or not np.isfinite(roll[t]):
+                continue
+            if F[t].get("in_frame") is False:
+                # the body's axis and ends read off a matte the frame cuts off (an approved spray bottle entering from
+                # the top: 4.9 deg off on that frame alone, its label where it belongs)
+                continue
+            nb = [roll[u] for u in ts if u != t and abs(u - t) <= 4 and roll[u] is not None and np.isfinite(roll[u])]
+            if len(nb) < 3:
+                continue
+            d = roll[t] - float(np.median(nb))
+            if abs(d) > c["drift_roll"]:
+                flags[t].append(("drift", f"the label turns {d:+.2f} deg off the body against the run's frames round "
+                                          f"it, on the run's {'first' if t - a < b - t else 'last'} frames"))
     # glitter: specks in front of the label in the source that the output lost (V37)
     for t in refined:
         g = F[t].get("glitter")
@@ -1103,6 +1157,8 @@ def notes_block(flags, summary, title="Automatic checks"):
              "ghost": "Old print showing through the new label",
              "shear": "Shear or shape spikes against the neighbouring frames",
              "vanish": "Label not refined while the product is in view",
+             "drop": "Label left out next to a refined run while the product and its print carry on (a pan, a camera move)",
+             "drift": "The label turns off the body for a frame where a run starts or ends",
              "switch": "Hard switch at a fix's end, or a jump where two shots meet",
              "fade": "The fix fades at a run's end though the product leaves right after (the old print shows through)",
              "bend": "The label bends along an occluder's edge (snapped onto it, not onto the product's limb)",
@@ -1129,7 +1185,7 @@ def notes_block(flags, summary, title="Automatic checks"):
         out.append("No frame flagged.")
     else:
         out.append("")
-        for k in ("edges", "step", "ghost", "shear", "bend", "body", "slide", "glitter", "shimmer", "vanish", "switch", "fade", "swim",
+        for k in ("edges", "step", "ghost", "shear", "bend", "body", "slide", "glitter", "shimmer", "vanish", "drop", "drift", "switch", "fade", "swim",
                   "ends", "creep", "lock", "level", "lines", "sharp", "tilt", "spots", "double"):
             if k in summary["checks"]:
                 ex = next(why for t in sorted(flags) for kk, why in flags[t] if kk == k)

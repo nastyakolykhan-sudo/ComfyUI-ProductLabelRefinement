@@ -1,8 +1,8 @@
 {
  "id": "a8949c68-ac79-5dc7-b4bd-5f838d510fa5",
  "revision": 0,
- "last_node_id": 105,
- "last_link_id": 246,
+ "last_node_id": 110,
+ "last_link_id": 260,
  "nodes": [
   {
    "id": 1,
@@ -30,9 +30,9 @@
      "name": "images",
      "type": "IMAGE",
      "links": [
-      189,
-      241,
-      244
+      191,
+      245,
+      248
      ],
      "slot_index": 0
     },
@@ -40,8 +40,8 @@
      "name": "audio",
      "type": "AUDIO",
      "links": [
-      167,
-      171
+      169,
+      173
      ],
      "slot_index": 1
     },
@@ -49,10 +49,10 @@
      "name": "fps",
      "type": "FLOAT",
      "links": [
-      165,
-      168,
-      172,
-      199
+      167,
+      170,
+      174,
+      201
      ],
      "slot_index": 2
     },
@@ -100,12 +100,12 @@
       60,
       68,
       107,
-      179,
-      202,
+      181,
       204,
-      207,
-      220,
-      236
+      206,
+      209,
+      222,
+      240
      ],
      "slot_index": 0
     },
@@ -113,8 +113,8 @@
      "name": "mask",
      "type": "MASK",
      "links": [
-      205,
-      208
+      207,
+      210
      ],
      "slot_index": 1
     }
@@ -162,7 +162,7 @@
      "name": "mask",
      "type": "MASK",
      "links": [
-      243
+      247
      ],
      "slot_index": 1
     },
@@ -172,7 +172,7 @@
      "links": [
       22,
       27,
-      224
+      226
      ],
      "slot_index": 2
     }
@@ -222,7 +222,7 @@
      "links": [
       34,
       157,
-      223
+      225
      ],
      "slot_index": 2
     }
@@ -291,7 +291,7 @@
      "name": "INT",
      "type": "INT",
      "links": [
-      222
+      224
      ],
      "slot_index": 0
     }
@@ -334,7 +334,7 @@
      "name": "settings",
      "type": "STRING",
      "links": [
-      164
+      166
      ],
      "slot_index": 0
     },
@@ -342,7 +342,7 @@
      "name": "product_copy",
      "type": "STRING",
      "links": [
-      181
+      183
      ],
      "slot_index": 1
     }
@@ -409,8 +409,8 @@
      "name": "BOOLEAN",
      "type": "BOOLEAN",
      "links": [
-      184,
-      186
+      186,
+      188
      ],
      "slot_index": 0
     }
@@ -445,10 +445,10 @@
      "links": [
       7,
       15,
-      201,
-      218,
-      235,
-      238
+      203,
+      220,
+      239,
+      242
      ],
      "slot_index": 0
     },
@@ -457,7 +457,7 @@
      "type": "CLIP",
      "links": [
       3,
-      234
+      238
      ],
      "slot_index": 1
     },
@@ -510,9 +510,9 @@
      "name": "CONDITIONING",
      "type": "CONDITIONING",
      "links": [
-      203,
-      213,
-      219
+      205,
+      215,
+      221
      ],
      "slot_index": 0
     }
@@ -565,9 +565,9 @@
      "type": "IMAGE",
      "links": [
       8,
-      177,
-      183,
-      193
+      179,
+      185,
+      195
      ],
      "slot_index": 0
     },
@@ -818,7 +818,7 @@
      "name": "value",
      "type": "*",
      "links": [
-      187
+      189
      ],
      "slot_index": 0
     }
@@ -875,8 +875,8 @@
      "type": "MASK",
      "links": [
       36,
-      178,
-      194
+      180,
+      196
      ],
      "slot_index": 1
     },
@@ -998,7 +998,7 @@
      "name": "start",
      "type": "INT",
      "links": [
-      192
+      257
      ],
      "slot_index": 2
     },
@@ -1007,7 +1007,7 @@
      "type": "INT",
      "links": [
       18,
-      163
+      256
      ],
      "slot_index": 3
     },
@@ -1015,7 +1015,7 @@
      "name": "shot",
      "type": "STRING",
      "links": [
-      191
+      258
      ],
      "slot_index": 4
     }
@@ -1130,7 +1130,7 @@
      "name": "mask",
      "type": "MASK",
      "links": [
-      214
+      216
      ],
      "slot_index": 2
     },
@@ -1140,7 +1140,7 @@
      "links": [
       121,
       125,
-      215
+      217
      ],
      "slot_index": 3
     }
@@ -1195,7 +1195,7 @@
      "type": "*",
      "links": [
       41,
-      239
+      243
      ],
      "slot_index": 0
     }
@@ -2417,7 +2417,8 @@
      "name": "report",
      "type": "STRING",
      "links": [
-      229
+      231,
+      260
      ],
      "slot_index": 3
     },
@@ -2586,7 +2587,8 @@
      "type": "*",
      "links": [
       129,
-      227
+      229,
+      259
      ],
      "slot_index": 0
     }
@@ -3179,9 +3181,8 @@
      "name": "value",
      "type": "*",
      "links": [
-      160,
-      196,
-      228
+      230,
+      253
      ],
      "slot_index": 0
     }
@@ -3230,7 +3231,7 @@
      "name": "value",
      "type": "*",
      "links": [
-      162
+      255
      ],
      "slot_index": 0
     }
@@ -3246,14 +3247,14 @@
    "type": "ProductLabelVideoRefine",
    "pos": [
     5960,
-    680
+    1050
    ],
    "size": [
     420,
     440
    ],
    "flags": {},
-   "order": 85,
+   "order": 86,
    "mode": 0,
    "inputs": [
     {
@@ -3282,12 +3283,25 @@
      "link": null
     },
     {
+     "name": "shots",
+     "type": "STRING",
+     "link": 163
+    },
+    {
      "name": "keyframe_index",
      "type": "INT",
      "widget": {
       "name": "keyframe_index"
      },
-     "link": 163
+     "link": 164
+    },
+    {
+     "name": "keyframe_frames",
+     "type": "STRING",
+     "widget": {
+      "name": "keyframe_frames"
+     },
+     "link": 165
     },
     {
      "name": "settings",
@@ -3295,7 +3309,7 @@
      "widget": {
       "name": "settings"
      },
-     "link": 164
+     "link": 166
     },
     {
      "name": "fps",
@@ -3303,7 +3317,7 @@
      "widget": {
       "name": "fps"
      },
-     "link": 165
+     "link": 167
     }
    ],
    "outputs": [
@@ -3311,7 +3325,7 @@
      "name": "frames",
      "type": "IMAGE",
      "links": [
-      190
+      192
      ],
      "slot_index": 0
     },
@@ -3331,9 +3345,9 @@
      "name": "report",
      "type": "STRING",
      "links": [
-      176,
-      230,
-      232
+      178,
+      232,
+      235
      ],
      "slot_index": 3
     },
@@ -3341,7 +3355,7 @@
      "name": "qa_image",
      "type": "IMAGE",
      "links": [
-      175
+      177
      ],
      "slot_index": 4
     }
@@ -3353,7 +3367,7 @@
    "widgets_values": [
     "alltracker.pth",
     0,
-    "auto",
+    "",
     "",
     0.0,
     0,
@@ -3375,18 +3389,18 @@
     220
    ],
    "flags": {},
-   "order": 88,
+   "order": 89,
    "mode": 0,
    "inputs": [
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 166
+     "link": 168
     },
     {
      "name": "audio",
      "type": "AUDIO",
-     "link": 167
+     "link": 169
     },
     {
      "name": "fps",
@@ -3394,7 +3408,7 @@
      "widget": {
       "name": "fps"
      },
-     "link": 168
+     "link": 170
     },
     {
      "name": "filename_prefix",
@@ -3402,7 +3416,7 @@
      "widget": {
       "name": "filename_prefix"
      },
-     "link": 169
+     "link": 171
     }
    ],
    "outputs": [],
@@ -3428,18 +3442,18 @@
     180
    ],
    "flags": {},
-   "order": 89,
+   "order": 90,
    "mode": 0,
    "inputs": [
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 170
+     "link": 172
     },
     {
      "name": "audio",
      "type": "AUDIO",
-     "link": 171
+     "link": 173
     },
     {
      "name": "fps",
@@ -3447,7 +3461,7 @@
      "widget": {
       "name": "fps"
      },
-     "link": 172
+     "link": 174
     }
    ],
    "outputs": [
@@ -3455,7 +3469,7 @@
      "name": "VIDEO",
      "type": "VIDEO",
      "links": [
-      173
+      175
      ],
      "slot_index": 0
     }
@@ -3483,18 +3497,18 @@
     200
    ],
    "flags": {},
-   "order": 91,
+   "order": 92,
    "mode": 0,
    "inputs": [
     {
      "name": "video",
      "type": "VIDEO",
-     "link": 173
+     "link": 175
     },
     {
      "name": "filename",
      "type": "STRING",
-     "link": 174
+     "link": 176
     }
    ],
    "outputs": [
@@ -3528,13 +3542,13 @@
     330
    ],
    "flags": {},
-   "order": 92,
+   "order": 93,
    "mode": 0,
    "inputs": [
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 175
+     "link": 177
     }
    ],
    "outputs": [],
@@ -3558,13 +3572,13 @@
     300
    ],
    "flags": {},
-   "order": 93,
+   "order": 94,
    "mode": 0,
    "inputs": [
     {
      "name": "source",
      "type": "*",
-     "link": 176
+     "link": 178
     }
    ],
    "outputs": [
@@ -3593,28 +3607,28 @@
     220
    ],
    "flags": {},
-   "order": 94,
+   "order": 95,
    "mode": 0,
    "inputs": [
     {
      "name": "frame",
      "type": "IMAGE",
-     "link": 177
+     "link": 179
     },
     {
      "name": "mask",
      "type": "MASK",
-     "link": 178
+     "link": 180
     },
     {
      "name": "reference",
      "type": "IMAGE",
-     "link": 179
+     "link": 181
     },
     {
      "name": "reference_mask",
      "type": "MASK",
-     "link": 180
+     "link": 182
     },
     {
      "name": "product_copy",
@@ -3622,7 +3636,7 @@
      "widget": {
       "name": "product_copy"
      },
-     "link": 181
+     "link": 183
     }
    ],
    "outputs": [
@@ -3630,7 +3644,7 @@
      "name": "sheet",
      "type": "IMAGE",
      "links": [
-      182
+      184
      ],
      "slot_index": 0
     },
@@ -3663,13 +3677,13 @@
     330
    ],
    "flags": {},
-   "order": 95,
+   "order": 96,
    "mode": 0,
    "inputs": [
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 182
+     "link": 184
     }
    ],
    "outputs": [],
@@ -3699,12 +3713,12 @@
     {
      "name": "value",
      "type": "*",
-     "link": 183
+     "link": 185
     },
     {
      "name": "when",
      "type": "*",
-     "link": 184
+     "link": 186
     }
    ],
    "outputs": [
@@ -3743,12 +3757,12 @@
     {
      "name": "value",
      "type": "*",
-     "link": 185
+     "link": 187
     },
     {
      "name": "when",
      "type": "*",
-     "link": 186
+     "link": 188
     }
    ],
    "outputs": [
@@ -3756,7 +3770,7 @@
      "name": "value",
      "type": "*",
      "links": [
-      210
+      212
      ],
      "slot_index": 0
     }
@@ -3787,12 +3801,12 @@
     {
      "name": "value",
      "type": "*",
-     "link": 187
+     "link": 189
     },
     {
      "name": "when",
      "type": "*",
-     "link": 188
+     "link": 190
     }
    ],
    "outputs": [
@@ -3800,8 +3814,7 @@
      "name": "value",
      "type": "*",
      "links": [
-      161,
-      197
+      254
      ],
      "slot_index": 0
     }
@@ -3826,23 +3839,23 @@
     240
    ],
    "flags": {},
-   "order": 86,
+   "order": 87,
    "mode": 0,
    "inputs": [
     {
      "name": "frames",
      "type": "IMAGE",
-     "link": 189
+     "link": 191
     },
     {
      "name": "shot_frames",
      "type": "IMAGE",
-     "link": 190
+     "link": 192
     },
     {
      "name": "shot",
      "type": "STRING",
-     "link": 191
+     "link": 193
     },
     {
      "name": "start",
@@ -3850,7 +3863,7 @@
      "widget": {
       "name": "start"
      },
-     "link": 192
+     "link": 194
     }
    ],
    "outputs": [
@@ -3858,8 +3871,8 @@
      "name": "frames",
      "type": "IMAGE",
      "links": [
-      166,
-      170
+      168,
+      172
      ],
      "slot_index": 0
     },
@@ -3870,7 +3883,7 @@
      "slot_index": 1
     }
    ],
-   "title": "The refined shot back into the clip (its text: shot.json)",
+   "title": "The refined shots back into the clip (its text: shot.json)",
    "properties": {
     "Node name for S&R": "ProductLabelSplice"
    },
@@ -3890,18 +3903,18 @@
     120
    ],
    "flags": {},
-   "order": 96,
+   "order": 97,
    "mode": 0,
    "inputs": [
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 193
+     "link": 195
     },
     {
      "name": "masks",
      "type": "MASK",
-     "link": 194
+     "link": 196
     }
    ],
    "outputs": [
@@ -3909,7 +3922,7 @@
      "name": "overlay",
      "type": "IMAGE",
      "links": [
-      195
+      197
      ],
      "slot_index": 0
     }
@@ -3934,13 +3947,13 @@
     330
    ],
    "flags": {},
-   "order": 97,
+   "order": 98,
    "mode": 0,
    "inputs": [
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 195
+     "link": 197
     }
    ],
    "outputs": [],
@@ -3964,18 +3977,18 @@
     120
    ],
    "flags": {},
-   "order": 98,
+   "order": 99,
    "mode": 0,
    "inputs": [
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 196
+     "link": 198
     },
     {
      "name": "masks",
      "type": "MASK",
-     "link": 197
+     "link": 199
     }
    ],
    "outputs": [
@@ -3983,12 +3996,12 @@
      "name": "overlay",
      "type": "IMAGE",
      "links": [
-      198
+      200
      ],
      "slot_index": 0
     }
    ],
-   "title": "The shot's masks on its frames (check SAM 3's track)",
+   "title": "The shots' masks on their frames (check SAM 3's track)",
    "properties": {
     "Node name for S&R": "ProductLabelMaskOverlay"
    },
@@ -4008,13 +4021,13 @@
     180
    ],
    "flags": {},
-   "order": 99,
+   "order": 100,
    "mode": 0,
    "inputs": [
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 198
+     "link": 200
     },
     {
      "name": "audio",
@@ -4027,7 +4040,7 @@
      "widget": {
       "name": "fps"
      },
-     "link": 199
+     "link": 201
     }
    ],
    "outputs": [
@@ -4035,7 +4048,7 @@
      "name": "VIDEO",
      "type": "VIDEO",
      "links": [
-      200
+      202
      ],
      "slot_index": 0
     }
@@ -4063,13 +4076,13 @@
     300
    ],
    "flags": {},
-   "order": 100,
+   "order": 101,
    "mode": 0,
    "inputs": [
     {
      "name": "video",
      "type": "VIDEO",
-     "link": 200
+     "link": 202
     }
    ],
    "outputs": [
@@ -4109,17 +4122,17 @@
     {
      "name": "model",
      "type": "MODEL",
-     "link": 201
+     "link": 203
     },
     {
      "name": "image",
      "type": "IMAGE",
-     "link": 202
+     "link": 204
     },
     {
      "name": "conditioning",
      "type": "CONDITIONING",
-     "link": 203
+     "link": 205
     },
     {
      "name": "bboxes",
@@ -4142,8 +4155,8 @@
      "name": "masks",
      "type": "MASK",
      "links": [
-      206,
-      209
+      208,
+      211
      ],
      "slot_index": 0
     },
@@ -4182,17 +4195,17 @@
     {
      "name": "reference",
      "type": "IMAGE",
-     "link": 204
+     "link": 206
     },
     {
      "name": "mask",
      "type": "MASK",
-     "link": 205
+     "link": 207
     },
     {
      "name": "sam_mask",
      "type": "MASK",
-     "link": 206
+     "link": 208
     }
    ],
    "outputs": [
@@ -4201,8 +4214,8 @@
      "type": "MASK",
      "links": [
       13,
-      180,
-      221
+      182,
+      223
      ],
      "slot_index": 0
     },
@@ -4239,17 +4252,17 @@
     {
      "name": "reference",
      "type": "IMAGE",
-     "link": 207
+     "link": 209
     },
     {
      "name": "mask",
      "type": "MASK",
-     "link": 208
+     "link": 210
     },
     {
      "name": "sam_mask",
      "type": "MASK",
-     "link": 209
+     "link": 211
     }
    ],
    "outputs": [
@@ -4298,7 +4311,7 @@
      "name": "BOOLEAN",
      "type": "BOOLEAN",
      "links": [
-      211
+      213
      ],
      "slot_index": 0
     }
@@ -4329,12 +4342,12 @@
     {
      "name": "value",
      "type": "*",
-     "link": 210
+     "link": 212
     },
     {
      "name": "when",
      "type": "*",
-     "link": 211
+     "link": 213
     }
    ],
    "outputs": [
@@ -4343,7 +4356,8 @@
      "type": "*",
      "links": [
       30,
-      188
+      190,
+      251
      ],
      "slot_index": 0
     }
@@ -4392,7 +4406,7 @@
      "name": "given",
      "type": "BOOLEAN",
      "links": [
-      212
+      214
      ],
      "slot_index": 2
     }
@@ -4423,7 +4437,7 @@
     {
      "name": "when",
      "type": "*",
-     "link": 212
+     "link": 214
     },
     {
      "name": "if_true",
@@ -4433,7 +4447,7 @@
     {
      "name": "if_false",
      "type": "*",
-     "link": 213
+     "link": 215
     }
    ],
    "outputs": [
@@ -4471,12 +4485,12 @@
     {
      "name": "mask",
      "type": "MASK",
-     "link": 214
+     "link": 216
     },
     {
      "name": "crop_data",
      "type": "CROP_DATA",
-     "link": 215
+     "link": 217
     }
    ],
    "outputs": [
@@ -4514,32 +4528,32 @@
     {
      "name": "frames",
      "type": "IMAGE",
-     "link": 216
+     "link": 218
     },
     {
      "name": "masks",
      "type": "MASK",
-     "link": 217
+     "link": 219
     },
     {
      "name": "model",
      "type": "MODEL",
-     "link": 218
+     "link": 220
     },
     {
      "name": "conditioning",
      "type": "CONDITIONING",
-     "link": 219
+     "link": 221
     },
     {
      "name": "reference",
      "type": "IMAGE",
-     "link": 220
+     "link": 222
     },
     {
      "name": "reference_mask",
      "type": "MASK",
-     "link": 221
+     "link": 223
     },
     {
      "name": "keyframe_frame",
@@ -4547,7 +4561,7 @@
      "widget": {
       "name": "keyframe_frame"
      },
-     "link": 222
+     "link": 224
     },
     {
      "name": "keyframe_given",
@@ -4555,7 +4569,7 @@
      "widget": {
       "name": "keyframe_given"
      },
-     "link": 223
+     "link": 225
     },
     {
      "name": "mask_given",
@@ -4563,7 +4577,7 @@
      "widget": {
       "name": "mask_given"
      },
-     "link": 224
+     "link": 226
     }
    ],
    "outputs": [
@@ -4581,8 +4595,9 @@
      "name": "report",
      "type": "STRING",
      "links": [
-      231,
-      233
+      233,
+      236,
+      252
      ],
      "slot_index": 1
     }
@@ -4609,14 +4624,14 @@
     1250
    ],
    "flags": {},
-   "order": 101,
+   "order": 102,
    "mode": 0,
    "inputs": [],
    "outputs": [],
    "title": "About this workflow",
    "properties": {},
    "widgets_values": [
-    "AGENTIC PRODUCT LABEL REFINEMENT\n\nMakes the garbled text on a product's label legible, in an AI-generated image or a single-shot clip, from the real product's packshot. The generated product keeps its shape, position, label outline, colours and light; only the letters change. Results a check finds wrong are named, never passed: _AUDIT-FAIL on the image (a clip whose keyframe fails: that keyframe comes back, no clip, no error), _REVIEW-FAIL (wrong) or _REVIEW-CHECK (look first) on the clip.\n\nInputs (WorkflowIO): Source (an image or a clip), Packshot, Product (what it is, e.g. pump bottle: SAM 3 finds it), Label Text (optional: the label's words, for clips).\nOutputs: refined_image (a clip: its refined keyframe) and refined_clip (mp4). The QA sheets, report.json, the clip's lossless master and its review summary are saved beside them.\n\nA clip is fixed in one shot: the shot the product is seen best in. For an edit with several shots, trim it to the shot first.\n\nThe rest is the one workflow (product-label-refinement-all) at its defaults: an agent can still set the product mask, a corrected keyframe, a job, the keyframe frame or Refine settings in a run copy.\n\n## Node packs\n- ComfyUI-ProductLabelRefinement: https://github.com/nastyakolykhan-sudo/ComfyUI-ProductLabelRefinement @ c24b000dfe0d2063ddedd031f0511d4f903f8ecd\n- ComfyUI-MaskAspectCrop (ImageReframe, ImageReframeComposite): https://github.com/nastyakolykhan-sudo/ComfyUI-MaskAspectCrop @ 10b47888f08a297da1ba2f03f45ace3ab9594ad1\n- comfy-workflow-io-nodes (WorkflowIO*): https://github.com/aw93silverside/comfy-workflow-io-nodes @ 11e07cc007b2a81b4e4228d750c6192d14c179cd\n- Core ComfyUI 0.42.5 or later (SAM3_Detect, GetVideoComponents, ComfyMathExpression).\n\n## Models\n- checkpoints/sam3.1_multiplex_fp16.safetensors (Comfy-Org/sam3.1)\n- trackers/alltracker.pth (aharley/alltracker)"
+    "AGENTIC PRODUCT LABEL REFINEMENT\n\nMakes the garbled text on a product's label legible, in an AI-generated image or a single-shot clip, from the real product's packshot. The generated product keeps its shape, position, label outline, colours and light; only the letters change. Results a check finds wrong are named, never passed: _AUDIT-FAIL on the image (a clip whose keyframe fails: that keyframe comes back, no clip, no error), _REVIEW-FAIL (wrong) or _REVIEW-CHECK (look first) on the clip.\n\nInputs (WorkflowIO): Source (an image or a clip), Packshot, Product (what it is, e.g. pump bottle: SAM 3 finds it), Label Text (optional: the label's words, for clips).\nOutputs: refined_image (a clip: its refined keyframe) and refined_clip (mp4). The QA sheets, report.json, the clip's lossless master and its review summary are saved beside them.\n\nA clip is fixed in every shot the product is in (6 frames or more), each from its own best frame; a shot whose keyframe fails its audit is left as generated, and the clip is named _REVIEW-FAIL.\n\nThe rest is the one workflow (product-label-refinement-all) at its defaults: an agent can still set the product mask, a corrected keyframe, a job, the keyframe frame or Refine settings in a run copy.\n\n## Node packs\n- ComfyUI-ProductLabelRefinement: https://github.com/nastyakolykhan-sudo/ComfyUI-ProductLabelRefinement @ c24b000dfe0d2063ddedd031f0511d4f903f8ecd\n- ComfyUI-MaskAspectCrop (ImageReframe, ImageReframeComposite): https://github.com/nastyakolykhan-sudo/ComfyUI-MaskAspectCrop @ 10b47888f08a297da1ba2f03f45ace3ab9594ad1\n- comfy-workflow-io-nodes (WorkflowIO*): https://github.com/aw93silverside/comfy-workflow-io-nodes @ 11e07cc007b2a81b4e4228d750c6192d14c179cd\n- Core ComfyUI 0.42.5 or later (SAM3_Detect, GetVideoComponents, ComfyMathExpression).\n\n## Models\n- checkpoints/sam3.1_multiplex_fp16.safetensors (Comfy-Org/sam3.1)\n- trackers/alltracker.pth (aharley/alltracker)"
    ],
    "color": "#432",
    "bgcolor": "#653"
@@ -4639,12 +4654,12 @@
     {
      "name": "value",
      "type": "*",
-     "link": 225
+     "link": 227
     },
     {
      "name": "when",
      "type": "*",
-     "link": 226
+     "link": 228
     }
    ],
    "outputs": [
@@ -4683,12 +4698,12 @@
     {
      "name": "value",
      "type": "*",
-     "link": 227
+     "link": 229
     },
     {
      "name": "when",
      "type": "*",
-     "link": 228
+     "link": 230
     }
    ],
    "outputs": [
@@ -4696,7 +4711,7 @@
      "name": "value",
      "type": "*",
      "links": [
-      225
+      227
      ],
      "slot_index": 0
     }
@@ -4727,7 +4742,7 @@
     {
      "name": "report",
      "type": "STRING",
-     "link": 229
+     "link": 231
     }
    ],
    "outputs": [
@@ -4736,7 +4751,7 @@
      "type": "STRING",
      "links": [
       130,
-      246
+      250
      ],
      "slot_index": 0
     }
@@ -4761,18 +4776,23 @@
     120
    ],
    "flags": {},
-   "order": 87,
+   "order": 88,
    "mode": 0,
    "inputs": [
     {
      "name": "report",
      "type": "STRING",
-     "link": 230
+     "link": 232
     },
     {
      "name": "keyframe_report",
      "type": "STRING",
-     "link": 231
+     "link": 233
+    },
+    {
+     "name": "every_shot",
+     "type": "STRING",
+     "link": 234
     }
    ],
    "outputs": [
@@ -4780,7 +4800,7 @@
      "name": "filename_prefix",
      "type": "STRING",
      "links": [
-      169
+      171
      ],
      "slot_index": 0
     }
@@ -4806,18 +4826,23 @@
     120
    ],
    "flags": {},
-   "order": 90,
+   "order": 91,
    "mode": 0,
    "inputs": [
     {
      "name": "report",
      "type": "STRING",
-     "link": 232
+     "link": 235
     },
     {
      "name": "keyframe_report",
      "type": "STRING",
-     "link": 233
+     "link": 236
+    },
+    {
+     "name": "every_shot",
+     "type": "STRING",
+     "link": 237
     }
    ],
    "outputs": [
@@ -4825,7 +4850,7 @@
      "name": "filename_prefix",
      "type": "STRING",
      "links": [
-      174
+      176
      ],
      "slot_index": 0
     }
@@ -4857,7 +4882,7 @@
     {
      "name": "clip",
      "type": "CLIP",
-     "link": 234
+     "link": 238
     }
    ],
    "outputs": [
@@ -4865,8 +4890,8 @@
      "name": "CONDITIONING",
      "type": "CONDITIONING",
      "links": [
-      237,
-      240
+      241,
+      244
      ],
      "slot_index": 0
     }
@@ -4897,17 +4922,17 @@
     {
      "name": "model",
      "type": "MODEL",
-     "link": 235
+     "link": 239
     },
     {
      "name": "image",
      "type": "IMAGE",
-     "link": 236
+     "link": 240
     },
     {
      "name": "conditioning",
      "type": "CONDITIONING",
-     "link": 237
+     "link": 241
     },
     {
      "name": "bboxes",
@@ -4969,17 +4994,17 @@
     {
      "name": "model",
      "type": "MODEL",
-     "link": 238
+     "link": 242
     },
     {
      "name": "image",
      "type": "IMAGE",
-     "link": 239
+     "link": 243
     },
     {
      "name": "conditioning",
      "type": "CONDITIONING",
-     "link": 240
+     "link": 244
     },
     {
      "name": "bboxes",
@@ -5041,17 +5066,17 @@
     {
      "name": "frames",
      "type": "IMAGE",
-     "link": 241
+     "link": 245
     },
     {
      "name": "is_video",
      "type": "BOOLEAN",
-     "link": 242
+     "link": 246
     },
     {
      "name": "masks",
      "type": "MASK",
-     "link": 243
+     "link": 247
     }
    ],
    "outputs": [
@@ -5060,8 +5085,8 @@
      "type": "IMAGE",
      "links": [
       5,
-      185,
-      216
+      187,
+      218
      ],
      "slot_index": 0
     },
@@ -5071,7 +5096,7 @@
      "links": [
       28,
       31,
-      217
+      219
      ],
      "slot_index": 1
     },
@@ -5158,7 +5183,7 @@
     {
      "name": "image",
      "type": "IMAGE",
-     "link": 244
+     "link": 248
     }
    ],
    "outputs": [
@@ -5178,7 +5203,7 @@
      "name": "batch_size",
      "type": "INT",
      "links": [
-      245
+      249
      ],
      "slot_index": 2
     }
@@ -5207,7 +5232,7 @@
     {
      "name": "values.a",
      "type": "FLOAT,INT,BOOLEAN",
-     "link": 245
+     "link": 249
     },
     {
      "name": "values.b",
@@ -5234,7 +5259,7 @@
      "links": [
       19,
       156,
-      242
+      246
      ],
      "slot_index": 2
     }
@@ -5348,7 +5373,7 @@
      "widget": {
       "name": "string_a"
      },
-     "link": 246
+     "link": 250
     }
    ],
    "outputs": [
@@ -5356,7 +5381,7 @@
      "name": "BOOLEAN",
      "type": "BOOLEAN",
      "links": [
-      226
+      228
      ],
      "slot_index": 0
     }
@@ -5371,6 +5396,148 @@
     "Ends With",
     true
    ]
+  },
+  {
+   "id": 110,
+   "type": "ProductLabelEveryShot",
+   "pos": [
+    5960,
+    680
+   ],
+   "size": [
+    420,
+    300
+   ],
+   "flags": {},
+   "order": 85,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "frames",
+     "type": "IMAGE",
+     "link": 251
+    },
+    {
+     "name": "keyframe_report",
+     "type": "STRING",
+     "link": 252
+    },
+    {
+     "name": "shot_frames",
+     "type": "IMAGE",
+     "link": 253
+    },
+    {
+     "name": "shot_masks",
+     "type": "MASK",
+     "link": 254
+    },
+    {
+     "name": "keyframe",
+     "type": "IMAGE",
+     "link": 255
+    },
+    {
+     "name": "keyframe_index",
+     "type": "INT",
+     "link": 256
+    },
+    {
+     "name": "start",
+     "type": "INT",
+     "link": 257
+    },
+    {
+     "name": "shot",
+     "type": "STRING",
+     "link": 258
+    },
+    {
+     "name": "template_keyframe",
+     "type": "IMAGE",
+     "link": 259
+    },
+    {
+     "name": "template_report",
+     "type": "STRING",
+     "link": 260
+    }
+   ],
+   "outputs": [
+    {
+     "name": "frames",
+     "type": "IMAGE",
+     "links": [
+      160,
+      198
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "masks",
+     "type": "MASK",
+     "links": [
+      161,
+      199
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "keyframes",
+     "type": "IMAGE",
+     "links": [
+      162
+     ],
+     "slot_index": 2
+    },
+    {
+     "name": "keyframe_index",
+     "type": "INT",
+     "links": [
+      164
+     ],
+     "slot_index": 3
+    },
+    {
+     "name": "keyframe_frames",
+     "type": "STRING",
+     "links": [
+      165
+     ],
+     "slot_index": 4
+    },
+    {
+     "name": "start",
+     "type": "INT",
+     "links": [
+      194
+     ],
+     "slot_index": 5
+    },
+    {
+     "name": "shot",
+     "type": "STRING",
+     "links": [
+      193,
+      234,
+      237
+     ],
+     "slot_index": 6
+    },
+    {
+     "name": "shots",
+     "type": "STRING",
+     "links": [
+      163
+     ],
+     "slot_index": 7
+    }
+   ],
+   "title": "Every Shot: a keyframe and masks for each other shot the product is in",
+   "properties": {
+    "Node name for S&R": "ProductLabelEveryShot"
+   },
+   "widgets_values": []
   }
  ],
  "links": [
@@ -6648,7 +6815,7 @@
   ],
   [
    160,
-   60,
+   110,
    0,
    62,
    0,
@@ -6656,46 +6823,62 @@
   ],
   [
    161,
-   74,
-   0,
+   110,
+   1,
    62,
    1,
    "MASK"
   ],
   [
    162,
-   61,
-   0,
+   110,
+   2,
    62,
    2,
    "IMAGE"
   ],
   [
    163,
-   19,
-   3,
+   110,
+   7,
    62,
    5,
-   "INT"
-  ],
-  [
-   164,
-   7,
-   0,
-   62,
-   6,
    "STRING"
   ],
   [
+   164,
+   110,
+   3,
+   62,
+   6,
+   "INT"
+  ],
+  [
    165,
-   1,
-   2,
+   110,
+   4,
    62,
    7,
-   "FLOAT"
+   "STRING"
   ],
   [
    166,
+   7,
+   0,
+   62,
+   8,
+   "STRING"
+  ],
+  [
+   167,
+   1,
+   2,
+   62,
+   9,
+   "FLOAT"
+  ],
+  [
+   168,
    75,
    0,
    63,
@@ -6703,7 +6886,7 @@
    "IMAGE"
   ],
   [
-   167,
+   169,
    1,
    1,
    63,
@@ -6711,7 +6894,7 @@
    "AUDIO"
   ],
   [
-   168,
+   170,
    1,
    2,
    63,
@@ -6719,7 +6902,7 @@
    "FLOAT"
   ],
   [
-   169,
+   171,
    94,
    0,
    63,
@@ -6727,7 +6910,7 @@
    "STRING"
   ],
   [
-   170,
+   172,
    75,
    0,
    64,
@@ -6735,7 +6918,7 @@
    "IMAGE"
   ],
   [
-   171,
+   173,
    1,
    1,
    64,
@@ -6743,7 +6926,7 @@
    "AUDIO"
   ],
   [
-   172,
+   174,
    1,
    2,
    64,
@@ -6751,7 +6934,7 @@
    "*"
   ],
   [
-   173,
+   175,
    64,
    0,
    65,
@@ -6759,7 +6942,7 @@
    "VIDEO"
   ],
   [
-   174,
+   176,
    95,
    0,
    65,
@@ -6767,7 +6950,7 @@
    "STRING"
   ],
   [
-   175,
+   177,
    62,
    4,
    66,
@@ -6775,7 +6958,7 @@
    "IMAGE"
   ],
   [
-   176,
+   178,
    62,
    3,
    67,
@@ -6783,7 +6966,7 @@
    "*"
   ],
   [
-   177,
+   179,
    12,
    0,
    70,
@@ -6791,7 +6974,7 @@
    "IMAGE"
   ],
   [
-   178,
+   180,
    17,
    1,
    70,
@@ -6799,7 +6982,7 @@
    "MASK"
   ],
   [
-   179,
+   181,
    2,
    0,
    70,
@@ -6807,7 +6990,7 @@
    "IMAGE"
   ],
   [
-   180,
+   182,
    82,
    0,
    70,
@@ -6815,7 +6998,7 @@
    "MASK"
   ],
   [
-   181,
+   183,
    7,
    1,
    70,
@@ -6823,7 +7006,7 @@
    "STRING"
   ],
   [
-   182,
+   184,
    70,
    0,
    71,
@@ -6831,26 +7014,10 @@
    "IMAGE"
   ],
   [
-   183,
+   185,
    12,
    0,
    72,
-   0,
-   "*"
-  ],
-  [
-   184,
-   9,
-   0,
-   72,
-   1,
-   "*"
-  ],
-  [
-   185,
-   99,
-   0,
-   73,
    0,
    "*"
   ],
@@ -6858,12 +7025,28 @@
    186,
    9,
    0,
-   73,
+   72,
    1,
    "*"
   ],
   [
    187,
+   99,
+   0,
+   73,
+   0,
+   "*"
+  ],
+  [
+   188,
+   9,
+   0,
+   73,
+   1,
+   "*"
+  ],
+  [
+   189,
    16,
    0,
    74,
@@ -6871,7 +7054,7 @@
    "*"
   ],
   [
-   188,
+   190,
    85,
    0,
    74,
@@ -6879,7 +7062,7 @@
    "*"
   ],
   [
-   189,
+   191,
    1,
    0,
    75,
@@ -6887,7 +7070,7 @@
    "IMAGE"
   ],
   [
-   190,
+   192,
    62,
    0,
    75,
@@ -6895,23 +7078,23 @@
    "IMAGE"
   ],
   [
-   191,
-   19,
-   4,
+   193,
+   110,
+   6,
    75,
    2,
    "STRING"
   ],
   [
-   192,
-   19,
-   2,
+   194,
+   110,
+   5,
    75,
    3,
    "INT"
   ],
   [
-   193,
+   195,
    12,
    0,
    76,
@@ -6919,7 +7102,7 @@
    "IMAGE"
   ],
   [
-   194,
+   196,
    17,
    1,
    76,
@@ -6927,7 +7110,7 @@
    "MASK"
   ],
   [
-   195,
+   197,
    76,
    0,
    77,
@@ -6935,23 +7118,23 @@
    "IMAGE"
   ],
   [
-   196,
-   60,
+   198,
+   110,
    0,
    78,
    0,
    "IMAGE"
   ],
   [
-   197,
-   74,
-   0,
+   199,
+   110,
+   1,
    78,
    1,
    "MASK"
   ],
   [
-   198,
+   200,
    78,
    0,
    79,
@@ -6959,7 +7142,7 @@
    "IMAGE"
   ],
   [
-   199,
+   201,
    1,
    2,
    79,
@@ -6967,7 +7150,7 @@
    "*"
   ],
   [
-   200,
+   202,
    79,
    0,
    80,
@@ -6975,7 +7158,7 @@
    "VIDEO"
   ],
   [
-   201,
+   203,
    10,
    0,
    81,
@@ -6983,7 +7166,7 @@
    "MODEL"
   ],
   [
-   202,
+   204,
    2,
    0,
    81,
@@ -6991,7 +7174,7 @@
    "IMAGE"
   ],
   [
-   203,
+   205,
    11,
    0,
    81,
@@ -6999,39 +7182,39 @@
    "CONDITIONING"
   ],
   [
-   204,
+   206,
    2,
    0,
    82,
    0,
    "IMAGE"
-  ],
-  [
-   205,
-   2,
-   1,
-   82,
-   1,
-   "MASK"
-  ],
-  [
-   206,
-   81,
-   0,
-   82,
-   2,
-   "MASK"
   ],
   [
    207,
    2,
+   1,
+   82,
+   1,
+   "MASK"
+  ],
+  [
+   208,
+   81,
+   0,
+   82,
+   2,
+   "MASK"
+  ],
+  [
+   209,
+   2,
    0,
    83,
    0,
    "IMAGE"
   ],
   [
-   208,
+   210,
    2,
    1,
    83,
@@ -7039,7 +7222,7 @@
    "MASK"
   ],
   [
-   209,
+   211,
    81,
    0,
    83,
@@ -7047,7 +7230,7 @@
    "MASK"
   ],
   [
-   210,
+   212,
    73,
    0,
    85,
@@ -7055,7 +7238,7 @@
    "*"
   ],
   [
-   211,
+   213,
    84,
    0,
    85,
@@ -7063,7 +7246,7 @@
    "*"
   ],
   [
-   212,
+   214,
    86,
    2,
    87,
@@ -7071,7 +7254,7 @@
    "*"
   ],
   [
-   213,
+   215,
    11,
    0,
    87,
@@ -7079,7 +7262,7 @@
    "*"
   ],
   [
-   214,
+   216,
    21,
    2,
    88,
@@ -7087,7 +7270,7 @@
    "MASK"
   ],
   [
-   215,
+   217,
    21,
    3,
    88,
@@ -7095,7 +7278,7 @@
    "CROP_DATA"
   ],
   [
-   216,
+   218,
    99,
    0,
    89,
@@ -7103,7 +7286,7 @@
    "IMAGE"
   ],
   [
-   217,
+   219,
    99,
    1,
    89,
@@ -7111,7 +7294,7 @@
    "MASK"
   ],
   [
-   218,
+   220,
    10,
    0,
    89,
@@ -7119,7 +7302,7 @@
    "MODEL"
   ],
   [
-   219,
+   221,
    11,
    0,
    89,
@@ -7127,7 +7310,7 @@
    "CONDITIONING"
   ],
   [
-   220,
+   222,
    2,
    0,
    89,
@@ -7135,7 +7318,7 @@
    "IMAGE"
   ],
   [
-   221,
+   223,
    82,
    0,
    89,
@@ -7143,7 +7326,7 @@
    "MASK"
   ],
   [
-   222,
+   224,
    6,
    0,
    89,
@@ -7151,7 +7334,7 @@
    "INT"
   ],
   [
-   223,
+   225,
    4,
    2,
    89,
@@ -7159,7 +7342,7 @@
    "BOOLEAN"
   ],
   [
-   224,
+   226,
    3,
    2,
    89,
@@ -7167,7 +7350,7 @@
    "BOOLEAN"
   ],
   [
-   225,
+   227,
    92,
    0,
    91,
@@ -7175,7 +7358,7 @@
    "*"
   ],
   [
-   226,
+   228,
    105,
    0,
    91,
@@ -7183,7 +7366,7 @@
    "*"
   ],
   [
-   227,
+   229,
    43,
    0,
    92,
@@ -7191,7 +7374,7 @@
    "*"
   ],
   [
-   228,
+   230,
    60,
    0,
    92,
@@ -7199,7 +7382,7 @@
    "*"
   ],
   [
-   229,
+   231,
    40,
    3,
    93,
@@ -7207,26 +7390,10 @@
    "STRING"
   ],
   [
-   230,
-   62,
-   3,
-   94,
-   0,
-   "STRING"
-  ],
-  [
-   231,
-   89,
-   1,
-   94,
-   1,
-   "STRING"
-  ],
-  [
    232,
    62,
    3,
-   95,
+   94,
    0,
    "STRING"
   ],
@@ -7234,12 +7401,44 @@
    233,
    89,
    1,
-   95,
+   94,
    1,
    "STRING"
   ],
   [
    234,
+   110,
+   6,
+   94,
+   2,
+   "STRING"
+  ],
+  [
+   235,
+   62,
+   3,
+   95,
+   0,
+   "STRING"
+  ],
+  [
+   236,
+   89,
+   1,
+   95,
+   1,
+   "STRING"
+  ],
+  [
+   237,
+   110,
+   6,
+   95,
+   2,
+   "STRING"
+  ],
+  [
+   238,
    10,
    1,
    96,
@@ -7247,7 +7446,7 @@
    "CLIP"
   ],
   [
-   235,
+   239,
    10,
    0,
    97,
@@ -7255,7 +7454,7 @@
    "MODEL"
   ],
   [
-   236,
+   240,
    2,
    0,
    97,
@@ -7263,7 +7462,7 @@
    "IMAGE"
   ],
   [
-   237,
+   241,
    96,
    0,
    97,
@@ -7271,7 +7470,7 @@
    "CONDITIONING"
   ],
   [
-   238,
+   242,
    10,
    0,
    98,
@@ -7279,7 +7478,7 @@
    "MODEL"
   ],
   [
-   239,
+   243,
    22,
    0,
    98,
@@ -7287,7 +7486,7 @@
    "IMAGE"
   ],
   [
-   240,
+   244,
    96,
    0,
    98,
@@ -7295,7 +7494,7 @@
    "CONDITIONING"
   ],
   [
-   241,
+   245,
    1,
    0,
    99,
@@ -7303,7 +7502,7 @@
    "IMAGE"
   ],
   [
-   242,
+   246,
    102,
    2,
    99,
@@ -7311,7 +7510,7 @@
    "BOOLEAN"
   ],
   [
-   243,
+   247,
    3,
    1,
    99,
@@ -7319,7 +7518,7 @@
    "MASK"
   ],
   [
-   244,
+   248,
    1,
    0,
    101,
@@ -7327,7 +7526,7 @@
    "IMAGE"
   ],
   [
-   245,
+   249,
    101,
    2,
    102,
@@ -7335,12 +7534,92 @@
    "FLOAT,INT,BOOLEAN"
   ],
   [
-   246,
+   250,
    93,
    0,
    105,
    0,
    "*"
+  ],
+  [
+   251,
+   85,
+   0,
+   110,
+   0,
+   "IMAGE"
+  ],
+  [
+   252,
+   89,
+   1,
+   110,
+   1,
+   "STRING"
+  ],
+  [
+   253,
+   60,
+   0,
+   110,
+   2,
+   "IMAGE"
+  ],
+  [
+   254,
+   74,
+   0,
+   110,
+   3,
+   "MASK"
+  ],
+  [
+   255,
+   61,
+   0,
+   110,
+   4,
+   "IMAGE"
+  ],
+  [
+   256,
+   19,
+   3,
+   110,
+   5,
+   "INT"
+  ],
+  [
+   257,
+   19,
+   2,
+   110,
+   6,
+   "INT"
+  ],
+  [
+   258,
+   19,
+   4,
+   110,
+   7,
+   "STRING"
+  ],
+  [
+   259,
+   43,
+   0,
+   110,
+   8,
+   "IMAGE"
+  ],
+  [
+   260,
+   40,
+   3,
+   110,
+   9,
+   "STRING"
   ]
  ],
  "groups": [
@@ -7437,7 +7716,7 @@
   },
   {
    "id": 8,
-   "title": "Video: Refine (Video) through the shot, spliced back into the clip (clips only)",
+   "title": "Video: Every Shot, Refine (Video) through the shots, spliced back into the clip (clips only)",
    "bounding": [
     5940,
     -80,

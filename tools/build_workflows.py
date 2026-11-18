@@ -346,18 +346,26 @@ def definition_all():
             "keyframe": L(92, 0), "report": L(40, 3)}, (0, 0)),
         61: (SW, "Keyframe: the given one, else the stills branch's", {"when": L(4, 2), "if_true": L(4, 0),
                                                                        "if_false": L(91, 0)}, (960, 2440)),
+        # every other shot the product is in (Find Keyframe's every_shot): the graph from the keyframe frame to its
+        # keyframe, audit and masks run again for each one's own keyframe frame; one shot passes on unchanged
+        110: ("ProductLabelEveryShot", "Every Shot: a keyframe and masks for each other shot the product is in", {
+            "frames": L(85, 0), "keyframe_report": L(89, 1), "shot_frames": L(60, 0), "shot_masks": L(74, 0),
+            "keyframe": L(61, 0), "keyframe_index": L(19, 3), "start": L(19, 2), "shot": L(19, 4),
+            "template_keyframe": L(43, 0), "template_report": L(40, 3)}, (0, 0)),
         62: ("ProductLabelVideoRefine", "Product Label: Refine (Video)", {
-            "frames": L(60, 0), "mask": L(74, 0), "keyframes": L(61, 0), "tracker": "alltracker.pth",
-            "keyframe_index": L(19, 3), "keyframe_frames": "auto", "settings": L(7, 0), "fps": L(1, 1), "processes": 0,
-            "model": "tube (round products)", "compositing": "settings (render.alpha, else measured)", "soft_cap": -1.0,
-            "glue": False}, (1500, 2300)),
-        75: ("ProductLabelSplice", "The refined shot back into the clip (its text: shot.json)", {
-            "frames": L(1, 0), "shot_frames": L(62, 0), "start": L(19, 2), "shot": L(19, 4)}, (0, 0)),
+            "frames": L(110, 0), "mask": L(110, 1), "keyframes": L(110, 2), "tracker": "alltracker.pth",
+            "keyframe_index": L(110, 3), "keyframe_frames": L(110, 4), "settings": L(7, 0), "fps": L(1, 1),
+            "processes": 0, "model": "tube (round products)", "compositing": "settings (render.alpha, else measured)",
+            "soft_cap": -1.0, "glue": False, "shots": L(110, 7)}, (1500, 2300)),
+        75: ("ProductLabelSplice", "The refined shots back into the clip (its text: shot.json)", {
+            "frames": L(1, 0), "shot_frames": L(62, 0), "start": L(110, 5), "shot": L(110, 6)}, (0, 0)),
         # the clip's file names from Refine's review: _REVIEW-FAIL (print wrong, slid), _REVIEW-CHECK (look first)
         94: ("ProductLabelReviewName", "Master's name: _REVIEW-FAIL / _REVIEW-CHECK from the review (+ its summary)", {
-            "report": L(62, 3), "prefix": "product-label-refinement/video/refined", "save_summary": True, "keyframe_report": L(89, 1)}, (0, 0)),
+            "report": L(62, 3), "prefix": "product-label-refinement/video/refined", "save_summary": True, "keyframe_report": L(89, 1),
+            "every_shot": L(110, 6)}, (0, 0)),
         95: ("ProductLabelReviewName", "Review copy's name: _REVIEW-FAIL / _REVIEW-CHECK from the review", {
-            "report": L(62, 3), "prefix": "product-label-refinement/video/review", "save_summary": False, "keyframe_report": L(89, 1)}, (0, 0)),
+            "report": L(62, 3), "prefix": "product-label-refinement/video/review", "save_summary": False, "keyframe_report": L(89, 1),
+            "every_shot": L(110, 6)}, (0, 0)),
         63: ("ProductLabelVideoSaveLossless", "Save the lossless master (QuickTime PNG)", {
             "images": L(75, 0), "fps": L(1, 1), "filename_prefix": L(94, 0),
             "format": "mov (PNG, exact RGB)", "audio": L(1, 2)}, (1980, 2300)),
@@ -370,8 +378,8 @@ def definition_all():
                                                       "filename_prefix": "product-label-refinement/video/qa_plot"},
              (2460, 2620)),
         67: ("PreviewAny", "Refine report (JSON)", {"source": L(62, 3)}, (2940, 2300)),
-        78: ("ProductLabelMaskOverlay", "The shot's masks on its frames (check SAM 3's track)", {
-            "images": L(60, 0), "masks": L(74, 0), "opacity": 0.4}, (0, 0)),
+        78: ("ProductLabelMaskOverlay", "The shots' masks on their frames (check SAM 3's track)", {
+            "images": L(110, 0), "masks": L(110, 1), "opacity": 0.4}, (0, 0)),
         79: ("CreateVideo", "Mask check video", {"images": L(78, 0), "fps": L(1, 1), "bit_depth": "auto",
                                                  "color_space": "sRGB", "codec": "none"}, (0, 0)),
         80: ("SaveVideo", "Save the mask check (mp4)", {
@@ -387,7 +395,7 @@ ALL_COLUMNS = [[1, 2, 3, 4, 5, 6, 7, 8, 9, 84], [99, 89, 19, 10, 11, 86, 87, 12,
                [81, 82, 83, 70, 71, 76, 77, 72, 73, 85, 74],
                [20, 21, 88, 22, 96, 97, 98, 23, 24], [25, 26, 27, 29, 28, 30],
                [31, 32, 33, 34, 35, 36], [37, 38, 39, 40], [41, 42, 43, 93, 44], [45, 46, 47, 48], [49, 50, 51, 52, 53, 54],
-               [55, 56, 57, 58], [60, 92, 91, 61, 62], [94, 95, 75, 63, 64, 65], [66, 67, 78, 79, 80]]
+               [55, 56, 57, 58], [60, 92, 91, 61, 110, 62], [94, 95, 75, 63, 64, 65], [66, 67, 78, 79, 80]]
 ALL_HEIGHTS = {1: 374, 21: 720, 24: 852, 31: 246, 70: 300}
 ALL_WIDTHS = {4: 510, 6: 439, 11: 504, 33: 416, 35: 397, 43: 400}
 
@@ -416,7 +424,10 @@ ALL_NOTES = {
         "decided from these and reported:\n"
         "- Keyframe frame -1: found. The clip's shots (between hard cuts) are each probed with SAM 3; the shot whose "
         "product matches the packshot best (silhouette, print layout, colour, size) is fixed, from its best frame "
-        "(largest, sharpest, most frontal, off morph frames and the shot's ends). Set it (from 0) to choose.\n"
+        "(largest, sharpest, most frontal, off morph frames and the shot's ends). Every other shot that likely shows "
+        "the product (6 frames or more) is fixed too, from its own best frame (Every Shot: its own keyframe from the "
+        "stills branch, its own masks); a shot whose keyframe fails its audit is left as generated and named. Set "
+        "the keyframe frame (from 0) to fix only that frame's shot.\n"
         "- The packshot's outline: its alpha, else the engine's trace of the backdrop where SAM 3 agrees, else SAM "
         "3's (the trace took in a drop shadow or a reflection).\n"
         "- Auto Draft auto: the print's polarity from the packshot; the fit affine where the packshot's silhouette "
@@ -445,8 +456,8 @@ ALL_GROUPS = [
      [20, 21, 88, 22, 96, 97, 98, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32], "#b58b2a"),
     ("Paper or print on the body, composite and QA", [33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43], "#a1309b"),
     ("Stills outputs", [93, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58], "#444"),
-    ("Video: Refine (Video) through the shot, spliced back into the clip (clips only)",
-     [60, 92, 91, 61, 62, 94, 95, 75, 63, 64, 65, 66, 67, 78, 79, 80], "#335"),
+    ("Video: Every Shot, Refine (Video) through the shots, spliced back into the clip (clips only)",
+     [60, 92, 91, 61, 110, 62, 94, 95, 75, 63, 64, 65, 66, 67, 78, 79, 80], "#335"),
 ]
 
 
@@ -454,7 +465,7 @@ SIZE = {"LoadImage": (400, 360), "LoadImageMask": (400, 360), "SaveImage": (400,
         "ImagePostQASheet": (420, 520), "ImagePostFitWarp": (380, 140), "ImagePostSavePSD": (420, 300),
         "ProductLabelLoadSource": (400, 360), "ProductLabelLoadOptional": (400, 360), "ProductLabelWorkSize": (400, 130), "ProductLabelSwitch": (380, 100),
         "ProductLabelRunIf": (380, 100), "ProductLabelPrintType": (380, 80), "ProductLabelPickFrame": (380, 120),
-        "ProductLabelShot": (400, 200), "ProductLabelFindKeyframe": (400, 280), "ProductLabelAuditGate": (380, 100), "ProductLabelSplice": (400, 240), "ProductLabelMaskOverlay": (380, 120),
+        "ProductLabelShot": (400, 200), "ProductLabelFindKeyframe": (400, 280), "ProductLabelAuditGate": (380, 100), "ProductLabelEveryShot": (420, 300), "ProductLabelSplice": (400, 240), "ProductLabelMaskOverlay": (380, 120),
         "ProductLabelPackshotMatte": (400, 140), "ProductLabelSAM3Points": (400, 100),
         "ProductLabelSAM3Product": (400, 240), "ProductLabelAuditName": (400, 120), "ProductLabelReviewName": (400, 120),
         "PrimitiveStringMultiline": (400, 240), "PrimitiveInt": (400, 100), "PrimitiveBoolean": (400, 80),

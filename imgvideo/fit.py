@@ -205,11 +205,75 @@ def _stop_reason(t_out, t_in, valid, ok, tracks, vis, q, fin, rig, min_inliers, 
                        "usual_step_px": r3(usual), "visible_before": r3(vis_in), "visible_after": r3(vis_out)}}
 
 
+# the carry (V81): past the held run, the label moved with the product from frame to frame while its own tracks follow
+# it as one similarity (a fast pan, the product crossing the frame's edge, a camera move swapping the background).
+# Measured on the coloured pump clip's shot edges: the tracks' similarity fits 1.7-1.9 px where the bottle crosses the
+# frame's edge (half its tracks out of frame), 5.6 px at a 162 px/frame pan; inside the held run 0.03-0.4 px.
+CARRY = {"res_px": 3.0,        # the similarity's median residual on its inlier tracks, at most this ...
+         "res_move": 0.05,     # ... or this share of the frame's move, if larger (motion blur hides the rest)
+         "min_tracks": 24,     # tracks visible on both frames: at least this many ...
+         "min_share": 0.2,     # ... and this share of the label's tracks
+         "inliers": 0.6,       # the similarity's inliers: at least this share of them
+         "scale": (0.8, 1.25)}  # the frame-to-frame scale within this
+
+
+# a morph frame's test (V81): its own fit holds its tracks within own_px, and the shape borrowed from its neighbours
+# misses them by miss_px more, or turns the label's axis roll_deg off its own fit's. Measured: a coloured pump
+# bottle's jolt as its shot starts, own 0.81 px, borrowed 2.79 (+1.98; its print sheared 4.2 deg off the body, the
+# axis 0.08 deg); the approved serum's and tube's morph frames +0.29 to +1.16 px, axes within 0.46 deg (kept).
+MORPH_OWN = {"own_px": 1.0, "miss_px": 1.5, "roll_deg": 1.5}
+
+
+def _similarity(X, Y):
+    """Least-squares similarity X -> Y (Umeyama, no reflection): (2 x 2 matrix, translation)."""
+    mx, my = X.mean(0), Y.mean(0)
+    Xc, Yc = X - mx, Y - my
+    U, D, Vt = np.linalg.svd(Yc.T @ Xc / len(X))
+    Dm = np.diag([1.0, np.sign(np.linalg.det(U @ Vt))])
+    R = U @ Dm @ Vt
+    s = np.trace(np.diag(D) @ Dm) / max(float((Xc ** 2).sum(1).mean()), 1e-9)
+    return s * R, my - s * R @ mx
+
+
+def carry_step(tracks, vis, a, b, c=CARRY):
+    """The product's move from frame a to frame b as one similarity through the tracks visible on both, outliers
+    dropped. -> (M, t, report) or (None, None, report) when the tracks don't follow it as one (a cut, too few left)."""
+    m = (vis[a] > 0.5) & (vis[b] > 0.5)
+    n = int(m.sum())
+    rep = {"tracks": n}
+    if n < max(c["min_tracks"], c["min_share"] * tracks.shape[1]):
+        return None, None, dict(rep, why="too few tracks on both frames")
+    X, Y = tracks[a][m], tracks[b][m]
+    keep = np.ones(n, bool)
+    for _ in range(4):
+        M, tv = _similarity(X[keep], Y[keep])
+        r = np.linalg.norm(X @ M.T + tv - Y, axis=1)
+        new = r <= max(2.0, 3.0 * float(np.median(r[keep])))
+        if new.sum() < c["min_tracks"] or (new == keep).all():
+            break
+        keep = new
+    res, move = float(np.median(r[keep])), float(np.linalg.norm(np.median(Y - X, 0)))
+    sc = float(np.sqrt(abs(np.linalg.det(M))))
+    rep.update(inliers=round(float(keep.mean()), 3), res_px=round(res, 2), move_px=round(move, 1), scale=round(sc, 3))
+    if keep.mean() < c["inliers"]:
+        return None, None, dict(rep, why="the tracks don't move as one")
+    if res > max(c["res_px"], c["res_move"] * move):
+        return None, None, dict(rep, why="the similarity misses the tracks")
+    if not c["scale"][0] <= sc <= c["scale"][1]:
+        return None, None, dict(rep, why="the scale jumps")
+    return M, tv, rep
+
+
 def fit_shot(base, H0, xy0, tracks, vis, wmin=0.5, reject=2.5, half=3, cuts=(), residual=None, ngrid=5, anchor=None,
-             min_inliers=0.5, max_rms=3.0, max_rigid=12.0, shear_max=None, morph_rigid=(), morph_skip=()):
+             min_inliers=0.5, max_rms=3.0, max_rigid=12.0, shear_max=None, morph_rigid=(), morph_skip=(), carry=0,
+             carry_gate=None, whole=None):
     """All frames of a shot. -> dict with raw and smoothed mappings, per-frame errors, impact frames, and `valid`:
     the frames around the anchor the tracks hold (enough inliers, misfit of the final mapping below max_rms, of the
-    rigid model alone below max_rigid) until a cut, a morph or the product leaving breaks them."""
+    rigid model alone below max_rigid) until a cut, a morph or the product leaving breaks them; with carry, the frames
+    past each end of that run where the product's own tracks still follow it as one similarity (carry_step) join it,
+    frame by frame until they don't, the label moved with them ("carried"); carry_gate(end, prev, t) -> None or why
+    not (the product's matte: the same product carrying on) stops it first. No frame count: the tracks and the matte
+    decide how far. whole(t): the product whole in frame on frame t (the morph test reads only those)."""
     uv, ok = label_coords(H0, xy0)
     T = len(tracks)
     raw, used, rig, fin = [], [], [], []
@@ -308,6 +372,57 @@ def fit_shot(base, H0, xy0, tracks, vis, wmin=0.5, reject=2.5, half=3, cuts=(), 
                 morph_source[t] = sm[t]            # where the source's own print is (render reads its light there)
                 sm[t] = with_camera(Hi, M @ Hi.A, M @ Hi.a + tv)
                 Cs[t] = geo.apply_H(sm[t], G)
+    # a morph frame keeps the shape it borrowed only where its own fit can't hold its tracks (V81): where its own fit
+    # does (MORPH_OWN["own_px"]) and the borrowed shape misses them by more (miss_px) or turns the label off its own
+    # fit's axis (roll_deg), the shear was the product's own (a jolt as a shot starts), and it keeps its own fit
+    morph_test = {}
+    if morph:
+        Gc = G.mean(0)
+        axis = np.array([[Gc[0], G[:, 1].min()], [Gc[0], G[:, 1].max()]])
+        for t in list(morph):
+            if t not in morph_source or t in morph_rigid:
+                continue
+            if whole is not None and not whole(t):
+                # the product cut off by the frame (entering, leaving): its tracks hold part of the label, and its own
+                # fit beyond them is a guess; the neighbours' shape stays (an approved spray bottle entering from the
+                # top: its own fit moved the print there)
+                morph_test[int(t)] = {"kept": "borrowed shape (the product cut off by the frame)"}
+                continue
+            u = used[t]
+            X, Y = uv[ok][u], tracks[t][ok][u]
+            e_own = float(np.sqrt(np.mean(np.sum((geo.apply_H(morph_source[t], X) - Y) ** 2, 1))))
+            e_m = float(np.sqrt(np.mean(np.sum((geo.apply_H(sm[t], X) - Y) ** 2, 1))))
+            p, q2 = geo.apply_H(morph_source[t], axis), geo.apply_H(sm[t], axis)
+            d = np.degrees(np.arctan2(*(q2[1] - q2[0])[::-1]) - np.arctan2(*(p[1] - p[0])[::-1]))
+            roll = float((d + 180.0) % 360.0 - 180.0)
+            own = e_own <= MORPH_OWN["own_px"] and (e_m - e_own > MORPH_OWN["miss_px"] or abs(roll) > MORPH_OWN["roll_deg"])
+            morph_test[int(t)] = {"own_rms_px": round(e_own, 3), "borrowed_rms_px": round(e_m, 3),
+                                  "roll_deg": round(roll, 2), "kept": "own fit" if own else "borrowed shape"}
+            if own:
+                sm[t] = morph_source.pop(t)
+                Cs[t] = geo.apply_H(sm[t], G)
+                morph.remove(t)
+    # the carry: past the held run's ends, frame by frame, the control points moved by the tracks' similarity
+    carried, carry_rep = [], {}
+    if carry:
+        trk, vv = tracks[:, ok], vis[:, ok]
+        for step in (1, -1):
+            end = valid[-1] if step > 0 else valid[0]
+            prev, t = end, end + step
+            while 0 <= t < T:
+                why = carry_gate(end, prev, t) if carry_gate is not None else None
+                if why:
+                    carry_rep[int(t)] = {"why": why}
+                    break
+                M, tv, rep = carry_step(trk, vv, prev, t)
+                carry_rep[int(t)] = rep
+                if M is None:
+                    break
+                Cs[t] = Cs[prev] @ M.T + tv
+                sm[t] = fit_points(base, G, Cs[t], residual)
+                carried.append(int(t))
+                prev, t = t, t + step
+        valid = sorted(set(valid) | set(carried))
     err = []
     for t in range(T):
         u = used[t]
@@ -316,10 +431,10 @@ def fit_shot(base, H0, xy0, tracks, vis, wmin=0.5, reject=2.5, half=3, cuts=(), 
                     "rigid_rms_px": round(rig[t], 3) if np.isfinite(rig[t]) else None,
                     "rms_px": round(float(np.sqrt(np.mean(r ** 2))), 3) if len(r) else None,
                     "p90_px": round(float(np.percentile(r, 90)), 3) if len(r) else None,
-                    "smooth_shift_px": round(float(np.linalg.norm(Cs[t] - C[t], axis=1).max()), 3)})
+                    "smooth_shift_px": 0.0 if t in carried else round(float(np.linalg.norm(Cs[t] - C[t], axis=1).max()), 3)})
     return {"raw": raw, "smooth": sm, "uv": uv, "on_surface": ok, "controls": G, "C_raw": C, "C_smooth": Cs,
             "impacts": br, "errors": err, "valid": valid, "kept_raw": kept_raw, "morph": morph, "stops": stops,
-            "morph_source": morph_source}
+            "morph_source": morph_source, "carried": carried, "carry": carry_rep, "held": [lo, hi], "morph_test": morph_test}
 
 
 def silhouette_snap(H, matte, v_range, step=24.0, max_px=30.0, inner=(-1.0, -0.6, -0.2, 0.2, 0.6, 1.0), lam=0.02,
