@@ -1,12 +1,13 @@
 {
  "skill": "~/Documents/Claude/product-label-refinement",
- "imgpost_version": "0.24.1",
+ "imgpost_version": "0.25.0",
  "synced": "2026-11-20",
  "files": {
-  "__init__.py": "7ea10e6fea2ae949b87747a97d59dd45ec5dc391a9b8de29d23eabc9a3bd9402",
+  "__init__.py": "ea41c8359d0fc6bc614a403f2adbfb1f229289194e95c43764a5e878c573a0bb",
   "audit.py": "7154d0ab2f5e63137450f2d57ac62677b80acdfa131bd94fa5ccf41e762e0c27",
   "autofit.py": "2cd163f9e2ce68e6e3c04072279ec5db2e73bb862afd08aeb11c6672a5e68d91",
   "bow.py": "56f709307bfe94bf9c96f6e30068586d6f33898202f753a81528b6fe1404b456",
+  "copyrows.py": "8acc05a0a20c2d76a3d09803bfb7135a744d2aa7fc136c75400952013f7df390",
   "decide.py": "b508d6cd939ef4097b4dad029a497da95b64ab8ed248a636da573c705fd5bcca",
   "draft.py": "26d93a15605f70888c75e66a2e800a0acf0b389d6ff982431a67b337b323d4ef",
   "fill.py": "4267aca68ce18703a25e1bbdd32670de80bcafd5701b2cd7577f46c93722a4af",
@@ -14,7 +15,7 @@
   "geometry.py": "fed88b4454a5fea93ce4f69cee4efb4ca11ed92532df13b7718ffcb0530b439e",
   "grade.py": "fe0c9d16dbc4c9df56f1cd8e69a88e37f5f87cd976089370a0fcd1e21f728d2b",
   "images.py": "7d2e9e6f77b4f70c555bcf35412a11caa7705afbffff83e8636dbac0604d7e3d",
-  "ink.py": "f0d791f073406f2a9032d193b0d9ab6b1d0052d5f84abb041c5f32fd68053fe6",
+  "ink.py": "8bf09a37b24eaa43a911f5b98a76f5345b480de3092af00b22c30af4900567fa",
   "masks.py": "2f46b382f3b6f0654d603557ed3b2b39f130f7dd825ccacbe0bb725e464b91a9",
   "outline.py": "134de36ca4749f6d58a5d177f2e97f90c6c84400edf6fc30cbd2992d252ad60f",
   "psd.py": "132fdcb5dd9ef88004cdb29c78a5bd67621f395c53b39e47fc8f5b1a0a13f868",
@@ -24,10 +25,10 @@
   "warp.py": "b7a19675703d2464867e8c6b7dbd6cb5b3cbbde062aac71403418efec9d6a45e",
   "workscale.py": "3276264d3af10e2a3f1864e99eab0b025aaacbca2325441d8d4f9e6554c6500a"
  },
- "run_py": "7161c26891a68af25d4aba1e61d30c555e29e629af81c8ec9e895f7136d2ca87",
+ "run_py": "0f426102bd15987142c89deca759c43275c23b7792e994bff79fbd0ae88fa937",
  "video_engine": {
   "synced": "2026-11-20",
-  "imgpost_version": "0.24.1",
+  "imgpost_version": "0.25.0",
   "packages": {
    "imgvideo": {
     "version": "0.21.0",

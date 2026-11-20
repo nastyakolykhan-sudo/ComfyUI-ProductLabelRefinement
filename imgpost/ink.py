@@ -59,6 +59,8 @@ DEFAULTS = {
                           # none darker than the frame's own darkest; None: one ink, the frame's (k)
     "text": False,        # text only (pitfall 111): letters only, line by line onto the generated lines, each in the
                           # generated line's own ink; the generated rules, bands, edges and lone marks stay
+    "copy_rows": True,    # a block of copy the generator drew smaller than the packshot's layout sized to its own
+                          # generated rows (copyrows.py, pitfall 119; not text only, which places line by line)
 }
 # dark print straight on a jar or a bottle (2026-10-18, pitfall 97): the frame's strokes are as wide as the packshot's,
 # often wider than 7 px (a wordmark), and a closing narrower than a stroke leaves its middle unfilled, so the frame's
@@ -775,6 +777,19 @@ def _prepare(ref_u8, refmask, cfg, H, roi, crop_u8, ss=4, prefilter=0.6, body=No
             Hfin = Hc
         else:
             Hfin = H
+    near = None
+    if cfg.get("copy_rows") and not cfg.get("text"):
+        # a block of copy drawn smaller than the rest of the print: on its own generated rows (pitfall 119)
+        from . import copyrows
+        fits, crep["copy_rows"] = copyrows.fit(cov_r, band, Hfin, roi, crop_u8, in_band, cfg,
+                                               frame_stroke(crep, cov, cov_r))
+        if fits:
+            # the garbled print is still taken from round where the print was laid too (the moved block's old
+            # place): on a clip the generator's lines drift against the carried edit, and a block put onto its
+            # own rows left their neighbours showing beside it (round v24, the clip's double check)
+            laid = cov
+            cov = copyrows.lay(cov_r, band, Hfin, roi, kw, fits)
+            near = np.maximum(laid, cov)
     text = None
     if cfg.get("text"):
         # text only (pitfall 111): the packshot's letters, line by line, onto the generated print's own lines
@@ -790,7 +805,7 @@ def _prepare(ref_u8, refmask, cfg, H, roi, crop_u8, ss=4, prefilter=0.6, body=No
     if cfg["sharpen"] == "auto":
         cov, crep["sharpen"] = sharpen_cover(cov, crop_u8, in_band, cfg, frame_stroke(crep, cov, cov_r))
     return {"cover": cov, "band": in_band, "box": ex.get("box"), "inks": ex.get("inks"), "report": crep,
-            "ref_sum": float(cov_r.sum()), "text": text}
+            "ref_sum": float(cov_r.sum()), "text": text, "near": near}
 
 
 def register(crop_u8, cover, in_band, cfg, offset, stroke=None, body=None, rows=None):
@@ -1027,12 +1042,14 @@ def sharpen_cover(cover, crop_u8, in_band, cfg, stroke=None):
     return out, rep
 
 
-def garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=None, text=None, ref_ink=None):
+def garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=None, text=None, ref_ink=None, near=None):
     """ref_ink: prepare()'s report "ref_ink" (the packshot's own ink): the letters' contrast is brought up to it where
-    the generated print reads fainter (pitfall 118); None: the generated print's ink as it is."""
+    the generated print reads fainter (pitfall 118); None: the generated print's ink as it is. near: prepare()'s
+    "near" (a block of copy moved onto its rows, pitfall 119: the print as first laid and as it goes on): the garbled
+    print taken from round it instead of round the cover alone."""
     if text is not None and text.get("mixed"):
         return _garbled_mixed(crop_u8, M, in_band, cfg, vis, text)
-    return _garbled(crop_u8, M, cover, in_band, cfg, vis, in_box, ink_rgb, text, ref_ink)
+    return _garbled(crop_u8, M, cover, in_band, cfg, vis, in_box, ink_rgb, text, ref_ink, near)
 
 
 def _garbled_mixed(crop_u8, M, in_band, cfg, vis, text):
@@ -1065,7 +1082,8 @@ def _garbled_mixed(crop_u8, M, in_band, cfg, vis, text):
     return fl, info, rep
 
 
-def _garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=None, text=None, ref_ink=None):
+def _garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=None, text=None, ref_ink=None,
+             near=None):
     """3. The frame's garbled print removed: -> (filled linear rgb, info for composite(), report).
     M: the generated product's matte over the work box (bool); in_box: the print box warped (warp_cover's extra
     "box"), with gen_grow; ink_rgb: ref_inks() warped (extra "inks"), each ink's own colour; text: prepare()'s text
@@ -1082,10 +1100,11 @@ def _garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=Non
                        "align and old_silhouette (the matte)")
     Lf = im.lum(Fl)
     zone = work
+    reach_of = cover if near is None else near       # where the garbled print is looked for round (pitfall 119)
     if cfg["gen_near"] is not None:
         # only garbled print near where the true print goes (its layout is the true one's, a few px off), inset from
         # the matte: a frosted body's own highlights (the band under the shoulder, the limb rims, the base) stay
-        zone = work & ndi.binary_dilation(cover > 0.1, iterations=int(cfg["gen_near"])) & \
+        zone = work & ndi.binary_dilation(reach_of > 0.1, iterations=int(cfg["gen_near"])) & \
             ndi.binary_erosion(M, iterations=int(cfg["gen_inset"]))
     rep = {}
     glow_wide = 0
@@ -1117,7 +1136,7 @@ def _garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=Non
             if cfg["gen_near"] is not None:
                 # ... and the garbled print is taken that much further from the new print's footprint: a blurred
                 # wordmark set a stroke's width beside the new one kept its far half (pitfall 117)
-                zone = work & ndi.binary_dilation(cover > 0.1, iterations=int(cfg["gen_near"]) + glow_wide) & \
+                zone = work & ndi.binary_dilation(reach_of > 0.1, iterations=int(cfg["gen_near"]) + glow_wide) & \
                     ndi.binary_erosion(M, iterations=int(cfg["gen_inset"]))
                 rep["frame_open_wide"]["near_px"] = int(cfg["gen_near"]) + glow_wide
     if dark:
@@ -1497,7 +1516,9 @@ def check(crop_u8, out_u8, info, cover, cfg, offset):
     changed = (out_u8 != crop_u8).any(-1)
     near = info.get("near_px") or (cfg["gen_near"] if cfg["gen_near"] is not None else DEFAULTS["gen_near"])
     reach = int(near) + int(cfg["gen_dilate"]) + 1    # (frame_open_wide: the widened reach, pitfall 117)
-    foot = ndi.binary_dilation(cover > 1e-3, iterations=reach)
+    # a block of copy moved onto its rows (pitfall 119): the garbled print was taken from round its first place too
+    reach_of = cover if info.get("near") is None else np.maximum(cover, info["near"])
+    foot = ndi.binary_dilation(reach_of > 1e-3, iterations=reach)
     grown = info.get("grown")
     if grown is not None:
         foot |= grown
@@ -1517,7 +1538,7 @@ def check(crop_u8, out_u8, info, cover, cfg, offset):
                         "text": f"{px} px changed {what}: a body highlight taken for print? (gen_near, print_box)"})
     if grown is not None:
         # garbled print taken whole beyond the true print's footprint (gen_grow): print the generator drew elsewhere
-        sel = changed & grown & ~ndi.binary_dilation(cover > 1e-3, iterations=reach)
+        sel = changed & grown & ~ndi.binary_dilation(reach_of > 1e-3, iterations=reach)
         lab, n = ndi.label(sel)
         for i, sl in enumerate(ndi.find_objects(lab), 1):
             px = int((lab[sl] == i).sum())
@@ -2190,7 +2211,8 @@ def dark_checks(crop_u8, out_u8, info, offset):
     if info.get("polarity") not in POLARITIES:
         return []
     size = int(info.get("frame_size") or 19)
-    copy = contrast_check(info) + copy_short_check(crop_u8, out_u8, info, offset)
+    from . import copyrows
+    copy = contrast_check(info) + copy_short_check(crop_u8, out_u8, info, offset) + copyrows.check(info.get("copy_rows"))
     if info.get("polarity") == "light":
         return place_check(crop_u8, out_u8, info["matte"], size, offset, dark=False) + \
             double_check(crop_u8, out_u8, info["matte"], size, offset, dark=False) + copy

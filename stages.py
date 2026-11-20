@@ -563,11 +563,14 @@ def light_fill(job, scene_u8, roi, old, vis, ink_cover):
     try:
         filled, info, frep = ik.garbled(scene_u8[y0:y1, x0:x1], old, ink_cover["cover"], ink_cover["band"], cfg, vis,
                                         ink_cover.get("box"), ink_cover.get("inks"), ink_cover.get("text"),
-                                        ref_ink=(ink_cover.get("report") or {}).get("ref_ink"))
+                                        ref_ink=(ink_cover.get("report") or {}).get("ref_ink"),
+                                        near=ink_cover.get("near"))
     except ik.InkError as e:
         raise StageError(str(e)) from e
     info["cover"] = ink_cover["cover"]
+    info["near"] = ink_cover.get("near")          # a block of copy moved: where the garbled print was taken from
     # run.py's last audit finding: a packshot too small for the frame (QA Sheet appends it)
+    info["copy_rows"] = (ink_cover["report"] or {}).get("copy_rows")     # copy_long (copyrows.check)
     info["soft"] = ik.soft_check(ink_cover["report"], ink_cover["cover"], ink_cover.get("ref_sum", 0.0), info["alpha"],
                                  (x0, y0))
     return filled, info["fill"], dict({"type": "ink", "polarity": pol}, **ink_cover["report"], **frep), info
