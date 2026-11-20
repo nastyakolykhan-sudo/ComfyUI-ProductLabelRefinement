@@ -185,6 +185,10 @@
       "masks": [
         "99",
         1
+      ],
+      "keyframe_report": [
+        "89",
+        1
       ]
     },
     "class_type": "ProductLabelShot",
@@ -1705,6 +1709,10 @@
       "shots": [
         "110",
         7
+      ],
+      "found_masks": [
+        "110",
+        8
       ]
     },
     "class_type": "ProductLabelVideoRefine",

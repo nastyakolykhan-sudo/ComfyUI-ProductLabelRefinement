@@ -107,6 +107,17 @@ def _keyframes_to_frames(kf, frames, masks, bbox, index, kfr):
     return out, kfr
 
 
+def _spans(ts):
+    """Sorted frames -> [[first, end), ...] runs."""
+    out = []
+    for t in sorted(ts):
+        if out and t == out[-1][1]:
+            out[-1][1] = t + 1
+        else:
+            out.append([int(t), int(t) + 1])
+    return out
+
+
 def _parse_frames(text, n):
     text = (text or "auto").strip()
     if text in ("", "auto"):
@@ -180,7 +191,13 @@ class ProductLabelVideoRefine:
                 "shots": ("STRING", {"forceInput": True, "tooltip": (
                     "Several shots of the clip, one per keyframe (Every Shot's): JSON [[start, end], ...], the frames "
                     "each covers (end excluded). Each is refined on its own, as a run of that shot alone, from its "
-                    "keyframe (keyframe_frames: each one's frame), and put back; empty: the frames are one run.")}),
+                    "keyframe (keyframe_frames: each one's frame), and put back; empty: the frames are one run. "
+                    "[start, end, \"found\"]: a run inside a shot where the product was lost and found again (Every "
+                    "Shot, V83): the shot is refined as it would be alone, the found run on its own masks (found_masks), "
+                    "and it fills only the frames the shot leaves as they are.")}),
+                "found_masks": ("MASK", {"tooltip": (
+                    "The product's masks on the found runs (shots marked \"found\"), one per frame of each, in order "
+                    "(Every Shot's)")}),
             },
         }
 
@@ -196,9 +213,47 @@ class ProductLabelVideoRefine:
     def _run(pl, fr, mk, kfs, cfg, kfr, fps, processes, weights):
         return _run_refine(pl, fr, mk, kfs, cfg, kfr, fps, processes, weights)
 
+    def _found(self, pl, r, sh, found, kfs, kfr, fr, found_masks, cfg, fps, processes, weights):
+        """The runs found again inside a shot (V83), each refined on its own frames and masks from its own keyframe
+        (as a shot of Every Shot's), put into the frames the shot's own run left as they are (a frame it changed
+        keeps its label). The report: not_covered less the frames they fill, covered with them, and "found": each
+        run's own report, its frames in the clip and the frames it filled."""
+        if found_masks is None:
+            raise ValueError("shots marked found need found_masks (Every Shot's)")
+        fm = found_masks[None] if found_masks.dim() == 2 else found_masks
+        fm = fm.detach().cpu().numpy() > 0.5
+        out, changed, matte = r["frames"].copy(), r["changed"].copy(), np.array(r["matte"], dtype=bool)
+        rep = dict(r["report"])
+        filled, runs, off = set(), [], 0
+        for i in found:
+            a, b = int(sh[i][0]), int(sh[i][1])
+            m = fm[off:off + b - a]
+            off += b - a
+            if m.shape[0] != b - a or m.shape[1:3] != fr.shape[1:3]:
+                raise ValueError(f"found_masks: {m.shape[0]} masks for the found run {a}-{b - 1}")
+            if not a <= kfr[i] < b:
+                raise ValueError(f"shots: keyframe frame {kfr[i]} is outside its found run {a}-{b - 1}")
+            print(f"found      {a}-{b - 1}, keyframe frame {kfr[i]}")
+            cfg_i = cfg if cfg.get("shots") else dict(cfg, shots=[[0, b - a]])
+            if "carry" not in (cfg_i.get("fit") or {}):
+                cfg_i = dict(cfg_i, fit=dict(cfg_i.get("fit") or {}, carry=True))
+            ri = self._run(pl, fr[a:b], m, [kfs[i]], cfg_i, [kfr[i] - a], fps, processes, weights)
+            take = [t for t in range(a, b) if not changed[t].any() and ri["changed"][t - a].any()]
+            for t in take:
+                out[t], changed[t], matte[t] = ri["frames"][t - a], ri["changed"][t - a], ri["matte"][t - a]
+            filled |= set(take)
+            runs.append({"frames": [a, b], "filled": _spans(take), "report": ri["report"]})
+        nc = []
+        for e in rep.get("not_covered") or []:
+            x0, x1 = (int(v) for v in e["frames"])
+            nc += [dict(e, frames=[p, q]) for p, q in _spans([t for t in range(x0, x1) if t not in filled])]
+        cov = {t for p, q in rep.get("covered") or [] for t in range(int(p), int(q))} | filled
+        rep.update(not_covered=nc, covered=_spans(sorted(cov)), found=runs)
+        return dict(r, frames=out, changed=changed, matte=matte, report=rep)
+
     def refine(self, frames, mask, keyframes, tracker, keyframe_index=-1, keyframe_frames="auto", keyframe_bbox=None,
                product=None, settings="", fps=24.0, processes=0, model=None, compositing=None, soft_cap=-1.0,
-               glue=False, shots=""):
+               glue=False, shots="", found_masks=None):
         pl = _engine()
         processes, why = _processes(processes, frames.shape)
         if mask.dim() == 2:
@@ -239,14 +294,22 @@ class ProductLabelVideoRefine:
         os.environ["PLR_ALLTRACKER"] = weights
         print(f"processes  {processes} ({why})")
         sh = json.loads(shots) if shots and shots.strip() else []
-        if sh:
+        found = [i for i, x in enumerate(sh) if len(x) > 2 and x[2] == "found"]
+        main = [i for i in range(len(sh)) if i not in found]
+        if sh and (len(sh) != len(kfs) or any(x is None for x in kfr)):
+            raise ValueError(f"shots: {len(sh)} shots for {len(kfs)} keyframes; each needs its keyframe frame "
+                             "(keyframe_frames)")
+        if found and len(main) == 1 and [int(v) for v in sh[main[0]][:2]] == [0, fr.shape[0]]:
+            # one shot with runs found again inside it (V83): the shot exactly as a run of it alone, as it was refined
+            # before any run was found (its frames stay as they were); the found runs fill in after
+            i = main[0]
+            print(f"shot       0-{fr.shape[0] - 1}, keyframe frame {kfr[i]} (as one run)")
+            r = self._run(pl, fr, mk, [kfs[i]], cfg, [kfr[i]], fps, processes, weights)
+        elif sh:
             # several shots (Every Shot): each refined on its own frames from its own keyframe, exactly as a run of
             # that shot alone (its own work folder by its inputs), then put back into the clip
-            if len(sh) != len(kfs) or any(x is None for x in kfr):
-                raise ValueError(f"shots: {len(sh)} shots for {len(kfs)} keyframes; each needs its keyframe frame "
-                                 "(keyframe_frames)")
             parts = []
-            for (a, b), k_i, f_i in zip(sh, kfs, kfr):
+            for (a, b), k_i, f_i in ((sh[i][:2], kfs[i], kfr[i]) for i in main):
                 if not a <= f_i < b:
                     raise ValueError(f"shots: keyframe frame {f_i} is outside its shot {a}-{b - 1}")
                 print(f"shot       {a}-{b - 1}, keyframe frame {f_i}")
@@ -260,9 +323,11 @@ class ProductLabelVideoRefine:
                     cfg_i = dict(cfg_i, fit=dict(cfg_i.get("fit") or {}, carry=True))
                 parts.append(self._run(pl, fr[a:b], mk[a:b], [k_i], cfg_i, [f_i - a], fps, processes, weights))
             root = Path(folder_paths.get_temp_directory()) / "label-video" / _digest(fr, mk, *kfs)
-            r = pl.merge_shots(parts, sh, fr, mk, work=root)
+            r = pl.merge_shots(parts, [sh[i][:2] for i in main], fr, mk, work=root)
         else:
             r = self._run(pl, fr, mk, kfs, cfg, kfr, fps, processes, weights)
+        if found:
+            r = self._found(pl, r, sh, found, kfs, kfr, fr, found_masks, cfg, fps, processes, weights)
         changed = torch.from_numpy(r["changed"])
         out = frames.clone()
         if changed.any():                    # only the changed pixels are written; the rest is the input tensor

@@ -2319,9 +2319,13 @@ def place_check(src_u8, out_u8, M, size, offset, max_px=12.0, max_share=0.10, da
         return []
     span = int(rows.max() - rows.min())
     best, shift = -1.0, 0
+    # normalised by the whole new print, not by its part in the window: a shift that leaves most of the new print out of
+    # the window can't match well on what's left (a tube drawn on its box: a third of the new print against the
+    # crimp's ridges, 0.69 at -220 px; on the whole print +6 px, 0.63). A window that holds all of it: as before
+    pn_norm = float((pn * pn).sum())
     for d in range(-span, span + 1):
         a, b = pn[max(0, -d):len(pn) - max(0, d)], pg[max(0, d):len(pg) - max(0, -d)]
-        v = float((a * b).sum() / (np.sqrt((a * a).sum() * (b * b).sum()) + 1e-9))
+        v = float((a * b).sum() / (np.sqrt(pn_norm * (b * b).sum()) + 1e-9))
         if v > best:
             best, shift = v, d
     lim = max(max_px, max_share * span)
