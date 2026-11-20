@@ -562,7 +562,8 @@ def light_fill(job, scene_u8, roi, old, vis, ink_cover):
     x0, y0, x1, y1 = roi
     try:
         filled, info, frep = ik.garbled(scene_u8[y0:y1, x0:x1], old, ink_cover["cover"], ink_cover["band"], cfg, vis,
-                                        ink_cover.get("box"), ink_cover.get("inks"), ink_cover.get("text"))
+                                        ink_cover.get("box"), ink_cover.get("inks"), ink_cover.get("text"),
+                                        ref_ink=(ink_cover.get("report") or {}).get("ref_ink"))
     except ik.InkError as e:
         raise StageError(str(e)) from e
     info["cover"] = ink_cover["cover"]

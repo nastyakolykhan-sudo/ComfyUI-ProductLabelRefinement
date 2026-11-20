@@ -79,6 +79,18 @@ WIDE_FROM = 2.0        # frame_open_wide: only where the widest garbled stroke i
 DARK_RIM = 0.03        # frame_open_wide: px this share below the body light within the glow's reach are the old strokes' rims
 POLARITIES = ("light", "dark")
 TEXT_ASPECT = 0.03     # text only: the registration's scales at most this share apart (reg_aspect)
+REF_CORE = 0.8         # ref_ink: packshot print this well covered is its ink
+REF_CORE_PX = 30       # ... at least this many such px, else the packshot's ink isn't read
+CONTRAST_SHARE = 0.8   # text only (pitfall 118): new letters fainter than this share of the packshot's print contrast
+                       # are brought up to it (the generator's small, soft print read 0.17 against the packshot's 0.45)
+CONTRAST_GAIN = 4.0    # ... by at most this much (a print read barely off its body has no ink to go by)
+TEXT_CONTRAST_WARN = 0.7   # text_contrast: the new letters under this share of the packshot's print contrast: WARN
+COPY_PRINT = 0.02      # copy_short: linear luminance off the body (top-hat) that counts as print
+COPY_SHORT_LINES = 0.5   # ... generated print taken away this many letter heights past the new print: WARN
+COPY_SHORT_PX = 25       # ... at least this many px of it (a short word)
+COPY_LINE_WIDE = 3.0     # ... in pieces this many letter heights wide across the body's axis
+COPY_LINE_TALL = 2.0     # ... and at most this many along it (a line of copy, not an old wordmark's end)
+COPY_LINE_SHARE = 0.25   # ... and this share of the new print's width across the axis or more
 
 
 class InkError(ValueError):
@@ -285,6 +297,36 @@ def _widest(top, sel, big, inner=False):
     return max(7, int(np.ceil(1.5 * widest)) | 1), widest
 
 
+def lift_of(k, body):
+    """The print's contrast over its body as a luminance ratio: light print (k >= 1) how much brighter, dark print how
+    much darker (both >= 0). k: frame / body per channel (3,) or per pixel (..., 3); body: linear rgb (3,)."""
+    b = float(np.asarray(body, float) @ im.LUMA)
+    r = (np.asarray(k, float) * np.asarray(body, float)) @ im.LUMA / max(b, 1e-6)
+    return np.abs(r - 1.0)
+
+
+def ref_ink(ref_u8, cov, inside, size, dark, cfg):
+    """The packshot's own ink (pitfall 118): its fully covered print against the bare body round it, per channel, and
+    its contrast as lift_of(). A generated print drawn small or soft is a blend of ink and body even at its most
+    covered px, so its k reads fainter than the print it stands for. The body is the local mean of the band's pixels
+    off the print (an opening wider than a bold wordmark's strokes reads a pink tube's darker side under them: the
+    ratio came out 2.5 for a white ink, 1.95 at most). -> {"k", "body", "lift", "px"} (linear) or None"""
+    core = (cov >= REF_CORE) & inside
+    if int(core.sum()) < REF_CORE_PX:
+        return None
+    Rl = im.srgb_to_lin(im.to_float(ref_u8))
+    bare = (inside & (cov < cfg["floor"]) & ~ndi.binary_dilation(cov > cfg["floor"], iterations=2)).astype(float)
+    sig = max(2.0, size / 2.0)
+    wb = np.maximum(ndi.gaussian_filter(bare, sig), 1e-3)     # (far from any bare body: a floor, not 0 / 0)
+    body = np.stack([ndi.gaussian_filter(Rl[..., c] * bare, sig) for c in range(3)], -1) / wb[..., None]
+    ratio = Rl[core] / np.maximum(body[core], 1e-4)
+    k = np.median(ratio, 0)
+    k = np.minimum(k, 1.0) if dark else np.maximum(k, 1.0)
+    bm = np.median(body[core], 0)
+    return {"k": k.round(4).tolist(), "body": bm.round(4).tolist(), "lift": round(float(lift_of(k, bm)), 4),
+            "px": int(core.sum())}
+
+
 def ref_cover(ref_u8, refmask, cfg):
     """1. The packshot's print as coverage (reference px, 0..1) -> (cover, band, report)."""
     band = band_mask(refmask, ref_u8.shape)
@@ -369,6 +411,9 @@ def ref_cover(ref_u8, refmask, cfg):
             faint = np.isin(lab, np.nonzero(ndi.maximum(cov, lab, np.arange(1, n + 1)) < 0.4)[0] + 1)
             rep["faint_px"] = int(faint.sum())
             cov[faint] = 0
+    rk = ref_ink(ref_u8[y0:y1, x0:x1], cov, B & K, s, dark, cfg)
+    if rk is not None:
+        rep["ref_ink"] = rk
     full = np.zeros(band.shape)
     full[y0:y1, x0:x1] = cov
     rep.update({"open": s, "ref_black_lin": round(black, 4)} if dark else {"open": s, "ref_white_lin": round(white, 4)})
@@ -739,6 +784,7 @@ def _prepare(ref_u8, refmask, cfg, H, roi, crop_u8, ss=4, prefilter=0.6, body=No
         # text_fit: whether the letters' size and place were checked against the generated print (the registration
         # kept) or come from the label's outline alone
         rg = crep.get("register") or {}
+        text["ref_ink"] = crep.get("ref_ink")        # the packshot's own ink (pitfall 118)
         text["register"] = {"run": bool(cfg.get("register")), "kept": bool(rg.get("kept")),
                             "ncc_after": rg.get("ncc_after"), "why": rg.get("why")}
     if cfg["sharpen"] == "auto":
@@ -981,10 +1027,12 @@ def sharpen_cover(cover, crop_u8, in_band, cfg, stroke=None):
     return out, rep
 
 
-def garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=None, text=None):
+def garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=None, text=None, ref_ink=None):
+    """ref_ink: prepare()'s report "ref_ink" (the packshot's own ink): the letters' contrast is brought up to it where
+    the generated print reads fainter (pitfall 118); None: the generated print's ink as it is."""
     if text is not None and text.get("mixed"):
         return _garbled_mixed(crop_u8, M, in_band, cfg, vis, text)
-    return _garbled(crop_u8, M, cover, in_band, cfg, vis, in_box, ink_rgb, text)
+    return _garbled(crop_u8, M, cover, in_band, cfg, vis, in_box, ink_rgb, text, ref_ink)
 
 
 def _garbled_mixed(crop_u8, M, in_band, cfg, vis, text):
@@ -1017,7 +1065,7 @@ def _garbled_mixed(crop_u8, M, in_band, cfg, vis, text):
     return fl, info, rep
 
 
-def _garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=None, text=None):
+def _garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=None, text=None, ref_ink=None):
     """3. The frame's garbled print removed: -> (filled linear rgb, info for composite(), report).
     M: the generated product's matte over the work box (bool); in_box: the print box warped (warp_cover's extra
     "box"), with gen_grow; ink_rgb: ref_inks() warped (extra "inks"), each ink's own colour; text: prepare()'s text
@@ -1318,11 +1366,51 @@ def _garbled(crop_u8, M, cover, in_band, cfg, vis=None, in_box=None, ink_rgb=Non
             # a printed body: the letters in the generated letters' own colour (as a ratio over the body, letters on
             # a near-black base came out speckled and fringed, the ratio 300-950)
             info["ink_abs"] = KA
+        else:
+            # the letters' contrast up to the packshot's print where the generated print reads fainter (pitfall 118)
+            info["k"], rep["contrast"] = contrast_up(info["k"], k, filled[core], text.get("ref_ink") or ref_ink,
+                                                     dark, a > 0.3)
+            info["contrast"] = rep["contrast"]
+    elif ink_rgb is None:
+        # one ink (the frame's k) over the whole print: its contrast up to the packshot's as above (pitfall 118)
+        info["k"], rep["contrast"] = contrast_up(info["k"], k, filled[core], ref_ink, dark, None)
+        info["contrast"] = rep["contrast"]
     if glow is not None:
         info["glow"] = glow            # the garbled strokes' glow the fill took: check() reads it as theirs
     rep.update({"filled_px": int(fillm.sum()), "garbled_px": int(gen.sum()), "grain_sd_lin": sd.round(5).tolist(),
                 "ink_k": k.round(3).tolist()})
     return filled, info, rep
+
+
+def contrast_up(kpx, k, body_core, ref, dark, letters):
+    """Text only (pitfall 118; the user, 2026-11-19: the new letters' ink may move up to the packshot's print
+    contrast, letters only): the generated print read as k (frame / body at its most covered px) stands for the real
+    print, but small or soft generated type is a blend of ink and body there, so the true letters came out as faint as
+    the garbled ones (a small tube's white copy: 0.17 over the body against the packshot's 0.45). Where the print's
+    contrast is under CONTRAST_SHARE of the packshot's, each letter pixel's lift over the body (its own hue, from the
+    generated line's ink) is raised to the packshot's, by at most CONTRAST_GAIN; never past it, and never down.
+    kpx: per-pixel k (h x w x 3); k: the print's; body_core: the filled body under the print's core (n x 3).
+    -> (k per pixel, report)"""
+    if ref is None or not len(body_core):
+        return kpx, {"applied": False, "why": "no packshot ink read" if ref is None else "no print core"}
+    bm = np.median(body_core, 0)
+    gen = float(lift_of(k, bm))
+    target = float(ref["lift"])
+    rep = {"generated": round(gen, 4), "packshot": round(target, 4), "share": round(gen / max(target, 1e-6), 3)}
+    if target <= 0 or gen >= CONTRAST_SHARE * target:
+        return kpx, dict(rep, applied=False, why=f"the generated print at {CONTRAST_SHARE:g}x the packshot's contrast "
+                                                 "or more")
+    kpx = np.asarray(kpx, float)
+    lp = np.asarray(lift_of(kpx, bm))                      # each pixel's line ink (or the one ink), as a contrast
+    g = np.clip(target / np.maximum(lp, 1e-6), 1.0, CONTRAST_GAIN)[..., None]
+    out = 1.0 - g * (1.0 - kpx) if dark else 1.0 + g * (kpx - 1.0)
+    out = np.clip(out, 0.0, None)
+    per_px = kpx.ndim > 1 and letters is not None and letters.any()
+    gl = g[..., 0][letters] if per_px else g.ravel()
+    after = float(np.median(lift_of(out[letters], bm))) if per_px else float(lift_of(out, bm))
+    return out, dict(rep, applied=True, gain=[round(float(gl.min()), 3), round(float(np.median(gl)), 3),
+                                              round(float(gl.max()), 3)], after=round(after, 4),
+                     k_after=np.asarray(out).round(4).tolist() if not per_px else None)
 
 
 def _line_inks(Fl, filled, gen, top, text, k, cfg, dark, a):
@@ -2098,18 +2186,109 @@ def dark_checks(crop_u8, out_u8, info, offset):
     curving unlike the generated print's) and ink_rim (an occluder's edge cut, a straight line of new ink near the
     body's edge). For run.py and the pack's QA Sheet. -> audit findings"""
     if info.get("text") is not None:
-        return text_checks(crop_u8, out_u8, info, offset)
+        return text_checks(crop_u8, out_u8, info, offset) + contrast_check(info)
     if info.get("polarity") not in POLARITIES:
         return []
     size = int(info.get("frame_size") or 19)
+    copy = contrast_check(info) + copy_short_check(crop_u8, out_u8, info, offset)
     if info.get("polarity") == "light":
         return place_check(crop_u8, out_u8, info["matte"], size, offset, dark=False) + \
-            double_check(crop_u8, out_u8, info["matte"], size, offset, dark=False)
-    return place_check(crop_u8, out_u8, info["matte"], size, offset) + \
+            double_check(crop_u8, out_u8, info["matte"], size, offset, dark=False) + copy
+    return copy + place_check(crop_u8, out_u8, info["matte"], size, offset) + \
         double_check(crop_u8, out_u8, info["matte"], size, offset) + \
         level_check(crop_u8, out_u8, info["matte"], size, offset) + \
         shape_check(crop_u8, out_u8, info["matte"], size, offset) + \
         rim_check(crop_u8, out_u8, info["matte"], info.get("vis"), size, offset)
+
+
+def contrast_check(info):
+    """text_contrast (pitfall 118; the user, 2026-11-19, on a small tube's copy fixed in its generated faint ink:
+    "why the tube isn't right"): the new letters' contrast over the body against the packshot's print. WARN under
+    TEXT_CONTRAST_WARN of it (fixed, but barely readable). -> audit findings"""
+    c = info.get("contrast") or {}
+    if not c.get("packshot"):
+        return []
+    now = c.get("after", c.get("generated"))
+    sh = float(now) / max(float(c["packshot"]), 1e-6)
+    low = sh < TEXT_CONTRAST_WARN
+    return [{"check": "text_contrast", "level": "WARN" if low else "INFO", "share": round(sh, 3),
+             "text": f"the new letters at {100 * sh:.0f} % of the packshot's print contrast" +
+                     (f" (under {100 * TEXT_CONTRAST_WARN:.0f} %): fixed but faint" if low else
+                      (f", raised from the generated print's {100 * c['share']:.0f} %" if c.get("applied") else ""))}]
+
+
+def copy_short_check(crop_u8, out_u8, info, offset):
+    """copy_short (pitfall 118): generated print the fix took away beyond the new print's first or last line along the
+    body's axis, by over COPY_SHORT_LINES of a line and COPY_SHORT_PX px or more: its line was removed and none put in
+    its place (a tube's last line of small copy left out by a print box a line short). Read on the changed pixels only
+    (the body's own crimp and seams read as print in both frames). WARN: a generator also draws lines the packshot
+    hasn't. -> audit findings"""
+    M = info["matte"]
+    inner = ndi.binary_erosion(M, iterations=4)
+    if inner.sum() < 200:
+        return []
+    dark = info.get("polarity") == "dark"
+    size = int(info.get("frame_size") or 7) | 1
+    changed = ndi.binary_dilation(np.abs(out_u8.astype(int) - crop_u8.astype(int)).max(-1) > 3, iterations=1)
+
+    def prt(u8):
+        L = im.lum(im.srgb_to_lin(im.to_float(u8)))
+        t = (ndi.grey_closing(L, size=(size, size)) - L) if dark else (L - ndi.grey_opening(L, size=(size, size)))
+        return (t > COPY_PRINT) & inner & changed
+    A, B = prt(crop_u8), prt(out_u8)
+    gone = A & ~ndi.binary_dilation(B, iterations=2)
+    if B.sum() < 50 or gone.sum() < COPY_SHORT_PX:
+        return []
+    ys, xs = np.nonzero(M)
+    pts = np.c_[xs, ys].astype(float)
+    ctr = pts.mean(0)
+    w, v = np.linalg.eigh(np.cov((pts - ctr).T))
+    ax = v[:, np.argmax(w)]
+
+    def along(m):
+        y, x = np.nonzero(m)
+        return (np.c_[x, y] - ctr) @ ax
+    tb, tg = along(B), along(gone)
+    # the letters' height: the new print's marks' extents along the axis (small type's lines touch, so the rows with
+    # print run together)
+    lab, nl = ndi.label(B)
+    hs = []
+    for i, sl in enumerate(ndi.find_objects(lab), start=1):
+        y_, x_ = np.nonzero(lab[sl] == i)
+        if len(y_) >= 4:
+            t_ = (np.c_[x_ + sl[1].start, y_ + sl[0].start] - ctr) @ ax
+            hs.append(float(t_.max() - t_.min() + 1))
+    lh = float(np.median(hs)) if hs else 8.0
+    lo, hi = np.percentile(tb, 0.5), np.percentile(tb, 99.5)
+    nv = np.array([ax[1], -ax[0]])
+    gy, gx = np.nonzero(gone)
+    # a left-out line lies across the body (wide across its axis, a letter or two along it): the ends of an old
+    # wordmark drawn longer than the new one run along it (a pump's, 26 px past the new one, 5 px across) and stay
+    # ... and a good share of the copy block's width (a blurred old line's glow under the new one: 20 px of 300)
+    by_, bx_ = np.nonzero(B)
+    nb = (np.c_[bx_, by_] - ctr) @ nv
+    block_w = float(np.percentile(nb, 95) - np.percentile(nb, 5))
+    glab, _ = ndi.label(ndi.binary_dilation(gone, iterations=2))
+    gl = glab[gy, gx]
+    line_like = np.zeros(len(gy), bool)
+    for j in np.unique(gl):
+        sel_ = gl == j
+        P_ = np.c_[gx[sel_], gy[sel_]] - ctr
+        a_, n_ = P_ @ ax, P_ @ nv
+        wide = np.ptp(n_) + 1
+        if wide >= max(COPY_LINE_WIDE * lh, COPY_LINE_SHARE * block_w) and np.ptp(a_) + 1 <= COPY_LINE_TALL * lh:
+            line_like[sel_] = True
+    out = []
+    for end, sel in (("first", (tg < lo - COPY_SHORT_LINES * lh) & line_like),
+                     ("last", (tg > hi + COPY_SHORT_LINES * lh) & line_like)):
+        px = int(sel.sum())
+        if px >= COPY_SHORT_PX:
+            span = float(lo - tg[sel].min()) if end == "first" else float(tg[sel].max() - hi)
+            out.append({"check": "copy_short", "level": "WARN", "px": px,
+                        "text": f"{px} px of generated print taken away {span:.0f} px ({span / lh:.1f} lines) past "
+                                f"the new print's {end} line, nothing put there: a line of the copy left out (the "
+                                "packshot's print box a line short?)"})
+    return out
 
 
 MIN_MATCH = 0.5      # place_check: the two prints' profiles correlate this well or better for a FAIL

@@ -26,7 +26,7 @@ DEFAULTS = {
     "p_bridge": 0.45,        # p2 at or above: a morph frame inside the shot
     "layout_cut": 0.35,      # background layout correlation below: a new set-up (a cut)
     "layout_same": 0.65,     # at or above: the same set-up, a pose snap; between: uncertain (kept in the shot)
-    "iou_cut": 0.30,         # matte overlap below: the product jumped away (a cut)
+    "iou_cut": 0.30,         # matte overlap below: the product jumped away (a cut, unless the layout is the same set-up's)
     "min_area": 0.004,       # matte area as a share of the frame: below, the product isn't there
     "min_width_px": 48,      # the product's width across its axis, full-res px: below, its print can't be read
     "print_min": 0.25,       # print energy against the product's own 90th percentile: below, no label to fix
@@ -139,7 +139,10 @@ def classify(b, cfg=DEFAULTS):
         return "continuous"
     if not np.isnan(p2) and p2 >= cfg["p_bridge"]:
         return "morph"
-    if lay < cfg["layout_cut"] or b["iou"] < cfg["iou_cut"]:
+    # the product jumping away is a cut only where the background's layout doesn't plainly hold: a bounce in one
+    # set-up (a tube's matte overlap 0.299 across it, the layout 0.978) cut the shot short, and the label stopped
+    # 68 frames before the tube left (V38)
+    if lay < cfg["layout_cut"] or (b["iou"] < cfg["iou_cut"] and lay < cfg["layout_same"]):
         return "cut"
     return "snap" if lay >= cfg["layout_same"] else "uncertain"
 

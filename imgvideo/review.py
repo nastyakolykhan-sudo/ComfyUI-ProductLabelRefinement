@@ -60,6 +60,9 @@ DEFAULTS = {
     "fade_n": 3,                 # just inside them, the product gone past the run (V72; an eased end: 0.67 and 0.34
     "fade_ref": 6,               # of its frames before, held: 1.0)
     "jump_px": 3.0,              # the old print, read through both frames' mappings, moves this far in label space
+    "twitch_own_px": 0.5,        # twitch (V82): a morph frame kept its borrowed shape though its own fit holds the tracks
+    "twitch_px": 1.0,            # this tightly, and the borrowed shape moves the label this far: off its tracks for a
+                                 # frame and back (a bouncing tube: 2.0-3.2 px, the user saw the label jump)
     "drop_matte": 0.35,          # drop (V81): frames left as generated next to a refined run, each side for as
                                  # long as they show the product (matte at least this share of the run's end frame's: half
                                  # in frame on a pan 0.45) ...
@@ -989,6 +992,13 @@ def evaluate(F, fps=24.0, cfg=None):
     for t in refined:
         shot_detail.setdefault(F[t].get("shot"), []).append(F[t]["detail"])
     for t in refined:
+        o = F[t].get("own_fit")
+        if o and o.get("own_rms_px") is not None and o["own_rms_px"] <= c["twitch_own_px"] and \
+                (o.get("shift_px") or 0.0) >= c["twitch_px"]:
+            flags[t].append(("twitch", f"the label {o['shift_px']:.1f} px off the product's own tracks for the frame "
+                                       f"(held within {o['own_rms_px']:.2f} px), and back: a morph frame's borrowed "
+                                       "shape"))
+    for t in refined:
         j = F[t].get("jump_px")
         if j is None or j <= c["jump_px"] or (t - 1) not in refined or cut(t):
             continue
@@ -1158,6 +1168,7 @@ def notes_block(flags, summary, title="Automatic checks"):
              "shear": "Shear or shape spikes against the neighbouring frames",
              "vanish": "Label not refined while the product is in view",
              "drop": "Label left out next to a refined run while the product and its print carry on (a pan, a camera move)",
+             "twitch": "The label off the product's own tracks for a frame and back (a morph frame's borrowed shape)",
              "drift": "The label turns off the body for a frame where a run starts or ends",
              "switch": "Hard switch at a fix's end, or a jump where two shots meet",
              "fade": "The fix fades at a run's end though the product leaves right after (the old print shows through)",
@@ -1185,7 +1196,7 @@ def notes_block(flags, summary, title="Automatic checks"):
         out.append("No frame flagged.")
     else:
         out.append("")
-        for k in ("edges", "step", "ghost", "shear", "bend", "body", "slide", "glitter", "shimmer", "vanish", "drop", "drift", "switch", "fade", "swim",
+        for k in ("edges", "step", "ghost", "shear", "bend", "body", "slide", "glitter", "shimmer", "vanish", "drop", "drift", "twitch", "switch", "fade", "swim",
                   "ends", "creep", "lock", "level", "lines", "sharp", "tilt", "spots", "double"):
             if k in summary["checks"]:
                 ex = next(why for t in sorted(flags) for kk, why in flags[t] if kk == k)

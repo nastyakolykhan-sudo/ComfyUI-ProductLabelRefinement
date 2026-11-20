@@ -2098,6 +2098,11 @@ def _review(J, parts, ll_path, arrays=None):
                 j = rv.label_jump(c["art"], Hq, H, src[i - 1], src[i], prev[1], m)
                 if j:
                     r["jump_px"] = j[1]
+        # the label off its own tracks for a frame (V82): a morph frame that kept its borrowed shape although its own
+        # fit holds the tracks tightly, the label moved by the borrowed shape (the review's twitch)
+        mt = (c["res"].get("morph_test") or {}).get(int(t)) if P is not None and isinstance(c.get("res"), dict) else None
+        if mt and mt.get("kept") == "borrowed shape" and mt.get("own_rms_px") is not None:
+            r["own_fit"] = {"own_rms_px": mt["own_rms_px"], "shift_px": mt.get("shift_px")}
         prev = (src[i], m)
         F[T] = r
     for c in ctx.values():                            # glitter: each frame against the frames around it
@@ -2267,12 +2272,12 @@ def plot_qa(rows, rep, path):
     if rep.get("review"):
         # the automatic review checks: one row per check, a mark on each flagged frame (refined or not)
         ax = axs[-1]
-        names = ["edges", "ghost", "shear", "bend", "vanish", "drop", "drift", "switch", "swim", "ends", "level", "sharp",
+        names = ["edges", "ghost", "shear", "bend", "vanish", "drop", "drift", "twitch", "switch", "swim", "ends", "level", "sharp",
                  "tilt", "spots", "double"]
         ax.set_facecolor(surf)
         for i, k in enumerate(names):
             xs = [int(t) for t, v in checks.items() if k in v]
-            ax.scatter(xs, [i] * len(xs), marker="|", s=160, color=(s2 if k in ("vanish", "drop", "drift", "switch") else s1), lw=2, zorder=3)
+            ax.scatter(xs, [i] * len(xs), marker="|", s=160, color=(s2 if k in ("vanish", "drop", "drift", "twitch", "switch") else s1), lw=2, zorder=3)
         ax.set_yticks(range(len(names)), names)
         ax.set_ylim(-0.6, len(names) - 0.4)
         if not checks:

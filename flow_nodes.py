@@ -837,9 +837,10 @@ class ProductLabelReviewName:
                                  # V76: a surface short of a shoulder left its line ends garbled; carried 0.97): FAIL
     CARRIED_DEFECT = ("spots",)  # the keyframe's whole edit carried (kf_kept reported): a keyframe defect repeats on every
                                  # frame; over SHARE, FAIL (V78: dark fill spots on 119 of 120; the spray clip 13 of 104)
-    EDGE = ("drop", "drift")            # the label left out next to its run while the product carries on, or turning
+    EDGE = ("drop", "drift", "twitch")  # the label left out next to its run while the product carries on, or turning
                                         # off the body where a run starts or ends (V81: the user saw 120-121 drop
-                                        # and 123 drift on a three-shot clip): any, FAIL
+                                        # and 123 drift on a three-shot clip), or off the product's own tracks for a
+                                        # frame and back (V82: the user saw a tube's label jump at 99-104): any, FAIL
     HELD = ("slide", "creep", "fade", "lock")   # the label off the print it lies on, held (the check's own run), creeping on
                                         # a still product (V71: the user saw 0.6 px over a still shot), or fading over
                                         # the old print where the product leaves right after (V72), or (the edit
