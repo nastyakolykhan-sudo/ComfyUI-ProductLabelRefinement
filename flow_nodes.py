@@ -335,7 +335,11 @@ class ProductLabelShot:
                     "end": ("INT", {"default": -1, "min": -1, "max": 1_000_000, "tooltip": (
                         "The shot's last frame in the clip; -1: found, the frame before the next cut (or the last)")})},
                 "optional": {"masks": ("MASK", {"tooltip": "A given mask video, one per frame of the clip: cut to the "
-                                                           "same shot"})}}
+                                                           "same shot"}),
+                             "keyframe_report": ("STRING", {"forceInput": True, "tooltip": (
+                                 "Find Keyframe Frame's report: where it found the product lost and found again "
+                                 "inside a shot (splits), taken as cuts for a found run's shot (its keyframe frame "
+                                 "not the report's own); the keyframe's own shot stays whole (V83)")})}}
 
     RETURN_TYPES = ("IMAGE", "MASK", "INT", "INT", "STRING")
     RETURN_NAMES = ("frames", "masks", "start", "keyframe_index", "shot")
@@ -347,14 +351,25 @@ class ProductLabelShot:
                    "(Splice); shot: JSON with start, end, the cuts found and the clip's length. Refine's report counts "
                    "frames from the shot's start: add start for the clip's frame. An image is its own shot.")
 
-    def cut(self, frames, keyframe_index, start=-1, end=-1, masks=None):
+    def cut(self, frames, keyframe_index, start=-1, end=-1, masks=None, keyframe_report=None):
         T, k = int(frames.shape[0]), int(keyframe_index)
         auto = (start < 0 or end < 0) and k >= 0
         cuts = find_cuts(frames) if auto else []
+        splits = []
+        if auto and keyframe_report:
+            try:
+                kr_ = json.loads(keyframe_report) or {}
+                # the keyframe's own shot stays whole (refined as before); a found run's shot ends at its splits
+                if int(kr_.get("keyframe_frame", -1)) != k:
+                    splits = [int(x) for x in kr_.get("splits") or [] if 0 < int(x) < T]
+            except (TypeError, ValueError, AttributeError):
+                splits = []
+        # the product lost and found again inside a shot (Find Keyframe Frame): a shot of its own, as at a cut
+        edges = sorted(set(cuts) | set(splits))
         if k >= T:
             raise ValueError(f"the keyframe frame {k} is past the clip's last frame ({T - 1})")
-        s = start if start >= 0 else max([c for c in cuts if c <= k], default=0) if k >= 0 else 0
-        e = end if end >= 0 else min([c - 1 for c in cuts if c > k], default=T - 1) if k >= 0 else T - 1
+        s = start if start >= 0 else max([c for c in edges if c <= k], default=0) if k >= 0 else 0
+        e = end if end >= 0 else min([c - 1 for c in edges if c > k], default=T - 1) if k >= 0 else T - 1
         s, e = min(s, T - 1), min(e, T - 1)
         if e < s:
             raise ValueError(f"the shot runs from frame {s} to {e}: end before start")
@@ -365,7 +380,8 @@ class ProductLabelShot:
             if masks.shape[0] == T:
                 masks = masks[s:e + 1]
         shot = {"start": s, "end": e, "frames": e - s + 1, "keyframe_in_shot": k - s if k >= 0 else -1,
-                "clip_frames": T, "cuts": cuts, "found": {"start": start < 0, "end": end < 0} if auto else False}
+                "clip_frames": T, "cuts": cuts, "found": {"start": start < 0, "end": end < 0} if auto else False,
+                **({"splits": splits} if splits else {})}
         return (frames[s:e + 1], masks, s, k - s if k >= 0 else -1, json.dumps(shot))
 
 
@@ -523,6 +539,15 @@ class ProductLabelFindKeyframe:
     WHOLE = 0.90                             # a frame whose product outline matches the packshot's under this share of
                                              # the shot's (90th percentile) shows part of it only (a hand, a holder)
     PARTIAL = 0.6                            # ... and keypick's score is multiplied by this (as an occluded frame)
+    LOST_IOU = 0.30                          # a product lost and found again overlapping where it was lost under this
+                                             # (the engine's iou_cut; a tube drawn again on its box's front: 0.0, the
+                                             # same tube's bounce: 0.28) ...
+    LOST_SHAPE = 0.90                        # ... or its silhouette changed under this (imgauto.coverage's redrawn;
+                                             # 0.84 on the box's front, a bounce 0.98): a shot of its own (V83)
+    STEP = 3                                 # where the track holds no run of the product for SHORT frames or more,
+                                             # SAM 3 looks for it again on every STEP-th frame (V83: a serum's track
+                                             # lost it under its box's sleeve and never took up the serum drawn on the
+                                             # box's front, which SAM 3 finds on its own: match 0.5 or more)
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -566,22 +591,11 @@ class ProductLabelFindKeyframe:
         the given masks), and of the frames where the product is in view the one keypick scores best, off partial
         frames, the most central of a tie. -> {"k", "view", "n", "best", "near", "ranking"}, or why there is none."""
         import numpy as np
-        from .video_nodes import _u8
-        from imgauto import keypick, refangle, shots as ash
+        from imgauto import keypick, refangle
         # the shot's masks: the given ones, else SAM 3 tracked through it from its best probe
-        if mask_given:
-            sm = masks[s:e + 1]
-        else:
-            from .video_nodes import ProductLabelVideoSAM3BothWays
-            kt = best_t - s
-            km = torch.from_numpy(pm[probes.index(best_t)].astype("float32"))[None]
-            sm = ProductLabelVideoSAM3BothWays().track(frames[s:e + 1], model, km, kt, conditioning=conditioning,
-                                                       detection_threshold=0.33, max_objects=1, detect_interval=1)[0]
-        F = _u8(frames[s:e + 1])
-        M = sm.detach().cpu().numpy() > 0.5
-        n = e - s + 1
-        F2, M2 = ash.downscale(F, 2), ash.downscale(M, 2)
-        stats, bnds, _sh, _kinds, _why = ash.analyse(F2, M2)
+        tr = self._track(frames, s, e, best_t, pm[probes.index(best_t)] if not mask_given else None, mask_given,
+                         masks, model, conditioning)
+        M2, stats, bnds, n = (tr[x] for x in ("M2", "stats", "bounds", "n"))
         # the candidates: the frames where the product is in view. A shot can show it for part of its length only (it
         # slides behind something, into a box, out of the frame); there the track is empty and nothing is measured
         view = [t for t in range(n) if "width_px" in stats[t] and stats[t]["area"] >= self.MIN_AREA]
@@ -615,7 +629,122 @@ class ProductLabelFindKeyframe:
         near = [r for r in ranking if r["score"] >= (1.0 - self.TIE) * top_s]
         mid = (view[0] + view[-1]) / 2
         best = min(near, key=lambda r: (abs(r["t"] - mid), -r["score"]))
-        return {"k": s + int(best["t"]), "view": view, "n": n, "best": best, "near": near, "ranking": ranking}
+        return {"k": s + int(best["t"]), "view": view, "n": n, "best": best, "near": near, "ranking": ranking,
+                "track": tr}
+
+    def _track(self, frames, s, e, t0, mask0, mask_given, masks, model, conditioning):
+        """SAM 3 tracked through shot s-e (clip frames, e included) both ways from frame t0's mask (or the given
+        masks), and the engine's analysis of it at half size. -> {"M" (full size), "M2", "stats", "bounds", "shots",
+        "why", "n", "trims" (the engine's fixable runs, [a, b) from the shot's start)}"""
+        from .video_nodes import _u8
+        from imgauto import shots as ash
+        if mask_given:
+            sm = masks[s:e + 1]
+        else:
+            from .video_nodes import ProductLabelVideoSAM3BothWays
+            km = torch.from_numpy(mask0.astype("float32"))[None]
+            sm = ProductLabelVideoSAM3BothWays().track(frames[s:e + 1], model, km, t0 - s, conditioning=conditioning,
+                                                       detection_threshold=0.33, max_objects=1, detect_interval=1)[0]
+        F = _u8(frames[s:e + 1])
+        M = sm.detach().cpu().numpy() > 0.5
+        F2, M2 = ash.downscale(F, 2), ash.downscale(M, 2)
+        stats, bnds, sh, _kinds, why = ash.analyse(F2, M2)
+        return {"M": M, "M2": M2, "stats": stats, "bounds": bnds, "shots": sh, "why": why, "n": e - s + 1,
+                "trims": sorted(tuple(x) for sh_ in sh for x in sh_["trims"])}
+
+    def _unheld(self, tr):
+        """The runs of a shot (from its start, [a, b)) where its track holds no fixable run of the product, SHORT
+        frames or more."""
+        held = {t for a, b in tr["trims"] for t in range(a, b)}
+        runs, t, n = [], 0, tr["n"]
+        while t < n:
+            if t in held:
+                t += 1
+                continue
+            u = t
+            while u < n and u not in held:
+                u += 1
+            if u - t >= self.SHORT:
+                runs.append((t, u))
+            t = u
+        return runs
+
+    def _lost_found(self, tr):
+        """Where SAM 3's track through a shot loses the product (frames with no matte between two of the engine's
+        fixable runs) and finds it again elsewhere or redrawn, with no cut: a wipe, an occlusion, the product drawn
+        again on its packaging. The keyframe's label can't be carried across (no tracks cross the lost frames, and the
+        product found is drawn anew), so the found run is a shot of its own (V83). A product found again where it
+        was lost, its shape kept (a hand passing in front), carries on. -> every gap between two of the engine's runs:
+        [{"at": the next run's first frame, "lost": [first, last], "why", "found_frames", "iou", "shape", "split"}]
+        (frames from the shot's start)"""
+        from imgauto import refangle
+        M2, trims, why = tr["M2"], tr["trims"], tr["why"]
+        out = []
+        for (a0, a1), (b0, b1) in zip(trims, trims[1:]):
+            gap = {"at": int(b0), "lost": [int(a1), int(b0 - 1)],
+                   "why": sorted({why[t] or "short run" for t in range(a1, b0)}), "found_frames": int(b1 - b0)}
+            x, y = M2[a1 - 1], M2[b0]
+            if x.any() and y.any():
+                gap["iou"] = round(float((x & y).sum() / max((x | y).sum(), 1)), 3)
+                gap["shape"] = round(float(refangle.shape_iou(y, x)), 3)
+            gap["split"] = bool(b1 - b0 >= self.SHORT and any(w.startswith("no matte") for w in gap["why"]) and
+                                "iou" in gap and (gap["iou"] < self.LOST_IOU or gap["shape"] < self.LOST_SHAPE))
+            out.append(gap)
+        return out
+
+    def _search(self, frames, s, tr, model, conditioning, ref, Rm):
+        """The runs of a shot where its track holds no run of the product (SHORT frames or more), searched again: SAM 3
+        on every STEP-th frame, its detection that matches the packshot best (PICK_FLOOR or more is the product). A
+        product found on SHORT frames or more, away from where the track last held it (overlapping it under
+        LOST_IOU), is a shot of its own from the first frame it is found on (V83). -> [{"run", "probes": {frame:
+        match}, "at", "lost", "iou", "shape", "split", "by", "probe", "mask"}] (clip frames; mask: the probe's
+        detection, full size)"""
+        from imgauto import refangle
+        M = tr["M"]
+        held = {t for a, b in tr["trims"] for t in range(a, b)}
+        runs = self._unheld(tr)
+        cache, out = {}, []
+        area = M.shape[1] * M.shape[2]
+
+        def det(t):
+            if t not in cache:
+                m, rep = _pick_product(model, frames[s + t:s + t + 1], conditioning, ref, Rm)
+                c = rep["candidates"][rep["pick"]] if rep.get("candidates") else None
+                ok = c is not None and c["match"] >= PICK_FLOOR and m.sum() >= self.MIN_AREA * area
+                cache[t] = (ok, m, round(float(c["match"]), 3) if c else None)
+            return cache[t]
+
+        for r0, r1 in runs:
+            ts = list(range(r0 + 1, r1, self.STEP))
+            groups = []
+            for t in ts:
+                if det(t)[0]:
+                    if groups and t - groups[-1][-1] <= self.STEP:
+                        groups[-1].append(t)
+                    else:
+                        groups.append([t])
+            entry = {"run": [s + r0, s + r1 - 1], "probes": {str(s + t): cache[t][2] for t in ts}}
+            out.append(entry)
+            for g in groups:
+                if g[-1] - g[0] + 1 < self.SHORT:
+                    continue
+                f = g[0]
+                while f - 1 >= r0 and det(f - 1)[0]:
+                    f -= 1
+                if f == 0:
+                    continue                 # found from the shot's first frame: nothing to split off
+                near = r0 - 1 if r0 - 1 in held else (r1 if r1 in held else None)
+                mid = g[len(g) // 2]
+                y = cache[g[0]][1]
+                gap = {"run": entry["run"], "probes": entry["probes"], "at": s + f, "lost": [s + r0, s + f - 1],
+                       "found_frames": g[-1] - f + 1, "by": "search", "probe": s + mid, "mask": cache[mid][1]}
+                if near is not None and M[near].any():
+                    x = M[near]
+                    gap["iou"] = round(float((x & y).sum() / max((x | y).sum(), 1)), 3)
+                    gap["shape"] = round(float(refangle.shape_iou(y[::2, ::2], x[::2, ::2])), 3)
+                gap["split"] = near is None or gap.get("iou", 0.0) < self.LOST_IOU
+                out[-1] = gap
+        return out
 
     def _auto(self, frames, keyframe_frame, keyframe_given):
         return keyframe_frame < 0 and not keyframe_given and frames.shape[0] > 1
@@ -693,6 +822,55 @@ class ProductLabelFindKeyframe:
                 left.append({"shot": r["shot"], "why": p})
             else:
                 every.append(self._entry(r, p))
+        # the product lost and found again inside the keyframe's shot (no cut: a wipe, an occlusion, the product drawn
+        # again on its packaging): the found run is refined as a shot of its own, from its own keyframe frame (V83),
+        # inside the keyframe's shot, which stays whole and is refined as before; the found run fills only the frames
+        # it leaves as they are (Every Shot, Refine). Shot reads the splits from this report for the found run's bounds
+        # Only where the keyframe frame's track shows a hint (a gap between two runs, or 6 frames or more it holds no
+        # run on) is the shot tracked again from the keyframe frame itself, as its own SAM 3 track will be, so the
+        # split keeps every frame that track holds (a probe's track can jump to the drawn product early, while the
+        # real one still shows); a clip with no hint runs as before
+        gaps, kt = [], None
+        if self._lost_found(main["track"]) or self._unheld(main["track"]):
+            if mask_given:
+                kt = main["track"]
+            else:
+                km, _ = _pick_product(model, frames[k:k + 1], conditioning, ref, Rm)
+                kt = self._track(frames, s, e, k, km, False, None, model, conditioning)
+            gaps = [dict(x, at=s + x["at"], lost=[s + y for y in x["lost"]], by="track") for x in self._lost_found(kt)]
+            if not mask_given:
+                gaps += self._search(frames, s, kt, model, conditioning, ref, Rm)
+        lost = sorted((x for x in gaps if x.get("split")), key=lambda x: x["at"])
+        s0 = s
+        if lost:
+            splits = [x["at"] for x in lost]
+            segs = list(zip([s] + splits, [x - 1 for x in splits] + [e]))
+            ms = next(a for a, b in segs if a <= k <= b)
+            for a, b in segs:
+                if a == ms:
+                    continue
+                hit = next((x for x in lost if x["at"] == a and x.get("probe") is not None), None)
+                if hit is not None:
+                    pt, pmask = hit["probe"], hit["mask"]        # where SAM 3 found it again
+                else:
+                    tr = [(s0 + x0, s0 + x1) for x0, x1 in kt["trims"] if a <= s0 + x0 and s0 + x1 - 1 <= b]
+                    if not tr:
+                        left.append({"shot": [a, b], "why": "no run of frames there holds the product's label"})
+                        continue
+                    x0, x1 = max(tr, key=lambda r: r[1] - r[0])
+                    pt = (x0 + x1 - 1) // 2
+                    pmask = kt["M"][pt - s0]
+                p = self._pick(frames, a, b, T, pt, probes + [pt], pm + [pmask], mask_given, masks,
+                               model, conditioning, Rm)
+                if isinstance(p, str):
+                    left.append({"shot": [a, b], "why": p})
+                    continue
+                also.append([a, b])
+                every.append(dict(self._entry({"shot": [a, b], "score": top["score"]}, p),
+                                  **{"from": "lost and found again"}))
+            print(f"keyframe   lost and found again in shot {s0}-{segs[-1][1]}: " + ", ".join(
+                f"lost {x['lost'][0]}-{x['lost'][1]}, found at {x['at']} by its {x['by']} (overlap {x.get('iou')}, "
+                f"silhouette {x.get('shape')})" for x in lost))
         for r in left:
             warn.append(f"shot {r['shot'][0]}-{r['shot'][1]} likely shows the product but isn't refined: {r['why']}")
         done = [x["shot"] for x in every[1:]]
@@ -703,10 +881,13 @@ class ProductLabelFindKeyframe:
                         "product of the same kind, name what tells this one apart in the SAM 3 prompt (its colour)")
         rep = {"keyframe_frame": k, "from": "found", "shot": [s, e], "also_likely": also,
                "every_shot": every, "not_refined": left, "passing": passing,
-               "in_view": {"first": s + view[0], "last": s + view[-1], "frames": len(view), "of": n},
-               "pick": {**best, "t": k, "best_scored": s + int(ranking[0]["t"]),
-                        "tied": [s + int(r["t"]) for r in sorted(near, key=lambda r: r["t"])]},
-               "shots": shots_rep, "warnings": warn}
+               "in_view": {"first": s0 + view[0], "last": s0 + view[-1], "frames": len(view), "of": n},
+               "pick": {**best, "t": k, "best_scored": s0 + int(ranking[0]["t"]),
+                        "tied": [s0 + int(r["t"]) for r in sorted(near, key=lambda r: r["t"])]},
+               "shots": shots_rep, "warnings": warn,
+               **({"gaps": [{k_: v for k_, v in x.items() if k_ != "mask"} for x in gaps]} if gaps else {}),
+               **({"lost_found": [{k_: v for k_, v in x.items() if k_ not in ("mask", "probes")} for x in lost],
+                   "splits": [x["at"] for x in lost]} if lost else {})}
         text = json.dumps(rep, default=float)
         print(f"keyframe   frame {k} (shot {s}-{e}, the product in view on {len(view)} of its {n} frames; "
               f"score {top['score']:.2f}; " +
@@ -841,6 +1022,10 @@ class ProductLabelReviewName:
                                         # off the body where a run starts or ends (V81: the user saw 120-121 drop
                                         # and 123 drift on a three-shot clip), or off the product's own tracks for a
                                         # frame and back (V82: the user saw a tube's label jump at 99-104): any, FAIL
+    LEFT = 6                           # the engine's fixable frames (the product in view, its print readable) left
+                                        # as generated, this many in a row or more: FAIL (V83: a tube and a serum
+                                        # drawn again on their box's front, 25 frames left; shorter runs are a
+                                        # shot's edge frames, V81)
     HELD = ("slide", "creep", "fade", "lock")   # the label off the print it lies on, held (the check's own run), creeping on
                                         # a still product (V71: the user saw 0.6 px over a still shot), or fading over
                                         # the old print where the product leaves right after (V72), or (the edit
@@ -873,7 +1058,21 @@ class ProductLabelReviewName:
                    "frames go in a JSON file beside it (a platform returns files, not text).")
 
     @classmethod
-    def verdict(cls, rv, keyframe=None, shots=None, every=None):
+    def _unrefined(cls, not_covered, off=0):
+        """Refine's runs of fixable frames left as generated (its report's not_covered), LEFT or more in a row, in clip
+        frames: [(first, last)]."""
+        out = []
+        for x in not_covered or []:
+            try:
+                a, b = (int(v) for v in x["frames"])
+            except (TypeError, ValueError, KeyError):
+                continue
+            if b - a >= cls.LEFT:
+                out.append((a + off, b - 1 + off))
+        return out
+
+    @classmethod
+    def verdict(cls, rv, keyframe=None, shots=None, every=None, not_covered=None):
         """-> (verdict PASS | CHECK | FAIL, reasons, frames per check) from Refine's review summary (and Find Keyframe
         Frame's report: the shots it found likely showing the product too; Every Shot's: which of them were refined).
         shots: Refine's report's shots (Every Shot: each refined on its own), each judged on its own review, the clip
@@ -893,15 +1092,29 @@ class ProductLabelReviewName:
             if also:
                 reasons.append(also)
                 worst = "FAIL"
+            gone = cls._unrefined(not_covered, off)
+            if gone:
+                reasons.append(cls._gone(gone, per))
+                worst = "FAIL"
             if worst == "FAIL":
                 reasons = [r for r in reasons if "flagged: look before delivering" not in r]
             return worst, reasons, per
         v, reasons, per = cls._one(rv)
         also = cls._left(keyframe, every)
-        if also:
-            reasons = ([] if v != "FAIL" else reasons) + [also]
+        gone = cls._unrefined(not_covered, int((every or {}).get("start") or 0))
+        if also or gone:
+            reasons = ([] if v != "FAIL" else reasons) + ([also] if also else []) + \
+                ([cls._gone(gone, per)] if gone else [])
             return "FAIL", reasons, per
         return v, reasons, per
+
+    @staticmethod
+    def _gone(gone, per):
+        """The FAIL reason for fixable frames left as generated (and their frames under the check 'left')."""
+        per.setdefault("left", []).extend(t for a, b in gone for t in range(a, b + 1))
+        return ("left: the product shows with a readable print on frames " + ", ".join(f"{a}-{b}" for a, b in gone) +
+                " but they are left as generated (no keyframe's label reaches them: the product lost and found "
+                "again, or a run no shot covers)")
 
     @staticmethod
     def _left(keyframe, every):
@@ -977,7 +1190,12 @@ class ProductLabelReviewName:
             ev = None
         if isinstance(ev, dict) and ev.get("start") is None:
             ev = dict(ev, start=0)
-        v, reasons, per = self.verdict(rv, kr if isinstance(kr, dict) else {}, full.get("shots"), ev)
+        shots = full.get("shots")
+        if full.get("found"):
+            # runs found again inside a shot (V83): each judged on its own review, beside the shot's
+            shots = (shots or [{"frames": [0, int(full.get("frames") or 0)], "report": {"review": rv}}]) + \
+                [{"frames": q["frames"], "report": q.get("report") or {}} for q in full["found"]]
+        v, reasons, per = self.verdict(rv, kr if isinstance(kr, dict) else {}, shots, ev, full.get("not_covered"))
         out = prefix + {"FAIL": "_REVIEW-FAIL", "CHECK": "_REVIEW-CHECK"}.get(v, "")
         n, f = int(rv.get("refined") or 0), int(rv.get("flagged") or 0)
         checks = ", ".join(f"{k} ({x})" for k, x in (rv.get("checks") or {}).items())
@@ -995,10 +1213,11 @@ class ProductLabelReviewName:
                            **({"every_shot": {"refined": [x["shot"] for x in ev.get("shots") or []],
                                               "left": ev.get("left") or []}} if isinstance(ev, dict) else {}),
                            **({"shots": [{"frames": q["frames"], "verdict": self._one((q.get("report") or {}).get(
-                               "review") or {})[0]} for q in full["shots"]]} if full.get("shots") else {}),
+                               "review") or {})[0]} for q in shots]} if shots else {}),
                            "rule": {"FAIL": f"{'/'.join(self.WRONG)} on more than {self.SHARE:.0%} of the refined "
                                             f"frames, or ghost on more than {self.GHOST:.0%} (the label rendered), or kf_old over {self.KF_OLD:g} (the keyframe "
                                             f"carried), or the product likely on other shots left as generated, "
+                                            f"or {self.LEFT} or more fixable frames in a row left as generated (left), "
                                             f"or any {'/'.join(self.HELD + self.EDGE)}, or (the keyframe carried) "
                                             f"{'/'.join(self.CARRIED_DEFECT)} on more than {self.SHARE:.0%}, or carried under "
                                             f"{self.CARRIED:g}, or kf_kept under {self.KF_KEPT:g}",
@@ -1159,8 +1378,9 @@ class ProductLabelEveryShot:
                         "QA Sheet's report for that keyframe (its audit), run again for each other shot")})},
                 "hidden": {"dynprompt": "DYNPROMPT", "unique_id": "UNIQUE_ID"}}
 
-    RETURN_TYPES = ("IMAGE", "MASK", "IMAGE", "INT", "STRING", "INT", "STRING", "STRING")
-    RETURN_NAMES = ("frames", "masks", "keyframes", "keyframe_index", "keyframe_frames", "start", "shot", "shots")
+    RETURN_TYPES = ("IMAGE", "MASK", "IMAGE", "INT", "STRING", "INT", "STRING", "STRING", "MASK")
+    RETURN_NAMES = ("frames", "masks", "keyframes", "keyframe_index", "keyframe_frames", "start", "shot", "shots",
+                    "found_masks")
     FUNCTION = "every"
     CATEGORY = CATEGORY
     DESCRIPTION = (
@@ -1171,7 +1391,10 @@ class ProductLabelEveryShot:
         "its audit is left as generated (and named); the rest go on: the clip from the first shot's start to the last "
         "one's end, the masks of each shot (empty between them), the keyframes, their frames and the shots, so "
         "Refine refines each shot on its own from its own keyframe. One shot: its inputs pass on unchanged. Each "
-        "other shot's keyframe is saved under shots/.")
+        "other shot's keyframe is saved under shots/. A run where Find Keyframe Frame found the product lost and found "
+        "again inside a shot (V83) gets its keyframe the same way and goes to Refine as a found run (shots: [start, "
+        "end, \"found\"], its masks on found_masks): the shot itself is refined as before, the run fills the frames "
+        "it leaves as they are.")
 
     def check_lazy_status(self, **kw):
         return []
@@ -1183,7 +1406,7 @@ class ProductLabelEveryShot:
         except (TypeError, ValueError):
             kr = {}
         extras = ((kr.get("every_shot") or [])[1:] if isinstance(kr, dict) else [])[:MAX_SHOTS]
-        one = (shot_frames, shot_masks, keyframe, keyframe_index, "auto", start, shot, "")
+        one = (shot_frames, shot_masks, keyframe, keyframe_index, "auto", start, shot, "", None)
         if not extras:
             return {"ui": {"text": ["one shot: " + shot]}, "result": one}
         from comfy_execution.graph_utils import GraphBuilder
@@ -1278,6 +1501,7 @@ class ProductLabelEveryShotGather:
         shots = [{"shot": [int(ms["start"]), int(ms["end"])], "keyframe_frame": k0, "masks": main_masks,
                   "keyframe": main_keyframe[:1], "from": "the keyframe's shot"}]
         left = [dict(x, why="not refined: " + x["why"]) for x in kr.get("not_refined") or []]
+        found = []                           # runs found again inside a shot (V83): refined as found runs
         extras = (kr.get("every_shot") or [])[1:]
         for j, x in enumerate(extras, 1):
             if j > MAX_SHOTS:
@@ -1300,7 +1524,9 @@ class ProductLabelEveryShotGather:
                 left.append({"shot": [a, b], "keyframe_frame": x["keyframe_frame"], "why": "its keyframe's audit failed: " +
                              "; ".join(f"{f['check']}: {f['text']}" for f in fails)})
                 continue
-            if any(not (b < y["shot"][0] or a > y["shot"][1]) for y in shots):
+            again = x.get("from") == "lost and found again"
+            inside = any(y["shot"][0] <= a and b <= y["shot"][1] for y in shots)
+            if not (again and inside) and any(not (b < y["shot"][0] or a > y["shot"][1]) for y in shots + found):
                 left.append({"shot": [a, b], "why": "overlaps a shot already refined"})
                 continue
             m = kw.get(f"masks_{j}")
@@ -1308,34 +1534,42 @@ class ProductLabelEveryShotGather:
             if m is None or m.shape[0] != b - a + 1:
                 left.append({"shot": [a, b], "why": "its masks don't cover its frames"})
                 continue
-            shots.append({"shot": [a, b], "keyframe_frame": int(x["keyframe_frame"]), "masks": m,
-                          "keyframe": kw[f"keyframe_{j}"][:1], "from": "its own keyframe frame (stills branch)"})
+            (found if again and inside else shots).append({
+                "shot": [a, b], "keyframe_frame": int(x["keyframe_frame"]), "masks": m,
+                "keyframe": kw[f"keyframe_{j}"][:1],
+                "from": "lost and found again inside the shot (V83)" if again and inside else
+                        "its own keyframe frame (stills branch)"})
         shots.sort(key=lambda y: y["shot"][0])
-        info = {"shots": [{k: v for k, v in y.items() if k in ("shot", "keyframe_frame", "from")} for y in shots],
-                "left": left, "clip_frames": T}
+        found.sort(key=lambda y: y["shot"][0])
+        info = {"shots": [{k: v for k, v in y.items() if k in ("shot", "keyframe_frame", "from")}
+                          for y in shots + found], "left": left, "clip_frames": T}
         for y in left:
             print(f"every shot WARN {y['shot'][0]}-{y['shot'][1]} left as generated: {y['why']}")
-        if len(shots) == 1:
+        if len(shots) == 1 and not found:
             # only the keyframe's shot: exactly the one-shot inputs
             text = json.dumps(dict(ms, every_shot=info))
             return {"ui": {"text": [text]}, "result": (main_frames, main_masks, main_keyframe, k0 - int(ms["start"]),
-                                                       "auto", int(ms["start"]), text, "")}
+                                                       "auto", int(ms["start"]), text, "", None)}
         s0, e0 = shots[0]["shot"][0], max(y["shot"][1] for y in shots)
         n = e0 - s0 + 1
         masks = torch.zeros((n,) + tuple(main_masks.shape[-2:]), dtype=main_masks.dtype)
         for y in shots:
             a, b = y["shot"]
             masks[a - s0:b - s0 + 1] = y["masks"].to(masks.dtype)
-        kfs = torch.cat([y["keyframe"].to(frames.dtype) for y in shots])
-        rel = [[y["shot"][0] - s0, y["shot"][1] - s0 + 1] for y in shots]
+        kfs = torch.cat([y["keyframe"].to(frames.dtype) for y in shots + found])
+        rel = [[y["shot"][0] - s0, y["shot"][1] - s0 + 1] for y in shots] + \
+              [[y["shot"][0] - s0, y["shot"][1] - s0 + 1, "found"] for y in found]
+        fm = torch.cat([y["masks"].to(main_masks.dtype) for y in found]) if found else None
         info.update(start=s0, end=e0, frames=n)
         text = json.dumps({"start": s0, "end": e0, "frames": n, "keyframe_in_shot": -1, "clip_frames": T,
                            "cuts": ms.get("cuts", []), "every_shot": info})
         print("every shot refining " + ", ".join(f"{y['shot'][0]}-{y['shot'][1]} (keyframe {y['keyframe_frame']})"
-                                                 for y in shots) + f"; frames {s0}-{e0} go to Refine")
+                                                 for y in shots) +
+              "".join(f", found again {y['shot'][0]}-{y['shot'][1]} (keyframe {y['keyframe_frame']})" for y in found) +
+              f"; frames {s0}-{e0} go to Refine")
         return {"ui": {"text": [text]}, "result": (frames[s0:e0 + 1], masks, kfs, -1,
-                                                   ", ".join(str(y["keyframe_frame"] - s0) for y in shots), s0, text,
-                                                   json.dumps(rel))}
+                                                   ", ".join(str(y["keyframe_frame"] - s0) for y in shots + found), s0,
+                                                   text, json.dumps(rel), fm)}
 
 
 class ProductLabelMaskOverlay:

@@ -190,7 +190,8 @@ def definition_all():
             "masks": L(99, 1), "model": L(10, 0), "conditioning": L(11, 0), "reference": L(2, 0),
             "reference_mask": L(82, 0)}, (0, 0)),
         19: ("ProductLabelShot", "Shot: the keyframe frame's, between cuts (start/end -1 = found)", {
-            "frames": L(85, 0), "keyframe_index": L(89, 0), "start": -1, "end": -1, "masks": L(99, 1)}, (0, 0)),
+            "frames": L(85, 0), "keyframe_index": L(89, 0), "start": -1, "end": -1, "masks": L(99, 1),
+            "keyframe_report": L(89, 1)}, (0, 0)),
         # SAM 3: the product's mask on the keyframe frame (an image: the image), then through the shot both ways
         10: ("CheckpointLoaderSimple", "SAM 3.1 checkpoint", {"ckpt_name": "sam3.1_multiplex_fp16.safetensors"}, (480, 0)),
         11: ("CLIPTextEncode", "SAM 3 prompt: the product (comma-separated; name:N for N objects)",
@@ -356,7 +357,7 @@ def definition_all():
             "frames": L(110, 0), "mask": L(110, 1), "keyframes": L(110, 2), "tracker": "alltracker.pth",
             "keyframe_index": L(110, 3), "keyframe_frames": L(110, 4), "settings": L(7, 0), "fps": L(1, 1),
             "processes": 0, "model": "tube (round products)", "compositing": "settings (render.alpha, else measured)",
-            "soft_cap": -1.0, "glue": False, "shots": L(110, 7)}, (1500, 2300)),
+            "soft_cap": -1.0, "glue": False, "shots": L(110, 7), "found_masks": L(110, 8)}, (1500, 2300)),
         75: ("ProductLabelSplice", "The refined shots back into the clip (its text: shot.json)", {
             "frames": L(1, 0), "shot_frames": L(62, 0), "start": L(110, 5), "shot": L(110, 6)}, (0, 0)),
         # the clip's file names from Refine's review: _REVIEW-FAIL (print wrong, slid), _REVIEW-CHECK (look first)
