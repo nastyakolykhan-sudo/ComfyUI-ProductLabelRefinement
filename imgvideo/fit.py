@@ -221,7 +221,10 @@ CARRY = {"res_px": 3.0,        # the similarity's median residual on its inlier 
 # misses them by miss_px more, or turns the label's axis roll_deg off its own fit's. Measured: a coloured pump
 # bottle's jolt as its shot starts, own 0.81 px, borrowed 2.79 (+1.98; its print sheared 4.2 deg off the body, the
 # axis 0.08 deg); the approved serum's and tube's morph frames +0.29 to +1.16 px, axes within 0.46 deg (kept).
-MORPH_OWN = {"own_px": 1.0, "miss_px": 1.5, "roll_deg": 1.5}
+# A morph frame whose own fit holds its tracks tightly (tight_px) keeps it too where the borrowed shape moves the label
+# shift_px or more (V82): the borrowed shape put the label 2.0-3.2 px off a bouncing tube's own tracks (held within
+# 0.27-0.36 px) for a frame and back on the next, which the user saw as the label jumping (frames 99-104).
+MORPH_OWN = {"own_px": 1.0, "miss_px": 1.5, "roll_deg": 1.5, "tight_px": 0.5, "shift_px": 1.0}
 
 
 def _similarity(X, Y):
@@ -395,9 +398,13 @@ def fit_shot(base, H0, xy0, tracks, vis, wmin=0.5, reject=2.5, half=3, cuts=(), 
             p, q2 = geo.apply_H(morph_source[t], axis), geo.apply_H(sm[t], axis)
             d = np.degrees(np.arctan2(*(q2[1] - q2[0])[::-1]) - np.arctan2(*(p[1] - p[0])[::-1]))
             roll = float((d + 180.0) % 360.0 - 180.0)
-            own = e_own <= MORPH_OWN["own_px"] and (e_m - e_own > MORPH_OWN["miss_px"] or abs(roll) > MORPH_OWN["roll_deg"])
+            shift = float(np.linalg.norm(geo.apply_H(sm[t], G) - geo.apply_H(morph_source[t], G), axis=1).max())
+            v81 = e_own <= MORPH_OWN["own_px"] and (e_m - e_own > MORPH_OWN["miss_px"] or abs(roll) > MORPH_OWN["roll_deg"])
+            v82 = e_own <= MORPH_OWN["tight_px"] and shift >= MORPH_OWN["shift_px"]
+            own = v81 or v82
             morph_test[int(t)] = {"own_rms_px": round(e_own, 3), "borrowed_rms_px": round(e_m, 3),
-                                  "roll_deg": round(roll, 2), "kept": "own fit" if own else "borrowed shape"}
+                                  "roll_deg": round(roll, 2), "shift_px": round(shift, 3),
+                                  "kept": ("own fit" if v81 else "own fit (V82)") if own else "borrowed shape"}
             if own:
                 sm[t] = morph_source.pop(t)
                 Cs[t] = geo.apply_H(sm[t], G)

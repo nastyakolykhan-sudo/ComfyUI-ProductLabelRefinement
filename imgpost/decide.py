@@ -17,6 +17,8 @@ EDGE_PX = 3          # a mark this close to the outline belongs to a part of the
 PART_PX = 4          # ... and so does a mark this close to such a part (a lid's shadow line under it)
 MIN_GLYPH = 20       # px: smaller marks are noise
 POLARITY_RATIO = 2.0  # one polarity's glyphs outnumber the other's this many times, or the polarity is mixed
+LINE_JOIN = 2        # px: thin print's broken strokes this near each other are one word (_more_lines)
+LINE_MIN_PIECES = 4  # ... a word of this many pieces or more (a stray speck is one or two)
 
 
 def glyphs(ref_u8, band, dark):
@@ -72,7 +74,51 @@ def print_box(ref_u8, band, dark):
     y1 = min(y1, int(bottom.min())) if len(bottom) else y1
     H, W = band.shape
     box = [int(max(x0, 0)), int(max(y0, 0)), int(min(x1, W)), int(min(y1, H))]
-    return box, {"glyphs": n, "pad_px": pad}
+    box, lines = _more_lines(ref_u8, band, dark, G, parts, box, pad)
+    return box, dict({"glyphs": n, "pad_px": pad}, **({"lines_added": lines} if lines else {}))
+
+
+def _more_lines(ref_u8, band, dark, G, parts, box, pad):
+    """A line of thin print next to the glyphs' box (pitfall 118): its strokes break up into marks under MIN_GLYPH
+    each (a tube's last line of small copy, 1-19 px a piece), so none of them counts as a glyph and the box stopped a
+    line short, and that line was never placed. Marks within LINE_JOIN px of each other are taken as a word; a word of
+    MIN_GLYPH px or more, LINE_MIN_PIECES pieces or more, off the parts and overlapping the box's columns, within one
+    line height of the box above or below it, extends the box to it (again from there). -> (box, [rows added])"""
+    Lr = im.lum(im.srgb_to_lin(im.to_float(ref_u8)))
+    xs = np.nonzero(band.any(0))[0]
+    big = int(max(15, (xs.max() - xs.min()) // 8)) | 1
+    top, _body = ink._tophat(Lr, band, big, dark)
+    p = np.percentile(top[band], 99.5)
+    marks = (top > 0.5 * p) & band & ~ndi.binary_dilation(parts, iterations=PART_PX)
+    lab, n = ndi.label(marks)
+    words, nw = ndi.label(ndi.binary_dilation(marks, iterations=LINE_JOIN) & band)
+    if not nw:
+        return box, []
+    gl, ng = ndi.label(G)
+    hs = [s[0].stop - s[0].start for s in ndi.find_objects(gl)] if ng else []
+    lh = float(np.median(hs)) if hs else 0.0
+    if lh <= 0:
+        return box, []
+    cand = []
+    for i, sl in enumerate(ndi.find_objects(words), start=1):
+        w = (words[sl] == i) & marks[sl]
+        if w.sum() < MIN_GLYPH or len(np.unique(lab[sl][w])) < LINE_MIN_PIECES:
+            continue
+        y0_, y1_, x0_, x1_ = sl[0].start, sl[0].stop, sl[1].start, sl[1].stop
+        if x1_ <= box[0] or x0_ >= box[2] or (y0_ >= box[1] and y1_ <= box[3]):
+            continue
+        cand.append((y0_, y1_, x0_, x1_))
+    added = []
+    grew = True
+    while grew:
+        grew = False
+        for y0_, y1_, x0_, x1_ in cand:
+            if y0_ >= box[3] - pad and y0_ - (box[3] - pad) <= 1.5 * lh:
+                box[3] = int(min(y1_ + pad, band.shape[0])); added.append([int(y0_), int(y1_)]); grew = True
+            elif y1_ <= box[1] + pad and (box[1] + pad) - y1_ <= 1.5 * lh:
+                box[1] = int(max(y0_ - pad, 0)); added.append([int(y0_), int(y1_)]); grew = True
+        cand = [c for c in cand if not (c[0] >= box[1] and c[1] <= box[3])]
+    return box, added
 
 
 # text only (2026-11-04, pitfall 111): every route keeps the generated product and changes its letters only. The
