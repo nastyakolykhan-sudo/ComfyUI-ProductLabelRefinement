@@ -145,7 +145,7 @@ NOTES = {
         "product mask, a corrected keyframe, a job, the keyframe frame or Refine settings in a run copy.\n\n"
         "## Node packs\n"
         "- ComfyUI-ProductLabelRefinement: https://github.com/nastyakolykhan-sudo/ComfyUI-ProductLabelRefinement "
-        "@ a1ec26c8e7b1e12f18c2ca073a15744da31d62f3\n"
+        "@ 8dc065094a1ec73edba0e24a590a48eb23411d56\n"
         "- ComfyUI-MaskAspectCrop (ImageReframe, ImageReframeComposite): "
         "https://github.com/nastyakolykhan-sudo/ComfyUI-MaskAspectCrop @ 10b47888f08a297da1ba2f03f45ace3ab9594ad1\n"
         "- comfy-workflow-io-nodes (WorkflowIO*): https://github.com/aw93silverside/comfy-workflow-io-nodes "
