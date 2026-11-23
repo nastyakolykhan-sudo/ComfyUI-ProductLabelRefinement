@@ -9,8 +9,8 @@ Product Label: Refine (Video) has the same contract as the engine's command line
 Full frames (recommended) or a workflow's crops: the contract is the same. A keyframe corrected on a zoomed crop comes
 back onto its frame through keyframe_bbox (ImageCropByMaskToAspect's bbox) and keyframe_index.
 
-The engine (imgvideo and imgauto here, next to the stills nodes' imgpost) is a byte-identical copy of the skill's, pinned
-in imgpost.lock.json (tools/sync_imgpost.py for imgpost, tools/sync_video_engine.py for imgvideo and imgauto). The point tracker is AllTracker (MIT, code vendored in imgvideo/alltracker);
+The engine (imgvideo and imgauto, next to the stills nodes' imgpost) lives in this pack; the skill carries a copy
+(tools/sync_engine.py). The point tracker is AllTracker (MIT, code vendored in imgvideo/alltracker);
 its weights come from models/trackers/ and are never downloaded here.
 """
 import json

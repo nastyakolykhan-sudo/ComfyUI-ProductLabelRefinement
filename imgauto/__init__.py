@@ -2,7 +2,7 @@
 keyframes, which anchor each shot gets), made from measurements, each with the evidence it rests on.
 
 It reads the engine (imgvideo, imgpost) and never changes it: every fix still goes through video.py and run.py.
-Owned by the autopilot session; the ComfyUI port calls it and vendors it. The stable API (signatures kept across
+Developed in the ComfyUI pack with the rest of the engine; the skill carries a copy. The stable API (signatures kept across
 versions; references/video/autopilot.md lists them with their units):
   shots.analyse(F, M, k=2, cfg=DEFAULTS) -> (stats, bounds, shots, kinds, why)
   shots.classify(bound, cfg=DEFAULTS) -> "continuous" | "morph" | "snap" | "cut" | "uncertain" | "absent"

@@ -7,7 +7,7 @@ changed mask must be identical, and the reports equal (paths and timings aside).
                                    [--weights alltracker.pth] [--keep DIR]
 
 Without --clip it runs the demo (examples/video_demo, drawn by tools/make_video_demo.py). Needs a Python with torch and
-ComfyUI's dependencies (the video nodes import folder_paths), ffmpeg on PATH, and the skill folder (imgpost.lock.json's).
+ComfyUI's dependencies (the video nodes import folder_paths), ffmpeg on PATH, and the skill folder (--skill-dir, default imgpost.lock.json's).
 """
 import argparse
 import json
@@ -33,14 +33,14 @@ def main():
     ap.add_argument("--settings")
     ap.add_argument("--weights", default=os.environ.get("PLR_ALLTRACKER", "~/Documents/ComfyUI/models/trackers/alltracker/alltracker.pth"))
     ap.add_argument("--keep")
+    ap.add_argument("--skill-dir", help="the skill folder (default: imgpost.lock.json's \"skill\")")
     a = ap.parse_args()
     demo = PACK / "examples" / "video_demo"
     clip = Path(a.clip or demo / "labelvideo_demo_clip.mov").expanduser()
     mask = Path(a.mask or demo / "labelvideo_demo_mask.mov").expanduser()
     kfs = [Path(k).expanduser() for k in (a.keyframe or [demo / "labelvideo_demo_keyframe.png"])]
     weights = Path(a.weights).expanduser()
-    lock = json.loads((PACK / "imgpost.lock.json").read_text())
-    skill = Path(lock["skill"]).expanduser()
+    skill = Path(a.skill_dir or json.loads((PACK / "imgpost.lock.json").read_text())["skill"]).expanduser()
     tmp = Path(a.keep) if a.keep else Path(tempfile.mkdtemp(prefix="labelvideo-regress-"))
     tmp.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, PLR_ALLTRACKER=str(weights))

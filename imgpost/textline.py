@@ -416,34 +416,6 @@ def _path_sharpness(L, mp, P_s, origin, n=48):
 STRAIGHT_GAIN = 1.1    # a line goes straight when the generated print's rows are this much sharper along it
 
 
-def measure_rows(lines, M, pad=0.35, wide=1.0):
-    """Each line's rows from its row profile over its columns in map M (both prints blurred alike): the run of rows at
-    half its peak, within its marks' rows and pad line heights round them (a neighbouring line's rows stay out). The
-    profile over `wide` line heights round them is kept for refine(), and so are its column profile over its rows.
-    In place: L["top"], L["bot"], L["h"], L["cy"], L["prof"] (first row, profile), L["cols"] (first column, profile)."""
-    H_, W_ = M.shape
-    for L in lines:
-        h = max(L["y1"] - L["y0"], 2)
-        x0, x1 = max(0, L["x0"]), min(W_, L["x1"])
-        n0, n1 = max(0, int(L["y0"] - pad * h)), min(H_, int(np.ceil(L["y1"] + pad * h)))
-        prof = M[n0:n1, x0:x1].sum(1)
-        if prof.max() <= 0:
-            continue
-        pk = int(np.argmax(prof))
-        a = b = pk
-        while a - 1 >= 0 and prof[a - 1] >= 0.5 * prof[pk]:
-            a -= 1
-        while b + 1 < len(prof) and prof[b + 1] >= 0.5 * prof[pk]:
-            b += 1
-        L["top"], L["bot"] = float(n0 + a) - 0.5, float(n0 + b) + 0.5
-        L["h"], L["cy"] = L["bot"] - L["top"], 0.5 * (L["top"] + L["bot"])
-        w0, w1 = max(0, int(L["y0"] - wide * h)), min(H_, int(np.ceil(L["y1"] + wide * h)))
-        L["prof"] = (w0, M[w0:w1, x0:x1].sum(1))
-        c0, c1 = max(0, int(x0 - 2 * h)), min(W_, int(x1 + 2 * h))
-        L["cols"] = (c0, M[int(round(L["top"])):int(round(L["bot"])) + 1, c0:c1].sum(0))
-        L["c_own"] = (x0, x1)
-
-
 REFINE_SCALES = np.arange(0.80, 1.2501, 0.02)
 
 
@@ -1502,13 +1474,6 @@ def _viterbi(lines, scores, slides, gaps):
     for k in range(n - 1, 0, -1):
         idx[k - 1] = back[k, idx[k]]
     return idx, float(acc.max())
-
-
-def _line_box(L, G, rad):
-    c = np.array([0.5 * (L["x0"] + L["x1"]), L["cy"]])
-    r = 0.5 * np.hypot(L["x1"] - L["x0"], L["h"]) + rad
-    return c, (int(max(c[0] - r, 0)), int(max(c[1] - r, 0)), int(min(c[0] + r + 1, G.shape[1])),
-               int(min(c[1] + r + 1, G.shape[0])))
 
 
 def _turn_sharpness(L, G, th):
