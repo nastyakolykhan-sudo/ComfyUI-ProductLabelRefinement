@@ -420,16 +420,6 @@ def shade_print(S_lin, T_lin, act, polarity, spec=True, key=None):
     return out
 
 
-def _shade(img, m, sigma):
-    """Low-pass of img (h x w x 3) over the pixels in m, filled into the gaps from further out."""
-    out = np.empty_like(img)
-    for c in range(img.shape[-1]):
-        a, wa = normconv(img[..., c], m, sigma)
-        b, _ = normconv(img[..., c], m, 4 * sigma)
-        out[..., c] = np.where(wa > 0.15, a, b)
-    return np.maximum(out, 1e-4)
-
-
 def _ratio_field(S_lin, T, m, block=8, med=5, sigma=10.0, local=False, log=False):
     """The frame's light over the keyframe's, per channel, as a smooth field: log(S / T) block medians over m, then a
     median across blocks, so print in either image (the frame's garbled, the keyframe's correct one) and small

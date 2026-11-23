@@ -1,30 +1,28 @@
-"""run.py's cmd_draft and cmd_run, split at the node boundaries.
+"""The stills run in stages, one function per step: imgpost's own orchestration, shared by its two front ends.
 
-Each function is a line-for-line port of one section of the product-label-refinement skill's scripts/run.py (same names,
-same order, same defaults) and works on the work box (roi) in float64, exactly like run.py. Keep it that way:
-when run.py changes, port the diff here. `tools/sync_imgpost.py --check` says when run.py or imgpost/ moved on.
-draft() is cmd_draft without its files: the draft itself lives in imgpost/draft.py, which both call.
-
-run.py's sys.exit() conditions raise StageError with the same message.
+The skill's scripts/run.py (files in, files out) and the ComfyUI pack's nodes (one node per stage) both call these
+functions, so a change here reaches both; never copy a stage's logic into either front end. Each works on the work
+box (roi) in float64. Errors a person must fix raise StageError (run.py exits with its message; a node shows it).
+draft() is the first job from rough input; imgpost/draft.py holds the draft itself.
 """
 import numpy as np
 from scipy.ndimage import binary_dilation, binary_erosion, gaussian_filter
 
-from .imgpost import audit as au
-from .imgpost import autofit as af
-from .imgpost import decide as dc
-from .imgpost import draft as dr
-from .imgpost import fill as fl
-from .imgpost import finish as fn
-from .imgpost import geometry as geo
-from .imgpost import grade as gr
-from .imgpost import images as im
-from .imgpost import ink as ik
-from .imgpost import masks as mk
-from .imgpost import outline as ol
-from .imgpost import psd
-from .imgpost import qa
-from .imgpost import warp as wp
+from . import audit as au
+from . import autofit as af
+from . import decide as dc
+from . import draft as dr
+from . import fill as fl
+from . import finish as fn
+from . import geometry as geo
+from . import grade as gr
+from . import images as im
+from . import ink as ik
+from . import masks as mk
+from . import outline as ol
+from . import psd
+from . import qa
+from . import warp as wp
 
 
 class StageError(RuntimeError):
@@ -46,20 +44,18 @@ def work_box(job, Hs, Ws):
 
 # 0. a first job from rough input (run.py draft)
 
-def draft(scene_u8, ref_u8, ref_a, quad=None, pairs=(), occluders=(), mask=None, mask_skip=None, model="homography",
-          outline=None, cylinder=False, relight=True, suggest=False, label=None, ink=None, print_box=None, bow=None,
-          label_mask=None, ref_label_mask=None, work_scale=1):
-    """run.py draft without its files -> (job without the scene, reference and output paths; the lines run.py prints:
-    the draft's summary and the align table; review sheet PIL image or None). run.py then runs the align stage,
-    which Fit Warp and Warp Reference do here. label "cylinder" / "flat": run.py draft --label (the label only).
-    ink "light" / "dark", print_box, bow: run.py draft --ink --print-box --bow (print straight on a coloured body). The
-    job's old_silhouette stays the draft's: here the product mask goes into Fill Leftovers' old_silhouette instead
-    (run.py draft writes the mask's file there). model, ink, print_box, bow "auto": decided from the frame, the mask
-    and the packshot (imgpost.decide.resolve), the decisions in the lines. label "auto" with label_mask and
-    ref_label_mask (SAM 3's "label" on the scene and on the packshot): run.py draft --label auto (decide.label_auto).
-    work_scale f > 1: the scene is the frame resized up f x for the fix (Work Size): drafted at the frame's own size,
-    the job scaled up (run.py draft --work-scale, imgpost.workscale)."""
-    from .imgpost import workscale
+def draft_job(scene_u8, ref_u8, ref_a, quad=None, pairs=(), occluders=(), mask=None, mask_skip=None,
+              model="homography", outline=None, cylinder=False, relight=True, suggest=False, label=None, ink=None,
+              print_box=None, bow=None, label_mask=None, ref_label_mask=None, work_scale=1):
+    """A first job from rough input -> {"job": the job without the scene, reference and output paths, "auto": the
+    decisions' lines, "summary": the draft's lines, "sheet": its review sheet (PIL image or None), "ink": the print
+    route decided}. label "cylinder" / "flat": the label only. ink "light" / "dark", print_box, bow: print straight on
+    a coloured body. model, ink, print_box, bow "auto": decided from the frame, the mask and the packshot
+    (decide.resolve). label "auto" with label_mask and ref_label_mask (SAM 3's "label" on the scene and on the
+    packshot): decide.label_auto. work_scale f > 1: the scene is the frame resized up f x for the fix: drafted at the
+    frame's own size, the job scaled up (workscale). The job's old_silhouette stays the draft's: run.py writes the mask
+    file's path there, the pack connects the mask to Fill Leftovers' old_silhouette."""
+    from . import workscale
     f_ws = int(work_scale or 1)
     if f_ws > 1:
         scene_u8, (mask, label_mask) = workscale.down(scene_u8, [mask, label_mask], f_ws)
@@ -106,9 +102,15 @@ def draft(scene_u8, ref_u8, ref_a, quad=None, pairs=(), occluders=(), mask=None,
     if f_ws > 1:
         workscale.up_job(d["job"], f_ws)
         auto.append(f"work size  drafted at the frame's own size, the job scaled {f_ws}x to the frame's work size")
+    return {"job": d["job"], "auto": auto, "summary": dr.summary(d), "sheet": d["sheet"], "ink": ink}
+
+
+def draft(scene_u8, ref_u8, ref_a, **kw):
+    """draft_job, checked and fitted -> (job, the lines: decisions, summary and the align table, review sheet)"""
+    d = draft_job(scene_u8, ref_u8, ref_a, **kw)
     check_job(d["job"])
     _, rep = fit_warp(d["job"])
-    return d["job"], "\n".join(auto + dr.summary(d) + [align_table(rep)]), d["sheet"]
+    return d["job"], "\n".join(d["auto"] + d["summary"] + [align_table(rep)]), d["sheet"]
 
 
 def generated_cover(job, roi):
@@ -324,10 +326,10 @@ def light_matte_only(node):
                      "Behind (ink: Fill Leftovers' ink); workflows/product-label-refinement-ink*.json")
 
 
-def grade(gs, scene_u8, ref_u8, roi, W_lin, a_new, old, vis, U=None, matte=None, body=None):
+def grade(gs, scene_u8, ref_u8, roi, W_lin, a_new, old, vis, U=None, matte=None, body=None, debug_dir=None):
     """-> (graded linear rgb, grade report, grade preview PIL image, relight map PIL image or None, ink or None).
     ref_u8 is only read for grade.ref_white_box, U (reference x per work-box pixel) only for grade.shading.
-    grade.relight's `debug` (run.py saves the relight inputs to work/) is ignored here. With the job's matte 'ink',
+    grade.relight's `debug` saves the relight inputs to debug_dir/relight_debug.npz (run.py: work/; none on a node). With the job's matte 'ink',
     `ink` carries what run.py's composite reads: the white field (linear) and the ink's colour (linear)."""
     if ik.on_body(matte):
         light_matte_only("Grade To Scene")
@@ -407,6 +409,9 @@ def grade(gs, scene_u8, ref_u8, roi, W_lin, a_new, old, vis, U=None, matte=None,
     sheet = None
     if rl:
         # the source's light the smooth grade missed: cast shadows, falloff, glows (+ optional glossy sheen)
+        if rl.get("debug") and debug_dir is not None:
+            np.savez_compressed(f"{debug_dir}/relight_debug.npz", S_lin=S_lin, graded=graded, both=both, W_lin=W_lin,
+                                a_new=a_new)
         R, SH, rinfo = gr.relight_map(S_lin, graded, both, W_lin=W_lin,
                                       **{k: v for k, v in rl.items() if k not in ("about", "strength", "clip", "debug")})
         fmul = np.clip(np.exp(R), *tuple(rl.get("clip", (0.25, 3.0))))
@@ -510,7 +515,7 @@ def fill(fls, scene_u8, roi, a_new, old, vis, matte=None, shape=None, body=None)
         base, nfill = fl.harmonic_fill(crop, F, D, offset=(x0, y0))
     except fl.FillError as e:
         raise StageError(f"FILL STOPPED, leftover regions with no background around them: {e}\n"
-                         "Fix: extend reference_outline under the occluder ('extend') or correct the occluder polyline, then re-run.")
+                         "Fix: extend reference_outline under the occluder ('extend') or correct the occluder polyline, then re-run.") from e
     ring = binary_dilation(D, iterations=3) & ~old_dil & visb
     gstd = fn.mad_std(fn.highpass(crop)[ring]) if ring.any() else np.zeros(3)
     if nfill:
@@ -594,9 +599,10 @@ def light_check(job, res, scene_u8, ink, roi):
 
 # 5. composite behind the occluders
 
-def composite(fs, base, card, a_new, vis, ink=None, matte=None, shape=None, body=None):
-    """-> (work box uint8, matte). With the job's matte 'ink', `ink` is the grade stage's ink output; with shape
-    'generated', `shape` as for fill()."""
+def composite(fs, base, card, a_new, vis, ink=None, matte=None, shape=None, body=None, report=None):
+    """-> (work box uint8, matte). With the job's matte 'ink', `ink` is the grade stage's ink output (and `report`, a
+    dict, gets run.py's report.json "matte": the ink level and its coverage); with shape 'generated', `shape` as for
+    fill()."""
     if shape is not None:
         alpha = np.clip(gaussian_filter(shape["cover"], fs.get("edge_softness", 0.45)), 0, 1) * \
             np.clip(2 * shape["bleed"], 0, 1) * vis
@@ -615,6 +621,8 @@ def composite(fs, base, card, a_new, vis, ink=None, matte=None, shape=None, body
         cov = np.clip((cov - t0) / (1 - t0), 0, 1)
         card = im.lin_to_srgb(ink["ink_lin"])
         alpha = alpha * cov
+        if report is not None:
+            report.update(type="ink", ink_level=round(ink["ink_level"], 4), coverage_px=int((cov * (a_new > 0.5)).sum()))
     out = base * (1 - alpha[..., None]) + card * alpha[..., None]
     if not np.isfinite(out).all():
         raise StageError("composite contains NaN or inf: nothing saved")
@@ -648,11 +656,32 @@ def audit(res, scene_u8, alpha, old, vis, F, roi, align_rep=None, squeeze=None, 
     x0, y0, x1, y1 = roi
     found, sheet = au.run(scene_u8[y0:y1, x0:x1], res[y0:y1, x0:x1], alpha, old, vis, F, (x0, y0), align_rep, squeeze,
                           cut, ink=ink, shape=shape)
-    lines = [f"audit      {f['level']:4s} {f['check']}: {f['text']}" + (f" at {f['box']}" if f.get("box") else "")
-             for f in found if f["level"] != "INFO"]
+    return found, sheet, "\n".join(verdict(found))
+
+
+def audit_on_body(found, job, res, scene_u8, ink, roi):
+    """The audit of print straight on the body (matte ink, light, dark or mixed) -> its findings. Checks that read an
+    outline become INFO (no outline is composited), then the ink checks are added (light_check) when `ink` is Fill
+    Leftovers' (light_fill's)."""
+    pol = ik.config(job["matte"])["polarity"]
+    for f in found:
+        if f["check"] == "fill":            # the garbled print is as thick as the generated letters, under the new print
+            f.update(level="INFO", text=f["text"] + " (the garbled print, under the new print: see before_after)")
+        elif f["check"] == "edges":         # no outline is composited: the lines only place the print
+            f.update(level="INFO", text=f["text"] + f" (matte ink {pol}: no outline shows; check the print's placement)")
+        elif f["check"] == "leftover" and pol == "dark":   # the new edge is a letter's, and the body beyond it is the
+            f.update(level="INFO", text=f["text"] + " (matte ink dark: the body round the print is the generated one)")
+    if isinstance(ink, dict) and ink.get("polarity") in ik.POLARITIES + ("mixed",):
+        found += light_check(job, res, scene_u8, ink, roi)
+    return found
+
+
+def verdict(found, sheet_hint="the audit sheet"):
+    """the audit's printed lines: every WARN and FAIL, then the worst level"""
     worst = "FAIL" if any(f["level"] == "FAIL" for f in found) else "WARN" if any(f["level"] == "WARN" for f in found) else "clean"
-    lines.append(f"audit      {worst}" + (": look at the audit sheet before delivering" if worst != "clean" else ""))
-    return found, sheet, "\n".join(lines)
+    return [f"audit      {f['level']:4s} {f['check']}: {f['text']}" + (f" at {f['box']}" if f.get("box") else "")
+            for f in found if f["level"] != "INFO"] + \
+        [f"audit      {worst}" + (f": look at {sheet_hint} before delivering" if worst != "clean" else "")]
 
 
 def write_psd(path, scene_u8, res, base, F, card, alpha, roi):

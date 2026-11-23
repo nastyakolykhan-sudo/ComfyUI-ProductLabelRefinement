@@ -8,7 +8,7 @@
                              [--rough-pairs] [--mask PATH|hand [--no-quad]] [--no-occluders]
                              [--label auto|off|cylinder|flat]
 
-Runs the engine's scripts/run.py (--skill-dir, default ~/Documents/Claude/product-label-refinement) with --job-dir and --output
+Runs the skill's scripts/run.py (--skill-dir, default imgpost.lock.json's "skill") with --job-dir and --output
 inside --work, never at the job's own output path; or pass --skill-out to compare with an existing engine output.
 Prints the pixel differences (max, count above 0, 1 and --levels) and which report sections match; with --psd
 both sides also write the layered PSD and their psd reports are compared.
@@ -48,7 +48,7 @@ from PIL import Image
 import comfy_run as cr
 
 PACK = Path(__file__).resolve().parent.parent
-SKILL = Path("~/Documents/Claude/product-label-refinement").expanduser()
+SKILL = Path(json.loads((PACK / "imgpost.lock.json").read_text())["skill"]).expanduser()
 JITTER = np.array([(1.0, -0.67), (-0.67, 1.0), (1.0, 0.67), (-1.0, -0.67)])   # x --jitter: a rough click per corner
 
 

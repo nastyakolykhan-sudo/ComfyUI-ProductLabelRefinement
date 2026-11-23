@@ -18,15 +18,6 @@ from scipy.ndimage import binary_erosion, distance_transform_edt, find_objects, 
 from . import qa
 
 
-def colour_model(crop_u8, mask, q=16):
-    """Share of the generated product's pixels per colour bin (q levels per channel), smoothed over neighbours."""
-    idx = (crop_u8[mask] // (256 // q)).astype(int)
-    h = np.zeros((q, q, q))
-    np.add.at(h, (idx[:, 0], idx[:, 1], idx[:, 2]), 1.0)
-    h = uniform_filter(h, size=3, mode="constant") * 27.0
-    return h / max(float(h.sum()), 1.0)
-
-
 def share(model, crop_u8, q=16):
     i = (crop_u8 // (256 // q)).astype(int)
     return model[i[..., 0], i[..., 1], i[..., 2]]

@@ -41,7 +41,7 @@ The demo is a made-up product card. In the "generated" scene its text is garbled
 
 ## Nodes
 
-There is one node per step. The math is the product-label-refinement engine's (`imgpost/`, see [Maintaining](#maintaining)), split at the node boundaries in `stages.py`.
+There is one node per step. The math is the product-label-refinement engine's (`imgpost/`, see [Maintaining](#maintaining)), split at the node boundaries in `imgpost/stages.py`, which the skill's `run.py` calls too.
 
 | Node | Inputs | Outputs | Step |
 |---|---|---|---|
@@ -735,38 +735,28 @@ The pack runs `workflows/product-label-refinement-draft.api.json` on that input,
 
 ## Maintaining
 
-Video: `imgvideo/` and `imgauto/` are the skill's too, pinned under `video_engine` in `imgpost.lock.json`:
+**The engine lives here.** `imgpost/` (stills, with `imgpost/stages.py`: the steps run one by one), `imgvideo/` (video) and `imgauto/` (the automatic decisions) are developed in this pack, on a branch per change. The nodes call them through `imgpost/stages.py`; the product-label-refinement skill's `scripts/run.py` calls the same functions, with files in and out, so a change reaches both. The skill carries a byte-identical copy of the three packages, written by `tools/sync_engine.py`; `silverside-comfy-nodes` mirrors this pack. Never edit the engine in either copy.
 
 ```bash
-python3 -P tools/sync_video_engine.py              # check; --update copies the skill's imgvideo/ and imgauto/ here
-python -P tools/regress_video.py --comfy PATH/TO/ComfyUI   # Refine (Video) against the skill's video.py --refine, bit for bit
+python3 -P tools/sync_engine.py            # check: the skill's copy against this checkout (and whether the skill was edited by hand)
+python3 -P tools/sync_engine.py --update   # copy the engine into the skill and record it in imgpost.lock.json
+tools/check_all.sh                         # every regression (STILLS, VIDEO, ALL, FIXTURES) against a private skill copy; exit 0 = all pass
+python -I tools/build_workflows.py         # rebuild workflows/ (the one workflow too) after changing a node's inputs or outputs
 python3 -P tools/make_video_demo.py examples/video_demo    # redraw the video demo (byte-identical)
+python3 tools/make_demo.py                 # redraw examples/demo/ (byte-identical with the same libraries)
+python3 -P tools/make_ink_demo.py          # redraw examples/ink_demo/ (the light-ink demo; uses imgpost/)
 ```
 
-Stills:
-
-`imgpost/` is a byte-identical copy of the product-label-refinement engine's library. The pack vendors it rather than importing it so the math stays identical and the pack stays self-contained on any server. `imgpost.lock.json` records the sha256 of every vendored file and of the runner version that `stages.py` ports.
-
-```bash
-python3 tools/sync_imgpost.py                    # check: local edits, engine changes, runner changes
-python3 tools/sync_imgpost.py --update           # copy the engine's imgpost/ here and re-pin
-python3 tools/sync_imgpost.py --mark-ported      # after porting a runner change into stages.py
-python -I tools/build_workflows.py               # rebuild workflows/ (the one workflow too) after changing a node's inputs or outputs
-python -P tools/regress_all.py --server URL --video   # the one workflow against each template, on a live server
-python3 tools/make_demo.py                       # redraw examples/demo/ (byte-identical with the same libraries)
-python3 -P tools/make_ink_demo.py                # redraw examples/ink_demo/ (the light-ink demo; uses imgpost/)
-```
-
-Never edit `imgpost/` here. To pick up an engine change:
-1. Change the engine.
-2. Run `--update`.
-3. Port any runner diff into `stages.py`.
-4. Run `tools/regress.py`.
-5. Commit.
+A change, start to finish:
+1. Branch and worktree from `main`; change the engine (and its `CHANGELOG`/version) or the nodes.
+2. `tools/check_all.sh` on the worktree: all four parts 0.
+3. Commit, merge to `main` (`--no-ff`), `tools/check_all.sh` again on the merge.
+4. `tools/sync_engine.py --update`, port the docs into the skill, commit and push the pack and the skill.
+5. Re-sync the mirror: `python3 scripts/sync_part.py product_label_refinement <commit>` in `silverside-comfy-nodes`, then its `load_test.py`.
 
 ## Extending
 
-- **New grade options.** Port the branch from the runner into `stages.grade`; the job's `grade` section passes it through unchanged. To add a switch on the node, add an optional combo whose first choice is `job`, after the existing ones, as `relight` was. UI workflows store widget values by position.
+- **New grade options.** Add the branch to `imgpost.stages.grade`; the job's `grade` section passes it through unchanged. To add a switch on the node, add an optional combo whose first choice is `job`, after the existing ones, as `relight` was. UI workflows store widget values by position.
 - **Measuring helpers.** `imgpost/autofit.py` holds the engine's measuring helpers: they snap a rough polyline to the colour edge below a pixel, refine a rough landmark by correlation with a trust verdict, trace a packshot's outline, fit an outline to a mask, and propose edge lines and the old silhouette from a rough placement. `imgpost/draft.py` puts them together, for the engine's `run.py draft` and for Auto Draft. Mask inputs already take scene-sized masks, so a mask from another node can replace Job Masks' outputs. Score any change to the draft with `tools/regress.py --draft` against hand-measured jobs before trusting it.
 
 ## Not covered yet

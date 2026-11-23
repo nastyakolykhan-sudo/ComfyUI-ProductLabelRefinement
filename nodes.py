@@ -6,7 +6,7 @@ Data conventions
   a scene-sized mask (mask editor, segmentation) and crop it to the work box.
 - Product layers (warped, graded, product) are sRGB like any IMAGE but keep highlight headroom above 1.0,
   which Match Finish rolls off. Don't clamp them in between.
-- Conversion happens here, at the node boundary; stages.py runs the skill's own imgpost code in float64.
+- Conversion happens here, at the node boundary; imgpost/stages.py runs the engine's stages in float64.
 """
 import hashlib
 import json
@@ -33,7 +33,7 @@ INK_CHOICES = ["off", "light", "dark", "auto"]
 
 
 def _stages():
-    from . import stages   # imgpost pulls in scipy: load it on first use, not at ComfyUI startup
+    from .imgpost import stages   # imgpost pulls in scipy: load it on first use, not at ComfyUI startup
     return stages
 
 
@@ -581,7 +581,7 @@ class ImagePostWarpReference:
 
 
 class ImagePostGradeToScene:
-    # New grade options: port the branch from run.py into stages.grade; the job's grade section reaches it as is.
+    # New grade options: add the branch to imgpost.stages.grade; the job's grade section reaches it as is.
     # A switch on the node is a combo whose first choice is "job", appended after the existing ones (UI workflows
     # store widget values by position), like `colour` and `shading`.
     @classmethod
@@ -806,26 +806,10 @@ class ImagePostQASheet:
                                             None if coords is None else coords.get("cut"), S.ink_mode(job.get("matte")),
                                             job.get("shape") == "generated")
             if S.ik.on_body(job.get("matte")):
-                pol = job["matte"].get("polarity", "light")
-                for f in found:
-                    if f["check"] == "fill":    # the garbled print is as thick as the generated letters, under the new print
-                        f.update(level="INFO", text=f["text"] + " (the garbled print, under the new print: see before_after)")
-                    elif f["check"] == "edges":     # no outline is composited: the lines only place the print
-                        f.update(level="INFO", text=f["text"] + f" (matte ink {pol}: no outline shows; check the print's "
-                                                                "placement)")
-                    elif f["check"] == "leftover" and pol == "dark":   # the new edge is a letter's, and the body
-                        f.update(level="INFO", text=f["text"] + " (matte ink dark: the body round the print is the "
-                                                                "generated one)")
-                if isinstance(ink, dict) and ink.get("polarity") in S.ik.POLARITIES + ("mixed",):
-                    found += S.light_check(job, res, su8, ink, box)
+                found = S.audit_on_body(found, job, res, su8, ink, box)
                 sheet = S.au.sheet(su8[box[1]:box[3], box[0]:box[2]], res[box[1]:box[3], box[0]:box[2]], found,
                                    (box[0], box[1])) if found else None
-                worst = "FAIL" if any(f["level"] == "FAIL" for f in found) else "WARN" if any(
-                    f["level"] == "WARN" for f in found) else "clean"
-                verdict = "\n".join([f"audit      {f['level']:4s} {f['check']}: {f['text']}" +
-                                      (f" at {f['box']}" if f.get("box") else "") for f in found if f["level"] != "INFO"] +
-                                     [f"audit      {worst}" + (": look at the audit sheet before delivering"
-                                                              if worst != "clean" else "")])
+                verdict = "\n".join(S.verdict(found))
             rep["audit"] = found
             rep["audit_verdict"] = verdict
             audit_img = _pil_out(sheet) if sheet else _placeholder()
