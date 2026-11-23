@@ -1623,10 +1623,12 @@ class ProductLabelPackshotMatte:
     FUNCTION = "matte"
     CATEGORY = CATEGORY
     DESCRIPTION = ("The packshot's outline as Load Image's MASK (1 = transparent): its alpha when it has one. Else, with "
-                   "auto, the engine's own trace of the backdrop (Load Image's mask passed on as it is) where SAM 3's "
+                   "auto, the engine's own trace of the backdrop (an empty 64 x 64 mask, Load Image's 'no alpha') where SAM 3's "
                    "mask of the packshot overlaps it by 98 % or more, and SAM 3's mask where it doesn't: the trace has "
                    "then taken in a drop shadow or a reflection round the product. With 'alpha, else SAM 3', SAM 3's "
-                   "mask. source: alpha, sam3 or none (the trace), and for auto why.")
+                   "mask. A mask with no transparent pixel is not alpha, whichever node loaded the packshot (Load Image "
+                   "gives a 64 x 64 placeholder for a JPEG but a full-size empty mask for an opaque PNG, the WorkflowIO "
+                   "image input a full-size one for both). source: alpha, sam3 or none (the trace), and for auto why.")
 
     @staticmethod
     def _alpha(reference, mask):
@@ -1645,7 +1647,9 @@ class ProductLabelPackshotMatte:
             s = sam_mask[None] if sam_mask.dim() == 2 else sam_mask
             s = (s[:1] > 0.5) if s.shape[1:3] == reference.shape[1:3] and bool((s[:1] > 0.5).any()) else None
         src = self._decide(reference, s) if use == self.USES[0] else "sam3" if s is not None else "none"
-        out = (1.0 - s.float(), src) if src.startswith("sam3") else (mask, src)
+        # no alpha: Load Image's placeholder, so the nodes reading this mask trace the packshot instead of taking a
+        # full-size empty mask for an opaque alpha (the whole image as the product)
+        out = (1.0 - s.float(), src) if src.startswith("sam3") else (torch.zeros((1, 64, 64), dtype=torch.float32), src)
         return {"ui": {"text": [src]}, "result": out}
 
     def _decide(self, reference, s):
