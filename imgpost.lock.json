@@ -1,11 +1,11 @@
 {
  "skill": "~/Documents/Claude/silverside-skills/skills/tooling/product-label-refinement",
- "synced": "2026-11-20",
+ "synced": "2026-11-24",
  "packages": {
   "imgpost": {
-   "version": "0.25.0",
+   "version": "0.25.1",
    "files": {
-    "__init__.py": "ea41c8359d0fc6bc614a403f2adbfb1f229289194e95c43764a5e878c573a0bb",
+    "__init__.py": "955d9a51f5cfaf75f303dfcc38c9b2619d4b0db40daf6979b1c58d5558edaed8",
     "audit.py": "945c620499cfd921006932f7c8a42b0dfec070b2468b5039c30eb54d7e9a9336",
     "autofit.py": "2cd163f9e2ce68e6e3c04072279ec5db2e73bb862afd08aeb11c6672a5e68d91",
     "bow.py": "56f709307bfe94bf9c96f6e30068586d6f33898202f753a81528b6fe1404b456",
@@ -17,7 +17,7 @@
     "geometry.py": "fed88b4454a5fea93ce4f69cee4efb4ca11ed92532df13b7718ffcb0530b439e",
     "grade.py": "fe0c9d16dbc4c9df56f1cd8e69a88e37f5f87cd976089370a0fcd1e21f728d2b",
     "images.py": "7d2e9e6f77b4f70c555bcf35412a11caa7705afbffff83e8636dbac0604d7e3d",
-    "ink.py": "8bf09a37b24eaa43a911f5b98a76f5345b480de3092af00b22c30af4900567fa",
+    "ink.py": "4581f2a18908f1e1f27c7be88e79cb7ca2983f423e60de53d68be6250f78bad6",
     "masks.py": "2f46b382f3b6f0654d603557ed3b2b39f130f7dd825ccacbe0bb725e464b91a9",
     "outline.py": "134de36ca4749f6d58a5d177f2e97f90c6c84400edf6fc30cbd2992d252ad60f",
     "psd.py": "132fdcb5dd9ef88004cdb29c78a5bd67621f395c53b39e47fc8f5b1a0a13f868",
