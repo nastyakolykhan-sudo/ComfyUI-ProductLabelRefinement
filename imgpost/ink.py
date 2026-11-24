@@ -81,6 +81,8 @@ WIDE_FROM = 2.0        # frame_open_wide: only where the widest garbled stroke i
 DARK_RIM = 0.03        # frame_open_wide: px this share below the body light within the glow's reach are the old strokes' rims
 POLARITIES = ("light", "dark")
 TEXT_ASPECT = 0.03     # text only: the registration's scales at most this share apart (reg_aspect)
+REG_FADE = 0.25        # a registration past its limits (shift 1.5 reg_reach, scale reg_scale + 0.05) by up to this share
+                       # of them is laid at a share of itself, falling linearly to none (pitfall 122); further: dropped
 REF_CORE = 0.8         # ref_ink: packshot print this well covered is its ink
 REF_CORE_PX = 30       # ... at least this many such px, else the packshot's ink isn't read
 CONTRAST_SHARE = 0.8   # text only (pitfall 118): new letters fainter than this share of the packshot's print contrast
@@ -701,9 +703,11 @@ def _prepare(ref_u8, refmask, cfg, H, roi, crop_u8, ss=4, prefilter=0.6, body=No
             A0, Abow0, rep0 = register(crop_u8, cov0, in_band, cfg, roi[:2], stroke, body, rows)
             with_bow = crep["register"].get("ncc_after", -1) if A is not None else -1
             without = rep0.get("ncc_after", -1) if A0 is not None else -1
+            # a registration within its limits goes before one faded past them (pitfall 122), then the better one
+            r_with, r_without = _reg_rank(A, crep["register"]), _reg_rank(A0, rep0)
             crep["register"]["bow_from_matte"] = {"with": round(float(with_bow), 3), "without": round(float(without), 3),
-                                                  "kept": bool(with_bow >= without)}
-            if without > with_bow:
+                                                  "kept": bool(r_with >= r_without)}
+            if r_without > r_with:
                 H, cov, ex, A, Abow = H.base, cov0, ex0, A0, Abow0
                 crep["register"] = dict(rep0, bow_from_matte=crep["register"]["bow_from_matte"])
                 ex = ex[0] if ex else {}
@@ -726,8 +730,8 @@ def _prepare(ref_u8, refmask, cfg, H, roi, crop_u8, ss=4, prefilter=0.6, body=No
                     cov, _, *ex = warp_cover(cov_r, band, H, roi, **kw)
                     ex = ex[0] if ex else {}
                     A2, Abow2, rep2 = register(crop_u8, cov, in_band, cfg, roi[:2], stroke, body, rows)
-                    if A2 is None:
-                        break
+                    if A2 is None or (rep2.get("faded") and not crep["register"].get("faded")):
+                        break        # one faded past its limits doesn't replace one within them (pitfall 122)
                     A, Abow = A2, Abow2
                     crep["register"] = dict(rep2, first=crep["register"].get("first", crep["register"]))
                     if step:
@@ -758,7 +762,8 @@ def _prepare(ref_u8, refmask, cfg, H, roi, crop_u8, ss=4, prefilter=0.6, body=No
                 # generator drew flat gave 2-8 px of noise and no better fit (0.697 -> 0.696), a jar's 0.58 -> 0.64
                 with_bow = crep["register"].get("ncc_after", -1) if crep["register"] is not before[5] else -1
                 without = before[5].get("ncc_after", -1)
-                keep = with_bow >= without + 0.005
+                tw, tb = int(not crep["register"].get("faded")), int(not before[5].get("faded"))
+                keep = tw > tb or (tw == tb and with_bow >= without + 0.005)
                 crep["bow_from_print"].update({"with": round(float(with_bow), 3), "without": round(float(without), 3),
                                                "kept": bool(keep)})
                 if not keep:
@@ -806,6 +811,11 @@ def _prepare(ref_u8, refmask, cfg, H, roi, crop_u8, ss=4, prefilter=0.6, body=No
         cov, crep["sharpen"] = sharpen_cover(cov, crop_u8, in_band, cfg, frame_stroke(crep, cov, cov_r))
     return {"cover": cov, "band": in_band, "box": ex.get("box"), "inks": ex.get("inks"), "report": crep,
             "ref_sum": float(cov_r.sum()), "text": text, "near": near}
+
+
+def _reg_rank(A, rep):
+    """A registration's rank among others: none, faded past its limits (pitfall 122), within them; then its correlation."""
+    return (-1, -1.0) if A is None else (0 if rep.get("faded") else 1, float(rep.get("ncc_after", -1)))
 
 
 def register(crop_u8, cover, in_band, cfg, offset, stroke=None, body=None, rows=None):
@@ -973,15 +983,34 @@ def register(crop_u8, cover, in_band, cfg, offset, stroke=None, body=None, rows=
         rep["bow_t"] = [round(float(t_lo), 1), round(float(t_hi), 1)]
     why = None
     sxy = np.array(rep["scale_xy"])
+    # how far past its limits it moved, as a share of the fade band past each (0: within them)
+    t_lim, s_lim = 1.5 * reach, cfg["reg_scale"] + 0.05
+    over = max((np.abs(t).max() - t_lim) / (REG_FADE * t_lim), (np.abs(sxy - 1).max() - s_lim) / (REG_FADE * s_lim), 0.0)
     if after < cfg["reg_min"]:
         why = f"the print maps correlate {after:.2f} after it (reg_min {cfg['reg_min']}): the generated print isn't the true layout"
     elif after <= before:
         why = f"no better than the fit ({after:.2f} against {before:.2f})"
-    elif np.abs(t).max() > 1.5 * reach or np.abs(sxy - 1).max() > cfg["reg_scale"] + 0.05:
+    elif over >= 1.0:
         why = f"it moved too far ({t.round(1).tolist()} px, scale {sxy.round(3).tolist()})"
     if why:
         rep.update(kept=False, why=why)
         return None, None, rep
+    if over > 0.0:
+        # just past a limit: laid at a share of itself, falling to none across the band (pitfall 122). At the limit it
+        # was all or nothing, and a packshot decoded 1-3 levels apart (PIL against PyAV) measured 1.199 or 1.202
+        # across: kept or dropped, the print a line and a half apart and a found run's copy on the wrong rows
+        w = 1.0 - float(over)
+        M = np.eye(2) + w * (M - np.eye(2))
+        t = w * t
+        db, db1 = w * db, w * db1
+        # its correlation as laid (a caller choosing between registrations compares these)
+        after_w = _ncc(warped(ndi.gaussian_filter(P, 1.0), M, moved(t), X, Y)[0], ndi.gaussian_filter(C, 1.0)[sy_, sx_])
+        rep["faded"] = {"weight": round(w, 3), "why": f"it moved past its limits ({rep['shift_px']} px, scale "
+                                                      f"{rep['scale_xy']}; limits {t_lim:.1f} px, {1 + s_lim:.2f})",
+                        "ncc_unfaded": rep["ncc_after"], "matrix": M.round(5).tolist(), "shift_px": t.round(2).tolist()}
+        rep["ncc_after"] = round(after_w, 3)
+        if fb is not None:
+            rep["faded"]["bow_px"] = [round(float(db - db1), 2), round(float(db + db1), 2)]
     rep["kept"] = True
     ca = c + np.asarray(offset, float)
     A = np.eye(3)
